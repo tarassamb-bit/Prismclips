@@ -18,7 +18,7 @@ public sealed partial class PrismWindow
         tiles.MarginTop = 16; tiles.MarginBottom = 20;
         tiles.Append(CategoryTile(0, "weather-overcast-symbolic", "AI & Cloud", "Provider, key, and model"));
         tiles.Append(CategoryTile(2, "avatar-default-symbolic", "Account", session.Account.Email ?? "Sign in to track your stats"));
-        tiles.Append(CategoryTile(1, "utilities-system-monitor-symbolic", "System resources", "RAM and storage updates"));
+        tiles.Append(CategoryTile(1, "computer-symbolic", "System resources", "RAM and storage updates"));
         page.Append(tiles);
         page.Append(settingsCategory switch { 0 => AiSettings(), 2 => AccountSettings(), _ => ResourceSettings() });
         return Scroll(page);
@@ -29,6 +29,7 @@ public sealed partial class PrismWindow
         var selected = settingsCategory == category;
         var tile = Button("", () => { settingsCategory = category; InvalidateScreen(); }, selected ? "category selected" : "category");
         tile.SetSizeRequest(190, 136);
+        tile.Hexpand = false; // the spacer inside would otherwise make every tile claim spare width
         var box = Gtk.CenterBox.New();
         box.AddCssClass("icon-box");
         var mark = Icon(icon, 18);
@@ -37,7 +38,7 @@ public sealed partial class PrismWindow
         box.Halign = Gtk.Align.Start;
         var top = Row(0);
         top.Append(box);
-        top.Append(Spacer());
+        top.Append(Gap());
         if (selected) { var check = Icon("object-select-symbolic", 16); check.AddCssClass("accent"); top.Append(check); }
         var name = Label(title, "t14", "medium");
         name.MarginTop = 11;
@@ -223,7 +224,7 @@ public sealed partial class PrismWindow
         var rule = Divider(); rule.MarginTop = 20; rule.MarginBottom = 16;
         var machine = Label($"{profile.OS} · {profile.Cores} CPU cores · {profile.MemoryGB} GB RAM", "mono");
         machine.MarginTop = 14;
-        var panel = Surface(8, SectionTitle("utilities-system-monitor-symbolic", "System resources"), Text("Monitor this computer and choose how often the sidebar refreshes.", "muted"), tiles, rule, row, machine);
+        var panel = Surface(8, SectionTitle("computer-symbolic", "System resources"), Text("Monitor this computer and choose how often the sidebar refreshes.", "muted"), tiles, rule, row, machine);
         return panel;
     }
 

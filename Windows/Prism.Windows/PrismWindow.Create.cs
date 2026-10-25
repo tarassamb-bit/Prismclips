@@ -97,7 +97,7 @@ public sealed partial class PrismWindow
 
         var count = Text("", 13); count.FontWeight = FontWeights.Medium; count.Margin = new Thickness(10, 0, 10, 0); count.MinWidth = 70; count.TextAlignment = TextAlignment.Center;
         var fewer = StepButton("\uE738", "Fewer Shorts", () => session.ShortCount = Math.Max(1, session.ShortCount - 1));
-        var more = StepButton("\uE710", "More Shorts", () => session.ShortCount = Math.Min(10, session.ShortCount + 1));
+        var more = StepButton("\uE710", "More Shorts", () => session.ShortCount = Math.Min(20, session.ShortCount + 1));
         double[] lengths = [15, 30, 45, 60];
         var length = Combo(lengths.Select(seconds => $"{seconds:0} seconds"), Math.Max(0, Array.IndexOf(lengths, session.ShortDuration)), index => { if (index >= 0) session.ShortDuration = lengths[index]; });
         var regions = Enum.GetValues<SourceRegion>();
@@ -124,7 +124,7 @@ public sealed partial class PrismWindow
         updateScreen = () =>
         {
             count.Text = $"{session.ShortCount} Shorts";
-            fewer.IsEnabled = session.ShortCount > 1; more.IsEnabled = session.ShortCount < 10;
+            fewer.IsEnabled = session.ShortCount > 1; more.IsEnabled = session.ShortCount < 20;
             custom.Visibility = session.ShortSourceRegion == SourceRegion.Custom ? Visibility.Visible : Visibility.Collapsed;
             if (session.CustomRangeError is { } error) { rangeNote.Text = "⚠ " + error; rangeNote.SetResourceReference(TextBlock.ForegroundProperty, "Amber"); }
             else if (session.ShortSourceRegion == SourceRegion.Custom)

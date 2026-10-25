@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import AppKit
+import CSQLite
 
 @main struct Smoke {
     /// The editor plays edits live: ready at once, with the Fit background drawn per frame like export.
@@ -140,8 +141,35 @@ import AppKit
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("RelioTest-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
+        ShortMaker.renderCacheDirectory = root.appendingPathComponent("Render cache")
+        try FileManager.default.createDirectory(at: ShortMaker.renderCacheDirectory, withIntermediateDirectories: true)
+        for name in ["fit-finished.mp4", "split-finished.mp4", ".relio-fit-in-progress.mp4", "unrelated.txt"] {
+            try Data().write(to: ShortMaker.renderCacheDirectory.appendingPathComponent(name))
+        }
+        ShortMaker.pruneRenderCache(keeping: 0)
+        let kept = try FileManager.default.contentsOfDirectory(atPath: ShortMaker.renderCacheDirectory.path)
+        precondition(Set(kept) == [".relio-fit-in-progress.mp4", "unrelated.txt"], "Pruning must preserve unfinished renders and unrelated files")
+        print("PASS render cache pruning preserves in-progress renders")
         let source = root.appendingPathComponent("pictures.mov")
         try await makePictureVideo(at: source)
+        let copiedSource = root.appendingPathComponent("original copy.mov")
+        try await ShortMaker.copySource(source, to: copiedSource)
+        let originalBytes = try Data(contentsOf: source)
+        let copiedBytes = try Data(contentsOf: copiedSource)
+        precondition(originalBytes == copiedBytes, "Original copies must keep every byte")
+        do {
+            try await ShortMaker.copySource(source, to: copiedSource)
+            preconditionFailure("Copy must not replace an existing export")
+        } catch ShortMaker.Failure.destinationExists { }
+        let cancelledCopy = root.appendingPathComponent("cancelled copy.mov")
+        let copyTask = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            try await ShortMaker.copySource(source, to: cancelledCopy)
+        }
+        do { try await copyTask.value; preconditionFailure("Cancelled copies must fail") }
+        catch is CancellationError { }
+        precondition(!FileManager.default.fileExists(atPath: cancelledCopy.path))
+        print("PASS original copies preserve bytes, existing destinations and cancellation")
         guard let imported = await MediaEngine.inspect(source, thumbnailDirectory: root.appendingPathComponent("Thumbnails")) else { fatalError("Import failed") }
         precondition(imported.kind == "video" && imported.width == 640 && imported.height == 360)
         precondition(imported.duration > 3.5 && imported.thumbnail != nil)
@@ -157,6 +185,22 @@ import AppKit
                      && (try? ProjectStore(root: root.appendingPathComponent("Picture project.relio"), create: false)) != nil,
                      "Opening a folder that is not a project must fail without leaving a database in it")
         print("PASS project persistence")
+        var database: OpaquePointer?
+        precondition(sqlite3_open(store.root.appendingPathComponent("project.sqlite").path, &database) == SQLITE_OK)
+        precondition(sqlite3_exec(database, "INSERT INTO state(key,value) VALUES('empty',X'')", nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(database)
+        do {
+            let _: ProjectData? = try store.load(ProjectData.self, key: "empty")
+            preconditionFailure("An unreadable saved record must not be reported as a missing project")
+        } catch ProjectStore.StoreError.database { }
+        let clippedOverlay = EditSegment(mediaID: imported.id, duration: 4, caption: "Clipped", captionStart: -1, captionDuration: 2)
+        let overlayLayer = ShortMaker.captionLayer(for: clippedOverlay)!.sublayers!.first!
+        let visibility = overlayLayer.animation(forKey: "captionVisibility") as! CAKeyframeAnimation
+        precondition(visibility.keyTimes![2].doubleValue == 0.25, "A caption crossing zero must end at its original end time")
+        let expiredOverlay = EditSegment(mediaID: imported.id, duration: 4, caption: "Expired", captionStart: -3, captionDuration: 1)
+        precondition(ShortMaker.captionLayer(for: expiredOverlay)?.sublayers?.isEmpty != false,
+                     "A caption ending before the clip must not reappear at its start")
+        print("PASS corrupt saved records are distinguished from missing keys, and captions clip to their actual interval")
         let invalidSource = root.appendingPathComponent("invalid.mp4")
         try Data("not a video".utf8).write(to: invalidSource)
         let invalidImport = await MediaEngine.inspect(invalidSource, thumbnailDirectory: root)
@@ -179,7 +223,7 @@ import AppKit
             } catch ShortMaker.Failure.invalidRange { }
         }
         // Both rejections happen before any Gemini request, so a placeholder key is never sent.
-        let offline = GeminiConfiguration(apiKey: "unused", model: "unused")
+        let offline = GeminiConfiguration()
         do {
             _ = try await ShortMaker.analyze(source, requestedDuration: 1, count: 1, sourceRegion: .custom, customStart: 0, customEnd: 60_000, gemini: offline)
             fatalError("Analysis must reject a custom end past the actual media duration")
@@ -269,7 +313,7 @@ import AppKit
             let frame = try generator.copyCGImage(at: CMTime(seconds: 0.65, preferredTimescale: 600), actualTime: nil)
             let bitmap = NSBitmapImageRep(cgImage: frame)
             var count = 0
-            for y in 1380..<1690 {
+            for y in 1150..<1450 {
                 for x in 70..<1010 {
                     guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
                     if color.redComponent > 0.8 && color.greenComponent > 0.75 && color.blueComponent < 0.35 { count += 1 }
@@ -288,19 +332,30 @@ import AppKit
         try await ShortMaker.export(source: source, segment: EditSegment(mediaID: imported.id, duration: 3,
             captions: [viralCue], captionStyle: .viral), destination: untimedURL)
         let (untimedPixels, _) = try yellowPixels(untimedURL)
-        precondition(untimedPixels == 0, "Viral style must not guess highlights without real word timings")
-        print("PASS viral captions show without highlights when word timings are unavailable")
-        // Every subtitle style renders. Word-following styles change with each word, Bold caps shows three words at a time,
-        // and without word timing every style falls back to one whole phrase per caption.
+        precondition(untimedPixels > 20, "Without exact word timings, Viral style still highlights words from estimated timing")
+        print("PASS viral captions follow the speech with estimated timing when exact word timings are unavailable")
+        // Every subtitle style renders in short pages: "This is the | viral caption" for three-word styles, two words for
+        // Bold caps, one for One word, a whole short line for Simple and Minimal. Highlighting styles add a layer per word.
+        let layerCounts: [CaptionStyle: Int] = [.auto: 5, .viral: 5, .highlightBox: 5, .podcast: 5, .boldCaps: 3, .oneWord: 5, .classic: 1, .minimal: 1]
         for style in CaptionStyle.allCases {
             precondition(ShortMaker.captionPreview(style) != nil, "\(style.title) preview must render")
+            let expected = layerCounts[style]!
             let layer = ShortMaker.captionLayer(for: EditSegment(mediaID: imported.id, duration: 3, captions: [viralCue],
                                                                  speechWords: viralWords, captionStyle: style))
-            let expected = style == .boldCaps ? 2 : style.usesWordTiming ? viralWords.count : 1
             precondition(layer?.sublayers?.count == expected, "\(style.title) must make \(expected) caption layers, made \(layer?.sublayers?.count ?? 0)")
             let untimed = ShortMaker.captionLayer(for: EditSegment(mediaID: imported.id, duration: 3, captions: [viralCue], captionStyle: style))
-            precondition(untimed?.sublayers?.count == 1, "\(style.title) without word timing must show the whole phrase")
+            precondition(untimed?.sublayers?.count == expected, "\(style.title) without word timing must page the same way from estimated timing")
         }
+        let pages = ShortMaker.captionPages([viralCue], words: viralWords, style: .viral)
+        precondition(pages.map(\.text) == ["This is the", "viral caption"] && pages[0].end == pages[1].start,
+                     "Viral pages are three words and the first stays up until the next begins")
+        var podcastShort = EditSegment(mediaID: imported.id, duration: 3, captionStyle: .auto)
+        podcastShort.videoType = .podcast
+        var gamingShort = EditSegment(mediaID: imported.id, duration: 3, captionStyle: .auto)
+        gamingShort.videoType = .gaming
+        precondition(podcastShort.resolvedCaptionStyle == .podcast && gamingShort.resolvedCaptionStyle == .boldCaps
+                     && EditSegment(mediaID: imported.id, duration: 3, captionStyle: .auto).resolvedCaptionStyle == .viral,
+                     "Auto picks Podcast for conversations, Bold caps for games and Viral highlight otherwise")
         let boxURL = root.appendingPathComponent("highlight-box.mp4")
         try await ShortMaker.export(source: source, segment: EditSegment(mediaID: imported.id, duration: 3,
             captions: [viralCue], speechWords: viralWords, captionStyle: .highlightBox), destination: boxURL)
@@ -332,7 +387,7 @@ import AppKit
         var topLarge = EditSegment(mediaID: imported.id, duration: 3, captions: [viralCue], captionStyle: .boldCaps)
         topLarge.captionPosition = .top; topLarge.captionSize = .large; topLarge.captionAnimated = true
         let topLayer = ShortMaker.captionLayer(for: topLarge)?.sublayers?.first
-        precondition(bottomLayer?.frame.minY == 330 && topLayer?.frame.minY == 1460, "Position must move the subtitles")
+        precondition(bottomLayer?.frame.midY == 620 && topLayer?.frame.midY == 1520, "Position must move the subtitles")
         precondition((topLayer?.frame.height ?? 0) > (bottomLayer?.frame.height ?? 0) && (topLayer?.frame.maxY ?? 9999) <= 1920,
                      "Large subtitles must be drawn larger and still fit inside the frame")
         precondition(topLayer?.animation(forKey: "captionPop") != nil && bottomLayer?.animation(forKey: "captionPop") == nil,
@@ -340,7 +395,7 @@ import AppKit
         var viralPop = EditSegment(mediaID: imported.id, duration: 3, captions: [viralCue], speechWords: viralWords, captionStyle: .viral)
         viralPop.captionAnimated = true
         let popping = ShortMaker.captionLayer(for: viralPop)?.sublayers?.filter { $0.animation(forKey: "captionPop") != nil }.count
-        precondition(popping == 1, "A moving highlight must not bounce the line on every word")
+        precondition(popping == 2, "Each new page pops once; the moving highlight must not bounce it on every word")
         let placedURL = root.appendingPathComponent("top-large-pop.mp4")
         try await ShortMaker.export(source: source, segment: topLarge, destination: placedURL)
         precondition(FileManager.default.fileExists(atPath: placedURL.path), "A Short with moved, larger, animated subtitles must export")

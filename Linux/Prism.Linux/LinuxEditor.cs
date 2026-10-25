@@ -251,10 +251,13 @@ public sealed class LinuxEditor : IDisposable
         }
         if (++clockTicks % 10 == 0 && panesInitialized && !session.IsPlayerExpanded)
         {
-            session.Settings.LeftSidebarWidth = Math.Clamp(outer.GetPosition(), 200, 700);
-            session.Settings.RightSidebarWidth = Math.Clamp(middle.GetWidth() - middle.GetPosition(), 248, 700);
-            session.Settings.TimelineHeight = Math.Clamp(vertical.GetHeight() - vertical.GetPosition(), 150, 700);
-            session.Settings.Save();
+            double left = Math.Clamp(outer.GetPosition(), 200, 700), right = Math.Clamp(middle.GetWidth() - middle.GetPosition(), 248, 700), bottom = Math.Clamp(vertical.GetHeight() - vertical.GetPosition(), 150, 700);
+            // Written only when a divider moved, not every second.
+            if (left != session.Settings.LeftSidebarWidth || right != session.Settings.RightSidebarWidth || bottom != session.Settings.TimelineHeight)
+            {
+                session.Settings.LeftSidebarWidth = left; session.Settings.RightSidebarWidth = right; session.Settings.TimelineHeight = bottom;
+                session.Settings.Save();
+            }
         }
     }
 
@@ -269,7 +272,7 @@ public sealed class LinuxEditor : IDisposable
             var count = Label($"{project.Segments.Count}", "muted", "t11", "medium"); count.SetHexpand(true); count.SetValign(Gtk.Align.Center); head.Append(count);
             var more = Button("✦ Create more", () => _ = session.MakeConfiguredShorts(), "link accent"); more.SetTooltipText("Analyze this video's unused moments for more Shorts"); more.SetSensitive(!session.IsBusy);
             head.Append(more); media.Append(head);
-            var grid = Grid(112);
+            var grid = Grid();
             for (var index = 0; index < project.Segments.Count; index++) grid.Append(ShortCard(project, project.Segments[index], index + 1));
             media.Append(grid);
             media.Append(Rule());
@@ -280,7 +283,7 @@ public sealed class LinuxEditor : IDisposable
         media.Append(mainHead);
         var import = Button("Import", () => _ = ImportVideo(), "wide inset-tile tile"); import.SetSensitive(!session.IsBusy); media.Append(import);
         if (project is null || project.Media.Count == 0) { var empty = Label("Import a video to begin editing.", "muted"); empty.SetMarginTop(24); media.Append(empty); return; }
-        var sources = Grid(112);
+        var sources = Grid();
         foreach (var item in project.Media) sources.Append(MediaCard(item));
         media.Append(sources);
         var clip = Button("+ Add clip to timeline", session.AddManualClip, "link accent"); clip.SetHalign(Gtk.Align.Start); clip.SetSensitive(!session.IsBusy); media.Append(clip);
@@ -296,7 +299,7 @@ public sealed class LinuxEditor : IDisposable
             var at = Math.Min(Math.Max(0.1, clip.Start + clip.Duration * 0.45), Math.Max(0.1, source.Duration - 0.1));
             var key = source.Id + ":" + at.ToString("R", CultureInfo.InvariantCulture);
             if (thumbnailCache.TryGetValue(key, out var bytes)) SetImage(image, bytes);
-            else if (source.Thumbnail is { } poster && File.Exists(poster)) SetImage(image, File.ReadAllBytes(poster));
+            else if (source.Thumbnail is { } poster && File.Exists(poster)) SetImage(image, PrismWindow.Scaled(File.ReadAllBytes(poster), 112, 82, false));
             if (!thumbnailCache.ContainsKey(key) && loadingThumbnails.Add(key)) _ = LoadThumbnail(key, source.Path, at, image);
         }
         var posterBox = Gtk.Overlay.New(); posterBox.SetChild(image); posterBox.SetOverflow(Gtk.Overflow.Hidden); posterBox.AddCssClass("poster");
@@ -332,7 +335,7 @@ public sealed class LinuxEditor : IDisposable
     {
         var selected = session.PreviewShortId is null && session.Selection == item.Id;
         var image = Gtk.Picture.New(); image.SetSizeRequest(100, 70); image.SetCanShrink(true); image.SetContentFit(Gtk.ContentFit.Cover);
-        if (item.Thumbnail is { } path && File.Exists(path)) SetImage(image, File.ReadAllBytes(path));
+        if (item.Thumbnail is { } path && File.Exists(path)) SetImage(image, PrismWindow.Scaled(File.ReadAllBytes(path), 112, 70, false));
         var poster = Gtk.Overlay.New(); poster.SetChild(image); poster.SetOverflow(Gtk.Overflow.Hidden); poster.AddCssClass("poster");
         var badge = Box(Gtk.Orientation.Horizontal, 0); badge.AddCssClass("badge"); badge.Append(Label(Format.Clock(item.Duration)));
         badge.SetHalign(Gtk.Align.End); badge.SetValign(Gtk.Align.End); Pad(badge, 4); poster.AddOverlay(badge);
@@ -349,7 +352,8 @@ public sealed class LinuxEditor : IDisposable
         {
             var bytes = await FFmpeg.FrameJpeg(path, at, 360);
             if (disposed || bytes is null) return;
-            thumbnailCache[key] = bytes;
+            // Cached at card size: GTK sizes a picture by its pixels, and a full frame would widen the card.
+            thumbnailCache[key] = bytes = PrismWindow.Scaled(bytes, 112, 82, false);
             SetImage(image, bytes);
         }
         catch (Exception) { }
@@ -465,12 +469,13 @@ public sealed class LinuxEditor : IDisposable
     {
         Clear(captions);
         if (session.ActiveSegment is not { } clip) { var empty = Label("Select a Short to change its captions.", "muted"); empty.SetMarginTop(28); captions.Append(empty); return; }
-        var current = (clip.CaptionStyle ?? CaptionStyle.Classic).Resolved();
+        var chosen = clip.CaptionStyle ?? CaptionStyle.Classic;
+        var current = chosen.Resolved(clip.VideoType, clip.SplitScreen == true);
         var hasAudio = session.Project?.Media.FirstOrDefault(m => m.Id == clip.MediaId)?.HasAudio == true;
         captions.Append(Label("Caption style", "t14", "medium"));
         foreach (var style in CaptionStyles.Choices)
         {
-            var selected = current == style.Resolved();
+            var selected = chosen == style || chosen == CaptionStyle.Clean && style == CaptionStyle.Classic;
             var chip = Gtk.CenterBox.New(); chip.AddCssClass("preview-chip"); chip.SetSizeRequest(112, 34); chip.SetValign(Gtk.Align.Center);
             try
             {
@@ -618,8 +623,8 @@ public sealed class LinuxEditor : IDisposable
         }
         return row;
     }
-    /// Columns of at least `width`, like SwiftUI's adaptive grid.
-    static Gtk.FlowBox Grid(int width)
+    /// An adaptive grid like SwiftUI's: each card's minimum width sets how many fit in a row.
+    static Gtk.FlowBox Grid()
     {
         var flow = Gtk.FlowBox.New(); flow.SetSelectionMode(Gtk.SelectionMode.None); flow.SetHomogeneous(true); flow.SetColumnSpacing(10); flow.SetRowSpacing(10);
         flow.SetMinChildrenPerLine(1); flow.SetMaxChildrenPerLine(8); flow.SetValign(Gtk.Align.Start); return flow;

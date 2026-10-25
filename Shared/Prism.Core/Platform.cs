@@ -107,7 +107,7 @@ public static class ProjectInfo
         if (video is not null)
         {
             // Moved projects keep their media inside the project folder.
-            var source = File.Exists(video.Path) ? video.Path : Path.Combine(path, "Media", Path.GetFileName(video.Path));
+            var source = File.Exists(video.Path) ? video.Path : Path.Combine(path, "Media", video.Name);
             var first = project.Segments.FirstOrDefault();
             var time = first is null ? 1 : first.Start + Math.Min(1, first.Duration / 2);
             if (FFmpeg.IsAvailable) poster = await FFmpeg.FrameJpeg(source, time, 480, cancellation);
@@ -129,7 +129,8 @@ public static class ProjectInfo
 
     /// <summary>How many Shorts each project has, for sorting finished from unfinished on Home.</summary>
     public static Dictionary<string, int> ShortCounts(IEnumerable<string> paths) =>
-        paths.Select(p => (p, ProjectStore.ReadProject(p))).Where(x => x.Item2 is not null).ToDictionary(x => x.p, x => x.Item2!.Segments.Count);
+        paths.Distinct(AppPaths.PathComparer).Select(p => (p, ProjectStore.ReadProject(p))).Where(x => x.Item2 is not null)
+             .ToDictionary(x => x.p, x => x.Item2!.Segments.Count, AppPaths.PathComparer);
 }
 
 /// Formatting shared by both apps.

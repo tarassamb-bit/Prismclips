@@ -17,7 +17,9 @@ public sealed class MediaItem
     public int Priority { get; set; } = 50;
     public DateTime Created { get; set; } = DateTime.UtcNow;
 
-    [JsonIgnore] public string Name => System.IO.Path.GetFileName(Path);
+    [JsonIgnore] public string Name => FileName(Path);
+    /// <summary>Managed projects can have paths saved on either Windows or a Unix system.</summary>
+    public static string FileName(string path) => System.IO.Path.GetFileName(path.Replace('\\', '/'));
 }
 
 /// One Short: a range of a source video plus its framing, captions and text.
@@ -43,10 +45,12 @@ public sealed class EditSegment
     public int? CropTrackingVersion { get; set; }
     /// <summary>Gemini word timings relative to this Short, used to keep trims from clipping speech.</summary>
     public List<TimedSpeechWord>? SpeechWords { get; set; }
+    public int? Score { get; set; }
     public string? SuggestedTitle { get; set; }
     public string? SelectionReason { get; set; }
     public string? CaptionNotice { get; set; }
     public CaptionStyle? CaptionStyle { get; set; }
+    public VideoType? VideoType { get; set; }
     /// <summary>Where subtitles sit; null is the bottom.</summary>
     public CaptionPosition? CaptionPosition { get; set; }
     /// <summary>Subtitle size; null is medium.</summary>
@@ -75,7 +79,7 @@ public sealed record TimedCaption(string Text, double Start, double Duration);
 
 public sealed record TimedSpeechWord(string Text, double Start, double Duration);
 
-public enum CaptionStyle { Classic, Viral, Clean, HighlightBox, BoldCaps, Minimal, OneWord, Podcast }
+public enum CaptionStyle { Classic, Viral, Clean, HighlightBox, BoldCaps, Minimal, OneWord, Podcast, Auto }
 
 public enum CaptionPosition { Top, Middle, Bottom }
 
@@ -87,12 +91,21 @@ public static class CaptionStyles
 {
     /// <summary>The styles people can pick; the retired boxed style (Clean) still decodes and draws as Simple.</summary>
     public static readonly CaptionStyle[] Choices =
-        [CaptionStyle.Classic, CaptionStyle.Viral, CaptionStyle.HighlightBox, CaptionStyle.BoldCaps, CaptionStyle.Minimal, CaptionStyle.OneWord, CaptionStyle.Podcast];
+        [CaptionStyle.Auto, CaptionStyle.Viral, CaptionStyle.HighlightBox, CaptionStyle.BoldCaps, CaptionStyle.OneWord, CaptionStyle.Podcast, CaptionStyle.Classic, CaptionStyle.Minimal];
 
-    public static CaptionStyle Resolved(this CaptionStyle style) => style == CaptionStyle.Clean ? CaptionStyle.Classic : style;
+    public static CaptionStyle Resolved(this CaptionStyle style, VideoType? videoType = null, bool splitScreen = false) => style switch
+    {
+        CaptionStyle.Clean => CaptionStyle.Classic,
+        CaptionStyle.Auto when splitScreen || videoType == VideoType.Podcast => CaptionStyle.Podcast,
+        CaptionStyle.Auto when videoType == VideoType.Gaming => CaptionStyle.BoldCaps,
+        CaptionStyle.Auto when videoType == VideoType.Tutorial => CaptionStyle.Minimal,
+        CaptionStyle.Auto => CaptionStyle.Viral,
+        _ => style,
+    };
 
     public static string Title(this CaptionStyle style) => style switch
     {
+        CaptionStyle.Auto => "Auto",
         CaptionStyle.Classic or CaptionStyle.Clean => "Simple",
         CaptionStyle.Viral => "Viral highlight",
         CaptionStyle.HighlightBox => "Highlight box",
@@ -104,6 +117,7 @@ public static class CaptionStyles
 
     public static string Detail(this CaptionStyle style) => style switch
     {
+        CaptionStyle.Auto => "Prism picks the style that fits this video.",
         CaptionStyle.Classic or CaptionStyle.Clean => "White text with a black outline.",
         CaptionStyle.Viral => "Each spoken word turns yellow.",
         CaptionStyle.HighlightBox => "The spoken word sits on a yellow box.",
@@ -279,4 +293,4 @@ public static class ExportQualities
 /// The result of analysis: one Short before it becomes an <see cref="EditSegment"/>.
 public sealed record ShortResult(
     double Start, double Duration, string Caption, List<TimedCaption> Captions, List<CropKeyframe> CropKeyframes,
-    List<TimedSpeechWord> SpeechWords, string? AnalysisWarning, string? SuggestedTitle, string? SelectionReason, bool FitToFrame);
+    List<TimedSpeechWord> SpeechWords, string? AnalysisWarning, string? SuggestedTitle, string? SelectionReason, bool FitToFrame, VideoType VideoType = VideoType.General, int? Score = null);

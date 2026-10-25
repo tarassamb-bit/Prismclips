@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Prism.Core;
+using System.Text.Json;
 
 namespace Prism.Core.Tests;
 
@@ -50,6 +51,121 @@ public class SessionTests
             => throw new HttpRequestException("The test is offline.");
     }
 
+    sealed class DelayedGemini : HttpMessageHandler
+    {
+        public readonly TaskCompletionSource Started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public readonly TaskCompletionSource Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Started.SetResult();
+            await Release.Task.WaitAsync(cancellationToken);
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"{\"ok\":true}"}]}}]}"""),
+            };
+        }
+    }
+
+    [Fact]
+    public void RedoRestoresEditsAndSurvivesFailedSaves()
+    {
+        using var fixture = new Fixture();
+        var clip = new EditSegment { Duration = 1, Caption = "Original" };
+        fixture.Open(null, clip);
+        var session = fixture.Session;
+        session.ApplyEdit(clip.Id, false, (value, _) => { value.Caption = "Edited"; return "Updated"; });
+        session.UndoFromEditor();
+        Assert.True(session.CanRedo);
+        Assert.Equal("Original", session.Project!.Segments[0].Caption);
+        fixture.BlockSaves(true);
+        Assert.StartsWith("Could not save redo", session.RedoEdit());
+        Assert.True(session.CanRedo);
+        Assert.Equal("Original", session.Project.Segments[0].Caption);
+        // A rejected new edit must not throw away the existing redo branch.
+        session.ApplyEdit(clip.Id, false, (value, _) => { value.Caption = "Rejected"; return "Updated"; });
+        Assert.True(session.CanRedo);
+        fixture.BlockSaves(false);
+        session.RedoFromEditor();
+        Assert.Equal("Edited", fixture.Saved().Segments[0].Caption);
+        Assert.False(session.CanRedo);
+        Assert.True(session.CanUndo);
+        session.UndoFromEditor();
+        session.ApplyEdit(clip.Id, false, (value, _) => { value.Caption = "New branch"; return "Updated"; });
+        Assert.False(session.CanRedo);
+        session.UndoFromEditor();
+        Assert.True(session.CanRedo);
+        fixture.Open();
+        Assert.False(session.CanRedo);
+    }
+
+    [Fact]
+    public async Task VerificationSavesTheKeyThatWasActuallyChecked()
+    {
+        using var fixture = new Fixture();
+        using var gemini = new DelayedGemini();
+        fixture.Session.GeminiKey = "test-key";
+        var verification = fixture.Session.VerifyAndSaveGeminiKey(gemini);
+        await gemini.Started.Task;
+        fixture.Session.GeminiKey = "an-unchecked-replacement";
+        gemini.Release.SetResult();
+        await verification;
+        Assert.Equal("test-key", fixture.Platform.Keys.Value);
+        Assert.Equal("test-key", fixture.Session.GeminiApiKey());
+        Assert.False(fixture.Session.IsTestingGemini);
+    }
+
+    [Fact]
+    public void RapidProjectCreationNeverReusesAnExistingProject()
+    {
+        using var fixture = new Fixture();
+        var paths = new HashSet<string>();
+        for (var index = 0; index < 5; index++)
+        {
+            fixture.Session.Create();
+            Assert.True(paths.Add(fixture.Session.ProjectPath!));
+            fixture.Session.RenameProject(fixture.Session.ProjectPath!, $"Project {index}");
+        }
+        Assert.Equal(5, paths.Select(path => ProjectStore.ReadProject(path)!.Id).Distinct().Count());
+        Assert.Equal(5, paths.Select(path => ProjectStore.ReadProject(path)!.DisplayTitle).Distinct().Count());
+        fixture.Open();
+        foreach (var path in paths) Directory.Delete(path, recursive: true);
+    }
+
+    [Theory]
+    [InlineData("Media")]
+    [InlineData("Thumbnails")]
+    public async Task ImportDirectoryFailuresLeaveTheEditorUsable(string blockedDirectory)
+    {
+        using var fixture = new Fixture();
+        fixture.Open();
+        var previousSelection = fixture.Session.Selection;
+        var path = System.IO.Path.Combine(fixture.Path, blockedDirectory);
+        File.WriteAllText(path, "This is a file, not a directory.");
+        await fixture.Session.ImportSource(await Media.Pictures());
+        Assert.False(fixture.Session.IsBusy);
+        Assert.Single(fixture.Session.Project!.Media);
+        Assert.Equal(previousSelection, fixture.Session.Selection);
+        Assert.StartsWith("Could not", fixture.Session.Message);
+        if (blockedDirectory == "Thumbnails") Assert.Empty(Directory.GetFiles(System.IO.Path.Combine(fixture.Path, "Media")));
+    }
+
+    [Fact]
+    public async Task WindowsProjectPathsResolveOnOtherPlatformsAndOnHome()
+    {
+        using var fixture = new Fixture();
+        var source = await Media.Pictures();
+        fixture.Open(source);
+        var managed = System.IO.Path.Combine(fixture.Path, "Media", "clip.mp4");
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(managed)!);
+        File.Copy(source, managed);
+        fixture.Session.Project!.Media[0].Path = @"C:\Prism\Library\Example.relio\Media\clip.mp4";
+        fixture.Session.Save();
+        Assert.Equal("clip.mp4", fixture.Session.Project.Media[0].Name);
+        Assert.NotNull((await ProjectInfo.Summary(fixture.Path)).Poster);
+        fixture.Session.Open(fixture.Path);
+        Assert.Equal(managed, fixture.Session.Project!.Media[0].Path);
+    }
+
     [Fact]
     public async Task OfflineVerificationDoesNotHideAKeyStoreSaveFailure()
     {
@@ -76,6 +192,85 @@ public class SessionTests
         Assert.False(player.Playing);
         Assert.Null(fixture.Session.Project);
         Assert.Contains(fixture.Path, fixture.Platform.Trashed);
+    }
+
+    [Fact]
+    public void FailedRenameKeepsTheOpenAndSavedNamesInSync()
+    {
+        using var fixture = new Fixture();
+        fixture.Open();
+        fixture.BlockSaves(true);
+        var revision = fixture.Session.ProjectListRevision;
+        fixture.Session.RenameProject(fixture.Path, "Must not persist later");
+        Assert.Equal("Editor test", fixture.Session.Project!.Title);
+        Assert.Equal(revision, fixture.Session.ProjectListRevision);
+        Assert.StartsWith("Could not rename project:", fixture.Session.Message);
+        fixture.BlockSaves(false);
+        fixture.Session.Save();
+        Assert.Equal("Editor test", fixture.Saved().Title);
+    }
+
+    [Fact]
+    public void FailedTrashRestoresTheOpenProjectAndItsHistory()
+    {
+        using var fixture = new Fixture();
+        var media = fixture.Open();
+        fixture.Session.AppendGeneratedShorts([new EditSegment { MediaId = media.Id, Duration = 1 }]);
+        fixture.Platform.BeforeTrash = () => throw new IOException("Trash unavailable");
+        fixture.Session.DeleteProject(fixture.Path);
+        Assert.NotNull(fixture.Session.Project);
+        Assert.Equal(fixture.Path, fixture.Session.ProjectPath);
+        Assert.Equal(media.Id, fixture.Session.Selection);
+        Assert.True(fixture.Session.CanUndo);
+        Assert.StartsWith("Could not delete project:", fixture.Session.Message);
+        fixture.Session.RenameProject(fixture.Path, "Still editable");
+        Assert.Equal("Still editable", fixture.Saved().Title);
+    }
+
+    [Fact]
+    public void DuplicateRecentPathsDoNotCrashHomeAndMissingFoldersDoNotMoveProjects()
+    {
+        using var fixture = new Fixture();
+        fixture.Open();
+        using var restored = new AppSession(fixture.Platform, new AppSettings { RecentProjects = [fixture.Path, fixture.Path] });
+        Assert.Single(restored.RecentProjectPaths);
+        Assert.Single(ProjectInfo.ShortCounts([fixture.Path, fixture.Path]));
+        var folder = restored.CreateFolder("Keep")!.Value;
+        restored.MoveProject(fixture.Path, folder);
+        restored.MoveProject(fixture.Path, Guid.NewGuid());
+        Assert.Equal([fixture.Path], restored.ProjectFolders.Single().ProjectPaths);
+    }
+
+    [Theory]
+    [InlineData("{\"media\":null,\"segments\":[]}")]
+    [InlineData("{\"media\":[],\"segments\":null}")]
+    [InlineData("{\"media\":[null],\"segments\":[]}")]
+    public void InvalidProjectCollectionsAreRejectedBeforeHomeUsesThem(string json)
+    {
+        using var fixture = new Fixture();
+        Directory.CreateDirectory(fixture.Path);
+        using (var store = new ProjectStore(fixture.Path)) store.Save(JsonDocument.Parse(json).RootElement, "project");
+        Assert.Null(ProjectStore.ReadProject(fixture.Path));
+        Assert.Empty(ProjectInfo.ShortCounts([fixture.Path]));
+    }
+
+    [Fact]
+    public void MalformedSettingsCannotSupplyInvalidNativeLayoutOrTimerValues()
+    {
+        Directory.CreateDirectory(AppPaths.Config);
+        var path = System.IO.Path.Combine(AppPaths.Config, "settings.json");
+        var previous = File.Exists(path) ? File.ReadAllText(path) : null;
+        try
+        {
+            File.WriteAllText(path, """{"recentProjects":null,"projectFolders":[null,{"projectPaths":null}],"resourceRefreshSeconds":"NaN","leftSidebarWidth":-10,"rightSidebarWidth":"Infinity","timelineHeight":0,"geminiModel":null,"exportQuality":999}""");
+            var settings = AppSettings.Load();
+            Assert.Empty(settings.RecentProjects);
+            Assert.Empty(Assert.Single(settings.ProjectFolders).ProjectPaths);
+            Assert.Equal((60d, 248d, 282d, 278d), (settings.ResourceRefreshSeconds, settings.LeftSidebarWidth, settings.RightSidebarWidth, settings.TimelineHeight));
+            Assert.Equal(ExportQuality.Full, settings.ExportQuality);
+            Assert.False(string.IsNullOrWhiteSpace(settings.GeminiModel));
+        }
+        finally { if (previous is null) File.Delete(path); else File.WriteAllText(path, previous); }
     }
 
     sealed class Fixture : IDisposable
@@ -402,6 +597,11 @@ public class SessionTests
         Assert.Equal(0, rebased.CropKeyframes![0].Time);
         Assert.True(rebased.CropKeyframes[0].PreserveWholeFrame);
         Assert.True(rebased.CropKeyframes[^1].PreserveWholeFrame);
+        session.AdjustCropKeyframe(1.5, 1.5, 0.05, false);
+        await PreviewSettled(session);
+        var edge = Assert.Single(session.ActiveSegment!.CropKeyframes!, p => Math.Abs(p.Time - 1.5) < 0.01);
+        Assert.Equal(0.05, edge.Position + session.ActiveSegment.CropPosition!.Value - 0.5, 6);
+        Assert.Contains(session.ActiveSegment.CropKeyframes!, p => p.Time == 0.9 && p.IsSceneCut == true && p.PreserveWholeFrame == true);
     }
 
     [Fact]

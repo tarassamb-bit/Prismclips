@@ -64,11 +64,13 @@ public sealed class LinuxTimeline : IDisposable
         var rule = Gtk.Box.New(Gtk.Orientation.Vertical, 0); rule.AddCssClass("divider"); rule.SetSizeRequest(1, 16); rule.Valign = Gtk.Align.Center; rule.MarginStart = 8; rule.MarginEnd = 8;
         tools.Append(undo); tools.Append(audio); tools.Append(rule); tools.Append(title);
         tools.Append(add); tools.Append(generate); tools.Append(settings);
-        undo.OnClicked += (_, _) => session.UndoFromEditor();
-        audio.OnClicked += (_, _) => session.ToggleSelectedAudio();
-        add.OnClicked += (_, _) => session.AddManualClip();
-        generate.OnClicked += async (_, _) => await session.MakeConfiguredShorts();
-        settings.OnClicked += (_, _) => session.Screen = Screen.ImportSource;
+        // A failed action reports on the status line instead of taking the window down.
+        void Safely(Action action) { try { action(); } catch (Exception error) { session.Message = error.Message; } }
+        undo.OnClicked += (_, _) => Safely(session.UndoFromEditor);
+        audio.OnClicked += (_, _) => Safely(session.ToggleSelectedAudio);
+        add.OnClicked += (_, _) => Safely(session.AddManualClip);
+        generate.OnClicked += async (_, _) => { try { await session.MakeConfiguredShorts(); } catch (Exception error) { session.Message = error.Message; } };
+        settings.OnClicked += (_, _) => Safely(() => session.Screen = Screen.ImportSource);
         container.Append(tools);
         area.ContentHeight = 224;
         area.Hexpand = true;

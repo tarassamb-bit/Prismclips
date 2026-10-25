@@ -5,3 +5,6 @@ test-output/
 bin/
 obj/
 .env.local
+
+# Built update archives, copied in by macOS/scripts/publish-update.sh and deployed with the site
+UI/updates/

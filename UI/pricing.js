@@ -12,6 +12,7 @@
   let user = null;
   let hasPlan = false;
   let finishing = false;
+  let opening = false;
 
   function say(message, kind = 'info') {
     status.textContent = message;
@@ -56,30 +57,45 @@
   async function checkPlan() {
     if (!db || !user) return false;
     const { data, error } = await db.from('subscriptions').select('id').in('status', ACTIVE).limit(1);
-    // If the check itself fails, don't stop someone from buying.
-    return !error && data.length > 0;
+    if (error) throw error;
+    if (!Array.isArray(data)) throw new Error('The server returned an unexpected plan response.');
+    return data.length > 0;
   }
 
   async function subscribe(tier) {
-    if (!paddle) return;
-    if (!user) {
-      // Purchases are linked by Supabase user ID, so a signed-out checkout can't be matched to an account.
-      location.href = '/login?next=/pricing';
-      return;
-    }
-    // Checked again on click: a plan may have been bought in another tab since the page loaded.
-    hasPlan = hasPlan || await checkPlan().catch(() => false);
-    if (hasPlan) {
+    if (!paddle || opening || finishing) return;
+    opening = true;
+    for (const { button } of cards) button.disabled = true;
+    try {
+      const currentUser = (await db?.auth.getSession())?.data?.session?.user ?? null;
+      if (currentUser?.id !== user?.id) hasPlan = false;
+      user = currentUser;
       label();
-      location.href = `/dashboard_${user.id}`;
-      return;
+      if (!user) {
+        // A sign-out or account switch in another tab must apply before checkout opens.
+        location.href = '/login?next=/pricing';
+        return;
+      }
+      // Checked again on click: a plan may have been bought in another tab since the page loaded.
+      hasPlan = hasPlan || await checkPlan();
+      if (hasPlan) {
+        label();
+        location.href = `/dashboard_${user.id}`;
+        return;
+      }
+      say('');
+      paddle.Checkout.open({
+        items: [{ priceId: tier.priceId, quantity: 1 }],
+        customer: user.email ? { email: user.email } : undefined,
+        customData: { supabase_user_id: user.id },
+        settings: { displayMode: 'overlay', variant: 'one-page' },
+      });
+    } catch (error) {
+      say(`Couldn’t open checkout. ${error.message || 'Please try again.'}`, 'error');
+    } finally {
+      opening = false;
+      for (const { button } of cards) button.disabled = finishing;
     }
-    paddle.Checkout.open({
-      items: [{ priceId: tier.priceId, quantity: 1 }],
-      customer: user.email ? { email: user.email } : undefined,
-      customData: { supabase_user_id: user.id },
-      settings: { displayMode: 'overlay', variant: 'one-page' },
-    });
   }
 
   // Saves the purchase to the account straight away instead of waiting for Paddle's webhook,
@@ -121,7 +137,7 @@
     paddle = window.Paddle;
 
     user = (await db?.auth.getSession().catch(() => null))?.data?.session?.user ?? null;
-    hasPlan = await checkPlan().catch(() => false);
+    hasPlan = await checkPlan();
 
     const preview = await paddle.PricePreview({
       items: tiers.map((tier) => ({ priceId: tier.priceId, quantity: 1 })),

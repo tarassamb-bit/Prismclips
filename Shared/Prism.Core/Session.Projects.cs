@@ -24,30 +24,37 @@ public sealed partial class AppSession
     {
         if (IsBusy) return;
         var name = "Video " + DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss", CultureInfo.InvariantCulture);
-        var path = Path.Combine(AppPaths.Projects, name + ".relio");
+        var path = Path.Combine(AppPaths.Projects, $"{name} {Guid.NewGuid():N}.relio");
+        ProjectStore? created = null;
         try
         {
             Directory.CreateDirectory(Path.Combine(path, "Media"));
             Directory.CreateDirectory(Path.Combine(path, "Exports"));
+            created = new ProjectStore(path);
+            var next = new ProjectData { Name = name };
+            created.Save(next, "project");
             store?.Dispose();
-            store = new ProjectStore(path);
+            store = created;
+            created = null;
             ProjectPath = path;
             ResetPreview();
             SourcePath = "";
             editHistory = [];
+            ClearRedo();
             Changed(nameof(CanUndo));
             ExportedFiles = [];
             LastExportFolder = null;
             chatMessages = [];
             Changed(nameof(ChatMessages));
-            Project = new ProjectData { Name = name };
-            Save();
+            Project = next;
+            LastSavedAt = DateTime.Now;
             Settings.LastProject = path;
             Remember(path);
             Screen = Screen.Editor;
             Message = "Import a long video to make your first Short.";
         }
         catch (Exception error) { Message = $"Could not create project: {error.Message}"; }
+        finally { created?.Dispose(); }
     }
 
     public void StartLongVideoToShort()
@@ -62,11 +69,12 @@ public sealed partial class AppSession
     public void Open(string path)
     {
         if (IsBusy) return;
+        ProjectStore? opened = null;
         try
         {
-            var opened = new ProjectStore(path, create: false);
+            opened = new ProjectStore(path, create: false);
             var loaded = opened.Load<ProjectData>("project");
-            if (loaded is null) { opened.Dispose(); throw new StoreException("The project database could not be read."); }
+            if (loaded is null) throw new StoreException("The project database could not be read.");
             // Resolve managed assets relative to the project when a project folder is moved, even from another computer.
             foreach (var media in loaded.Media)
             {
@@ -80,7 +88,9 @@ public sealed partial class AppSession
             }
             store?.Dispose();
             store = opened;
+            opened = null;
             editHistory = [];
+            ClearRedo();
             Changed(nameof(CanUndo));
             ExportedFiles = [];
             LastExportFolder = null;
@@ -98,14 +108,15 @@ public sealed partial class AppSession
             Message = "Project ready.";
         }
         catch (Exception error) { Message = $"Could not open project: {error.Message}"; }
+        finally { opened?.Dispose(); }
     }
 
     /// Paths saved on macOS use "/", paths saved on Windows "\"; either can appear in a moved project.
-    static string FileName(string path) => path.Split('/', '\\').Last();
+    static string FileName(string path) => MediaItem.FileName(path);
 
     void Remember(string path)
     {
-        recentProjectPaths.Remove(path);
+        recentProjectPaths.RemoveAll(existing => AppPaths.PathComparer.Equals(existing, path));
         recentProjectPaths.Insert(0, path);
         Settings.RecentProjects = [.. recentProjectPaths];
         Settings.Save();
@@ -114,8 +125,8 @@ public sealed partial class AppSession
 
     void RestoreSavedProjects()
     {
-        var paths = Settings.RecentProjects.Where(Directory.Exists).ToList();
-        var known = paths.ToHashSet();
+        var paths = Settings.RecentProjects.Where(Directory.Exists).Distinct(AppPaths.PathComparer).ToList();
+        var known = paths.ToHashSet(AppPaths.PathComparer);
         var recovered = new List<(string Path, DateTime Created)>();
         try
         {
@@ -135,7 +146,8 @@ public sealed partial class AppSession
 
     public void Save()
     {
-        if (project is null || store is null) return;
+        if (project is null) return;
+        if (store is null) throw new StoreException("Reopen this project before saving changes.");
         store.Save(project, "project");
         LastSavedAt = DateTime.Now;
     }
@@ -210,7 +222,8 @@ public sealed partial class AppSession
     {
         // Drops can carry any text; only known projects belong in folders.
         if (folderId is not null && !recentProjectPaths.Contains(path)) return;
-        foreach (var folder in Settings.ProjectFolders) folder.ProjectPaths.Remove(path);
+        if (folderId is { } targetId && Settings.ProjectFolders.All(folder => folder.Id != targetId)) return;
+        foreach (var folder in Settings.ProjectFolders) folder.ProjectPaths.RemoveAll(existing => AppPaths.PathComparer.Equals(existing, path));
         if (folderId is { } id && Settings.ProjectFolders.FirstOrDefault(f => f.Id == id) is { } target) target.ProjectPaths.Insert(0, path);
         SaveFolders();
     }
@@ -224,8 +237,10 @@ public sealed partial class AppSession
             // The open project is saved from memory, so it changes there too or the next save would undo the rename.
             if (projectPath == path && project is not null)
             {
+                var previous = project.Title;
                 project.Title = title;
-                Save();
+                try { Save(); }
+                catch { project.Title = previous; throw; }
                 ProjectChanged();
             }
             else
@@ -245,28 +260,39 @@ public sealed partial class AppSession
     public void DeleteProject(string path)
     {
         if (IsBusy) return;
-        if (projectPath == path)
-        {
-            ResetPreview();
-            store?.Dispose();
-            store = null;
-            Project = null;
-            ProjectPath = null;
-            editHistory = [];
-            Changed(nameof(CanUndo));
-            LastSavedAt = null;
-            Settings.LastProject = null;
-        }
+        var deletingOpen = projectPath == path;
+        var previousSelection = Selection;
+        var previousShort = PreviewShortId;
         try
         {
+            if (deletingOpen) { ResetPreview(); store?.Dispose(); store = null; }
             platform.MoveToTrash(path);
+            if (deletingOpen)
+            {
+                Project = null;
+                ProjectPath = null;
+                editHistory = [];
+            ClearRedo();
+                Changed(nameof(CanUndo));
+                LastSavedAt = null;
+                Settings.LastProject = null;
+            }
             recentProjectPaths.Remove(path);
             Settings.RecentProjects = [.. recentProjectPaths];
             Changed(nameof(RecentProjectPaths));
             MoveProject(path, null);
             Message = OperatingSystem.IsWindows() ? "Moved the project to the Recycle Bin." : "Moved the project to the Trash.";
         }
-        catch (Exception error) { Message = $"Could not delete project: {error.Message}"; }
+        catch (Exception error)
+        {
+            if (deletingOpen && projectPath == path && project is not null)
+            {
+                try { store ??= new ProjectStore(path, create: false); } catch { }
+                Selection = previousSelection;
+                SelectPreview(previousShort);
+            }
+            Message = $"Could not delete project: {error.Message}";
+        }
     }
 
     // MARK: Import
@@ -304,18 +330,30 @@ public sealed partial class AppSession
         IsBusy = true;
         Message = "Copying video into your Prism library…";
         var mediaDirectory = Path.Combine(folder, "Media");
-        Directory.CreateDirectory(mediaDirectory);
         var copied = UniqueDestination(path, mediaDirectory);
-        try { await Task.Run(() => File.Copy(path, copied)); }
+        var temporary = Path.Combine(mediaDirectory, $".import-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(mediaDirectory);
+            await Task.Run(() => { File.Copy(path, temporary); File.Move(temporary, copied); });
+        }
         catch (Exception error)
         {
-            try { File.Delete(copied); } catch { }
             Message = $"Could not copy video: {error.Message}";
             IsBusy = false;
             return;
         }
+        finally { try { File.Delete(temporary); } catch { } }
         Message = "Reading video metadata and creating thumbnail…";
-        var item = await Inspect(copied, Path.Combine(folder, "Thumbnails"));
+        MediaItem? item;
+        try { item = await Inspect(copied, Path.Combine(folder, "Thumbnails")); }
+        catch (Exception error)
+        {
+            try { File.Delete(copied); } catch { }
+            Message = $"Could not read video: {error.Message}";
+            IsBusy = false;
+            return;
+        }
         if (item is null || project is null)
         {
             try { File.Delete(copied); } catch { }
@@ -372,7 +410,7 @@ public sealed partial class AppSession
         var name = Path.GetFileNameWithoutExtension(source);
         var extension = Path.GetExtension(source);
         var destination = Path.Combine(directory, Path.GetFileName(source));
-        for (var index = 2; File.Exists(destination); index++) destination = Path.Combine(directory, $"{name} {index}{extension}");
+        for (var index = 2; File.Exists(destination) || Directory.Exists(destination); index++) destination = Path.Combine(directory, $"{name} {index}{extension}");
         return destination;
     }
 

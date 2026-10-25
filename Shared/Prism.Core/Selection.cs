@@ -72,7 +72,7 @@ public static class GeminiSelection
         foreach (var clip in valid)
         {
             if (selected.All(s => !TranscriptSelection.Overlaps(clip.Start, clip.End - clip.Start, s.Start, s.End - s.Start))) selected.Add(clip);
-            if (selected.Count == Math.Min(10, Math.Max(1, count))) break;
+            if (selected.Count == Math.Min(20, Math.Max(1, count))) break;
         }
         if (selected.Count == 0)
         {
@@ -241,7 +241,7 @@ public static class GeminiSelection
             var bounds = (allowed.Min(a => a.Start), allowed.Max(a => a.End));
             try
             {
-                var clips = await SelectDetailed(path, selectedCues, bounds, targetDuration, Math.Min(10, count + 2), configuration, excluding, guidance, allowed, token);
+                var clips = await SelectDetailed(path, selectedCues, bounds, targetDuration, Math.Min(20, count + 2), configuration, excluding, guidance, allowed, token);
                 return (Clips: clips, Error: (Exception?)null);
             }
             // A timed-out request is one failed batch; only a real stop ends the pass.
@@ -257,7 +257,7 @@ public static class GeminiSelection
         if (allClips.Count == 0 && failures.Count == detailBatches.Count && failures.Count > 0) ExceptionDispatchInfo.Capture(failures[0]).Throw();
         if (allClips.Count == 0) throw new GeminiException(excluding.Count == 0 ? GeminiFailure.NoStrongClips : GeminiFailure.NoDistinctClips);
         // A wider pool of time-distinct finalists, then one editor pass compares them side by side.
-        var pool = StrongestOrBest(allClips, interval, targetDuration, Math.Min(10, count * 2 + 2), excluding);
+        var pool = StrongestOrBest(allClips, interval, targetDuration, Math.Min(20, count * 2 + 2), excluding);
         if (pool.Count <= count) return pool;
         progress(0.95, "Gemini · final edit: picking the best distinct stories");
         var chosen = await FinalCut(pool, cues, count, guidance, configuration, cancellation) ?? pool.Take(count).ToList();

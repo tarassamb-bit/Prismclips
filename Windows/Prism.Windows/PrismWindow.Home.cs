@@ -166,12 +166,16 @@ public sealed partial class PrismWindow
         open.ContextMenu = Menu(actions.ToArray());
         var host = new Border { Child = open };
         Point down = default;
-        host.PreviewMouseLeftButtonDown += (_, args) => down = args.GetPosition(host);
+        var armed = false;
+        // Only a press that began on this card can drag it.
+        host.PreviewMouseLeftButtonDown += (_, args) => { down = args.GetPosition(host); armed = true; };
+        host.PreviewMouseLeftButtonUp += (_, _) => armed = false;
         host.PreviewMouseMove += (_, args) =>
         {
-            if (args.LeftButton != MouseButtonState.Pressed || session.IsBusy) return;
+            if (!armed || args.LeftButton != MouseButtonState.Pressed || session.IsBusy) { armed &= args.LeftButton == MouseButtonState.Pressed; return; }
             var here = args.GetPosition(host);
             if (Math.Abs(here.X - down.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(here.Y - down.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+            armed = false;
             open.ReleaseMouseCapture();
             DragDrop.DoDragDrop(host, new DataObject("PrismProject", path), DragDropEffects.Move);
         };

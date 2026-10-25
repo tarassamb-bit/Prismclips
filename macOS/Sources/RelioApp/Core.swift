@@ -3,6 +3,7 @@ import AVFoundation
 import AppKit
 import CSQLite
 import Darwin.Mach
+import CryptoKit
 
 struct MediaItem: Identifiable, Codable, Hashable {
     var id: UUID = UUID()
@@ -16,7 +17,8 @@ struct MediaItem: Identifiable, Codable, Hashable {
     var note: String = ""
     var priority: Int = 50
     var created: Date = .now
-    var name: String { URL(fileURLWithPath: path).lastPathComponent }
+    var name: String { Self.fileName(in: path) }
+    static func fileName(in path: String) -> String { path.replacingOccurrences(of: "\\", with: "/").split(separator: "/").last.map(String.init) ?? "" }
 }
 
 struct EditSegment: Identifiable, Codable, Hashable {
@@ -37,11 +39,15 @@ struct EditSegment: Identifiable, Codable, Hashable {
     var cropKeyframes: [CropKeyframe]? = nil
     /// Tracker algorithm version used to create cropKeyframes; old paths are regenerated on next preview/export.
     var cropTrackingVersion: Int? = nil
-    /// Gemini word timings, relative to this Short, used to keep trims from clipping speech.
+    /// Prism AI word timings, relative to this Short, used to keep trims from clipping speech.
     var speechWords: [TimedSpeechWord]? = nil
 
     var suggestedTitle: String? = nil
     var selectionReason: String? = nil
+    /// Prism AI's rating of this Short, 0–100; nil for Shorts added by hand or made before scores were kept.
+    var score: Int? = nil
+    /// The kind of video this Short was cut from, as chosen or detected; Auto captions pick their style from it.
+    var videoType: VideoType? = nil
     var captionNotice: String? = nil
     var captionStyle: CaptionStyle? = nil
     /// Where subtitles sit; nil is the bottom.
@@ -58,7 +64,7 @@ struct EditSegment: Identifiable, Codable, Hashable {
     private enum CodingKeys: String, CodingKey {
         case id, mediaID, start, duration, caption, isMuted, captionStart, captionDuration
         case fitToFrame, captions, cropZoom, cropPosition, cropKeyframes, cropTrackingVersion, speechWords, suggestedTitle, selectionReason, captionNotice, captionStyle
-        case captionPosition, captionSize, captionAnimated, splitScreen, splitCenters
+        case captionPosition, captionSize, captionAnimated, splitScreen, splitCenters, score, videoType
     }
 
     init(id: UUID = UUID(), mediaID: UUID, start: Double = 0, duration: Double, caption: String = "",
@@ -102,7 +108,14 @@ struct EditSegment: Identifiable, Codable, Hashable {
         captionStyle = try values.decodeIfPresent(CaptionStyle.self, forKey: .captionStyle)
         splitScreen = try values.decodeIfPresent(Bool.self, forKey: .splitScreen)
         splitCenters = try values.decodeIfPresent([Double].self, forKey: .splitCenters)
+        score = try values.decodeIfPresent(Int.self, forKey: .score)
+        videoType = try? values.decodeIfPresent(VideoType.self, forKey: .videoType)
     }
+
+    /// The style captions are drawn in: Auto becomes the style that fits this Short's video.
+    var resolvedCaptionStyle: CaptionStyle { (captionStyle ?? .classic).resolved(for: videoType, splitScreen: splitScreen == true) }
+    /// New caption pages pop in; unless set, the lively word-by-word styles pop and the calm ones don't.
+    var captionPops: Bool { captionAnimated ?? [.viral, .boldCaps, .oneWord, .highlightBox].contains(resolvedCaptionStyle) }
 }
 
 /// A Home-screen folder: a name and the project folders inside it. Projects stay where they are on disk.
@@ -138,6 +151,8 @@ struct TimedSpeechWord: Codable, Hashable {
 }
 
 enum CaptionStyle: String, Codable, CaseIterable, Identifiable {
+    /// Picks the style that fits the video; see `resolved(for:splitScreen:)`.
+    case auto
     case classic
     case viral
     /// Retired boxed style. Kept so saved projects still decode; it renders as Simple.
@@ -148,12 +163,28 @@ enum CaptionStyle: String, Codable, CaseIterable, Identifiable {
     case oneWord
     case podcast
 
-    static let allCases: [CaptionStyle] = [.classic, .viral, .highlightBox, .boldCaps, .minimal, .oneWord, .podcast]
+    static let allCases: [CaptionStyle] = [.auto, .viral, .highlightBox, .boldCaps, .oneWord, .podcast, .classic, .minimal]
     var id: String { rawValue }
-    /// Old projects saved the retired boxed style; it is shown and drawn as Simple.
-    var resolved: CaptionStyle { self == .clean ? .classic : self }
+    /// Old projects saved the retired boxed style; it is shown and drawn as Simple. Auto without a video is Viral highlight.
+    var resolved: CaptionStyle { resolved(for: nil, splitScreen: false) }
+    /// Auto's pick: green-word captions for conversations, big caps for games, a calm band over screens, and the
+    /// word-by-word yellow highlight that holds viewers on everything else.
+    func resolved(for videoType: VideoType?, splitScreen: Bool) -> CaptionStyle {
+        switch self {
+        case .clean: return .classic
+        case .auto:
+            if splitScreen || videoType == .podcast { return .podcast }
+            switch videoType {
+            case .gaming: return .boldCaps
+            case .tutorial: return .minimal
+            default: return .viral
+            }
+        default: return self
+        }
+    }
     var title: String {
         switch self {
+        case .auto: "Auto"
         case .classic, .clean: "Simple"
         case .viral: "Viral highlight"
         case .highlightBox: "Highlight box"
@@ -165,25 +196,29 @@ enum CaptionStyle: String, Codable, CaseIterable, Identifiable {
     }
     var detail: String {
         switch self {
-        case .classic, .clean: "White text with a black outline."
-        case .viral: "Each spoken word turns yellow."
-        case .highlightBox: "The spoken word sits on a yellow box."
-        case .boldCaps: "Big all-caps text, three words at a time."
-        case .minimal: "Smaller text on a soft dark band."
+        case .auto: "Prism picks the style that fits this video."
+        case .classic, .clean: "Short lines of white text with a bold outline."
+        case .viral: "Three words at a time; the spoken word turns yellow."
+        case .highlightBox: "The spoken word sits on a bright box."
+        case .boldCaps: "Huge all-caps text, two words at a time."
+        case .minimal: "Calm text on a soft dark band."
         case .oneWord: "One big word at a time."
         case .podcast: "Soft-shadowed text; the spoken word turns green."
         }
     }
-    /// Styles that follow each spoken word need word timing; without it they fall back to whole phrases.
-    var usesWordTiming: Bool { [.viral, .highlightBox, .oneWord, .podcast].contains(self) }
+    /// Styles that follow each spoken word need exact word timing; without it the timing is estimated from sentences.
+    var usesWordTiming: Bool { [.auto, .viral, .highlightBox, .boldCaps, .oneWord, .podcast].contains(self) }
+    /// Styles that color the word being spoken.
+    var highlightsWords: Bool { [.viral, .highlightBox, .podcast].contains(self) }
 }
 
 enum CaptionPosition: String, Codable, CaseIterable, Identifiable {
     case top, middle, bottom
     var id: String { rawValue }
     var title: String { rawValue.capitalized }
-    /// Bottom edge of the subtitle layer in the 1080×1920 frame (origin at the bottom).
-    var y: CGFloat { switch self { case .top: 1460; case .middle: 855; case .bottom: 330 } }
+    /// Center line of the captions in the 1080×1920 frame (origin at the bottom). Bottom sits above the caption,
+    /// buttons and progress bar that TikTok, Reels and Shorts draw over the lowest quarter of the video.
+    var centerY: CGFloat { switch self { case .top: 1520; case .middle: 960; case .bottom: 620 } }
 }
 
 enum CaptionSize: String, Codable, CaseIterable, Identifiable {
@@ -245,7 +280,7 @@ enum VideoType: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-/// Gemini's sentence transcript of one source range.
+/// Prism AI's sentence transcript of one source range.
 struct SentenceTranscript: Codable, Sendable {
     var start: Double
     var end: Double
@@ -324,11 +359,11 @@ struct MachineProfile {
             }
         }
         guard result == KERN_SUCCESS else { return 0 }
+        // Activity Monitor's "Memory Used": app memory, wired and compressed. File cache is free for the taking,
+        // so counting it as used showed nearly every Mac at 95–99%.
         let pageSize = UInt64(getpagesize())
-        let totalPages = totalBytes / pageSize
-        let availablePages = UInt64(statistics.free_count + statistics.speculative_count)
-        let usedPages = totalPages > availablePages ? totalPages - availablePages : 0
-        let usedBytes = usedPages * pageSize
+        let appPages = UInt64(statistics.internal_page_count) - min(UInt64(statistics.internal_page_count), UInt64(statistics.purgeable_count))
+        let usedBytes = (appPages + UInt64(statistics.wire_count) + UInt64(statistics.compressor_page_count)) * pageSize
         return min(Double(totalBytes) / 1_073_741_824, Double(usedBytes) / 1_073_741_824)
     }
 }
@@ -345,9 +380,17 @@ final class ProjectStore {
         } else if !FileManager.default.fileExists(atPath: file) {
             throw StoreError.notAProject
         }
-        guard sqlite3_open(file, &db) == SQLITE_OK else { throw StoreError.database }
-        try execute("PRAGMA journal_mode=WAL")
-        try execute("CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value BLOB NOT NULL)")
+        guard sqlite3_open_v2(file, &db, SQLITE_OPEN_READWRITE | (create ? SQLITE_OPEN_CREATE : 0), nil) == SQLITE_OK else {
+            sqlite3_close(db); db = nil
+            throw StoreError.database
+        }
+        do {
+            try execute("PRAGMA journal_mode=WAL")
+            if create { try execute("CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value BLOB NOT NULL)") }
+        } catch {
+            sqlite3_close(db); db = nil
+            throw error
+        }
     }
     deinit { sqlite3_close(db) }
     enum StoreError: LocalizedError {
@@ -376,7 +419,9 @@ final class ProjectStore {
         defer { sqlite3_finalize(statement) }
         guard sqlite3_prepare_v2(db, "SELECT value FROM state WHERE key=?", -1, &statement, nil) == SQLITE_OK else { throw StoreError.database }
         sqlite3_bind_text(statement, 1, key, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        guard sqlite3_step(statement) == SQLITE_ROW, let bytes = sqlite3_column_blob(statement, 0) else { return nil }
+        let result = sqlite3_step(statement)
+        if result == SQLITE_DONE { return nil }
+        guard result == SQLITE_ROW, let bytes = sqlite3_column_blob(statement, 0) else { throw StoreError.database }
         return try JSONDecoder().decode(T.self, from: Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, 0))))
     }
 }
@@ -400,7 +445,8 @@ enum MediaEngine {
                 }
                 let generator = AVAssetImageGenerator(asset: asset)
                 generator.appliesPreferredTrackTransform = true
-                if let cg = try? generator.copyCGImage(at: CMTime(seconds: min(item.duration / 2, 0.5), preferredTimescale: 600), actualTime: nil) {
+                // A few seconds in, past the black frame or fade most videos open with.
+                if let cg = try? generator.copyCGImage(at: CMTime(seconds: min(item.duration / 2, 3), preferredTimescale: 600), actualTime: nil) {
                     item.thumbnail = saveThumbnail(NSImage(cgImage: cg, size: .zero), id: item.id, directory: thumbnailDirectory)
                 }
             }
@@ -418,5 +464,69 @@ enum MediaEngine {
         let path = directory.appendingPathComponent("\(id).jpg")
         try? data.write(to: path, options: .atomic)
         return path.path
+    }
+}
+
+/// How much video Shorts can be made from: 60 minutes a calendar day and 300 a week. A video already counted that day
+/// or week costs nothing extra, and a run that makes no Shorts isn't counted. Each video counts once, at its length.
+// shortcut: counted on this Mac in UserDefaults; the account's copy in Supabase decides when signed in.
+enum UsageLimit {
+    static let perDayMinutes = 60.0
+    static let perWeekMinutes = 300.0
+    static let storageKey = "usage.videos"
+
+    struct Entry: Codable, Equatable {
+        var video: String
+        var date: Date
+        var minutes: Double
+    }
+
+    /// Two imports of the same file count as one video.
+    static func videoKey(_ media: MediaItem) -> String { "\(media.name)|\(Int(media.duration.rounded()))" }
+    /// What Supabase stores: a SHA-256 of the video key, so the file name never leaves the Mac.
+    static func serverKey(_ media: MediaItem) -> String {
+        SHA256.hash(data: Data(videoKey(media).utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+    static func minutes(of media: MediaItem) -> Double { media.duration / 60 }
+
+    static func load() -> [Entry] {
+        (UserDefaults.standard.data(forKey: storageKey)).flatMap { try? JSONDecoder().decode([Entry].self, from: $0) } ?? []
+    }
+
+    /// Minutes of different videos used in the day or week that contains `now`.
+    static func used(_ period: Calendar.Component, entries: [Entry], now: Date = .now, calendar: Calendar = .current) -> Double {
+        var longest: [String: Double] = [:]
+        for entry in entries where calendar.isDate(entry.date, equalTo: now, toGranularity: period) {
+            longest[entry.video] = max(longest[entry.video] ?? 0, entry.minutes)
+        }
+        return longest.values.reduce(0, +)
+    }
+
+    /// Why a video of `minutes` length can't be used now, or nil when it can.
+    static func refusal(for video: String, minutes: Double, entries: [Entry], now: Date = .now, calendar: Calendar = .current) -> String? {
+        func counted(_ period: Calendar.Component) -> Bool {
+            entries.contains { $0.video == video && calendar.isDate($0.date, equalTo: now, toGranularity: period) }
+        }
+        if !counted(.weekOfYear), used(.weekOfYear, entries: entries, now: now, calendar: calendar) + minutes > perWeekMinutes {
+            let reset = calendar.dateInterval(of: .weekOfYear, for: now)?.end ?? now
+            return "You've reached your weekly limit of \(Int(perWeekMinutes)) minutes of video. You can start new videos again \(reset.formatted(.dateTime.weekday(.wide)))."
+        }
+        if !counted(.day), used(.day, entries: entries, now: now, calendar: calendar) + minutes > perDayMinutes {
+            return "You've reached your daily limit of \(Int(perDayMinutes)) minutes of video. You can start new videos again tomorrow."
+        }
+        return nil
+    }
+
+    /// Counts `video` once for today; entries older than two weeks are dropped.
+    static func recorded(_ video: String, minutes: Double, in entries: [Entry], now: Date = .now, calendar: Calendar = .current) -> [Entry] {
+        var kept = entries.filter { now.timeIntervalSince($0.date) < 14 * 86_400 }
+        if !kept.contains(where: { $0.video == video && calendar.isDate($0.date, inSameDayAs: now) }) {
+            kept.append(.init(video: video, date: now, minutes: minutes))
+        }
+        return kept
+    }
+
+    static func record(_ video: String, minutes: Double) {
+        UserDefaults.standard.set(try? JSONEncoder().encode(recorded(video, minutes: minutes, in: load())), forKey: storageKey)
     }
 }

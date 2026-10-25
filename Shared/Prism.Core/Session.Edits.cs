@@ -17,6 +17,12 @@ public sealed partial class AppSession
         Changed(nameof(CanUndo));
     }
 
+    void ClearRedo()
+    {
+        redoHistory.Clear();
+        Changed(nameof(CanRedo));
+    }
+
     static string FormatSeconds(double value) => Math.Round(value) == value
         ? value.ToString("0", CultureInfo.InvariantCulture) + " seconds"
         : value.ToString("0.0", CultureInfo.InvariantCulture) + " seconds";
@@ -44,6 +50,7 @@ public sealed partial class AppSession
         try
         {
             Save();
+            ClearRedo();
             ProjectChanged();
             // Native players show the rendered caption track, so wording and layout changes need a fresh preview too.
             if (to is null || to == PreviewShortId) SelectPreview(candidate.Id);
@@ -184,6 +191,8 @@ public sealed partial class AppSession
         try
         {
             Save();
+            redoHistory.Add(PrismJson.Clone(current));
+            Changed(nameof(CanRedo));
             ForgetLastEdit();
             ProjectChanged();
             var restored = previous.Any(s => s.Id == PreviewShortId) ? PreviewShortId : previous.FirstOrDefault()?.Id;
@@ -195,6 +204,35 @@ public sealed partial class AppSession
             project.Segments = current;
             ProjectChanged();
             return "Could not save undo: " + error.Message;
+        }
+    }
+
+    public void RedoFromEditor()
+    {
+        if (!IsBusy) Message = RedoEdit();
+    }
+
+    public string RedoEdit()
+    {
+        if (project is null || redoHistory.Count == 0) return "There isn’t an edit to redo yet.";
+        var current = project.Segments;
+        var next = PrismJson.Clone(redoHistory[^1]);
+        project.Segments = next;
+        try
+        {
+            Save();
+            editHistory.Add(PrismJson.Clone(current));
+            redoHistory.RemoveAt(redoHistory.Count - 1);
+            Changed(nameof(CanUndo)); Changed(nameof(CanRedo));
+            ProjectChanged();
+            SelectPreview(next.Any(s => s.Id == PreviewShortId) ? PreviewShortId : next.FirstOrDefault()?.Id);
+            return "Redone. I restored the next timeline edit.";
+        }
+        catch (Exception error)
+        {
+            project.Segments = current;
+            ProjectChanged();
+            return "Could not save redo: " + error.Message;
         }
     }
 
@@ -211,6 +249,7 @@ public sealed partial class AppSession
         try
         {
             Save();
+            ClearRedo();
             ProjectChanged();
             if (wasPreviewed) SelectPreview(next);
             Message = "Removed Short. Use Undo to restore it.";
@@ -339,9 +378,17 @@ public sealed partial class AppSession
             || to < 0 || to > active.Duration || position < 0 || position > 1) return;
         ApplyEdit((segment, _) =>
         {
-            var stored = position - ((segment.CropPosition ?? 0.5) - 0.5);
+            var bias = (segment.CropPosition ?? 0.5) - 0.5;
+            var stored = position - bias;
             var points = segment.CropKeyframes is null
                 ? new List<CropKeyframe> { new(0, 0.5), new(segment.Duration, 0.5) } : new List<CropKeyframe>(segment.CropKeyframes);
+            if (stored is < 0 or > 1)
+            {
+                // Keep the current visible path while making the full 0–1 focus range reachable.
+                points = points.Select(p => p with { Position = Math.Clamp(p.Position + bias, 0, 1) }).ToList();
+                segment.CropPosition = 0.5;
+                stored = position;
+            }
             var nearest = points.Count == 0 ? -1 : Enumerable.Range(0, points.Count).MinBy(i => Math.Abs(points[i].Time - (insert ? to : from)));
             if (insert)
             {
@@ -388,6 +435,7 @@ public sealed partial class AppSession
         try
         {
             Save();
+            ClearRedo();
             ProjectChanged();
             SelectPreview(clip.Id);
             Message = "Clip added. Adjust its timing in the inspector.";

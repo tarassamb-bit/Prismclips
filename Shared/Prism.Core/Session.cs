@@ -209,12 +209,12 @@ public sealed partial class AppSession : INotifyPropertyChanged, IDisposable
     // Create flow settings
 
     int shortCount = 3;
-    public int ShortCount { get => shortCount; set => Set(ref shortCount, Math.Clamp(value, 1, 10)); }
+    public int ShortCount { get => shortCount; set => Set(ref shortCount, Math.Clamp(value, 1, 20)); }
     double shortDuration = 30;
     public double ShortDuration { get => shortDuration; set => Set(ref shortDuration, value); }
     SourceRegion shortSourceRegion = SourceRegion.EntireVideo;
     public SourceRegion ShortSourceRegion { get => shortSourceRegion; set => Set(ref shortSourceRegion, value); }
-    CaptionStyle shortCaptionStyle = CaptionStyle.Classic;
+    CaptionStyle shortCaptionStyle = CaptionStyle.Auto;
     public CaptionStyle ShortCaptionStyle { get => shortCaptionStyle; set => Set(ref shortCaptionStyle, value); }
     VideoType shortVideoType = VideoType.Auto;
     /// <summary>Chosen after captions, so it never overrides the caption style picked on the step before.</summary>
@@ -232,6 +232,8 @@ public sealed partial class AppSession : INotifyPropertyChanged, IDisposable
 
     List<List<EditSegment>> editHistory = [];
     public bool CanUndo => editHistory.Count > 0;
+    readonly List<List<EditSegment>> redoHistory = [];
+    public bool CanRedo => redoHistory.Count > 0;
     const string EditingAIName = "Gemini";
 
     List<string> recentProjectPaths = [];
@@ -331,9 +333,10 @@ public sealed partial class AppSession : INotifyPropertyChanged, IDisposable
         return text + " " + note;
     }
 
-    public void SaveGeminiKey()
+    public void SaveGeminiKey() => SaveGeminiKey(geminiKey.Trim());
+
+    void SaveGeminiKey(string key)
     {
-        var key = geminiKey.Trim();
         try { platform.KeyStore.Save(key); }
         catch (Exception error) { GeminiKeyStatus = $"Could not save the Gemini key: {error.Message}"; return; }
         cachedGeminiKey = key;
@@ -414,7 +417,7 @@ public sealed partial class AppSession : INotifyPropertyChanged, IDisposable
             unconfirmed = $"Saved. Google couldn’t confirm the key right now ({error.Message}); Prism will use it when Google answers.";
         }
         IsTestingGemini = false;
-        SaveGeminiKey();
+        SaveGeminiKey(key);
         if (unconfirmed is not null && IsGeminiKeySaved && GeminiKey.Length == 0) GeminiKeyStatus = unconfirmed;
     }
 

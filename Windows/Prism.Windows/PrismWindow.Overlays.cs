@@ -234,6 +234,16 @@ public sealed partial class PrismWindow
 
     static TextBlock Label12(string title) { var label = Text(title, 12, muted: true); label.FontWeight = FontWeights.Medium; return label; }
 
+    /// Escape closes the popup that offers a way out, as Cancel or Close would; progress, the key gate and work in flight stay.
+    bool Dismiss()
+    {
+        if (localCard is not null) { CloseLocal(); return true; }
+        if (modalKind.StartsWith("error:", StringComparison.Ordinal)) { session.GenerationError = null; return true; }
+        if (modalKind.StartsWith("done:", StringComparison.Ordinal)) { session.ExportSummary = null; return true; }
+        if (modalKind == "export") { session.ExportChoice = null; return true; }
+        return false;
+    }
+
     void ShowLocal(Border card) { localCard = card; localRevision++; RefreshModal(); }
     void CloseLocal() { localCard = null; RefreshModal(); }
     void ShowNotice(string title, string message)

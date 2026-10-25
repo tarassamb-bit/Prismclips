@@ -73,7 +73,11 @@ enum TranscriptSelection {
         func tokens(_ text: String) -> [String] { text.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init) }
         let expected = reference.flatMap { tokens($0.text) }
         let actual = words.flatMap { tokens($0.text) }
-        guard !expected.isEmpty, !actual.isEmpty, actual.first == expected.first, actual.last == expected.last,
+        // The edges may differ by a word or two (a dropped "so", an added "uh"); the overlap check below still
+        // demands 95% of the words, so a lost payoff is still caught.
+        guard !expected.isEmpty, !actual.isEmpty,
+              expected.prefix(3).contains(actual[0]) || actual.prefix(3).contains(expected[0]),
+              expected.suffix(3).contains(actual[actual.count - 1]) || actual.suffix(3).contains(expected[expected.count - 1]),
               actual.count <= expected.count * 3 / 2 + 3 else { return false }
         var previous = [Int](repeating: 0, count: actual.count + 1)
         for token in expected {
@@ -118,9 +122,9 @@ enum TranscriptSelection {
         return (beginning, min(interval.end, end + tail) - beginning)
     }
 
+    /// Shorts never share footage: only a touch under 0.3 s, where one ends as the next begins, is allowed.
     static func overlaps(start: Double, duration: Double, otherStart: Double, otherDuration: Double) -> Bool {
-        let intersection = min(start + duration, otherStart + otherDuration) - max(start, otherStart)
-        return intersection > 0 && intersection / max(0.000001, min(duration, otherDuration)) >= 0.25
+        min(start + duration, otherStart + otherDuration) - max(start, otherStart) > 0.3
     }
 
     /// Moves a range's edges out of the middle of a sentence; `cues` must be whole sentences (the cloud transcript).

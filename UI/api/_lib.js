@@ -35,12 +35,13 @@ function requireEnv(...names) {
 // Every outside call gets a timeout, so a slow service fails with a clear error instead of hanging the function.
 async function call(service, url, init = {}) {
   let response;
+  let text;
   try {
     response = await fetch(url, { ...init, signal: AbortSignal.timeout(8000) });
+    text = await response.text();
   } catch (error) {
     throw new HttpError(502, `${service} didn’t respond. Please try again.`);
   }
-  const text = await response.text();
   let body = null;
   try { body = text ? JSON.parse(text) : null; } catch {}
   return { response, body, text };
@@ -52,6 +53,7 @@ async function paddle(path, init = {}) {
     headers: { Authorization: `Bearer ${process.env.PADDLE_API_KEY}`, 'Content-Type': 'application/json' },
   });
   if (!response.ok) throw new HttpError(response.status === 404 ? 404 : 502, body?.error?.detail || `Paddle returned ${response.status}.`);
+  if (!body || typeof body !== 'object' || body.data == null) throw new HttpError(502, 'Paddle returned an incomplete response. Please try again.');
   return body.data;
 }
 

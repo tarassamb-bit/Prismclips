@@ -165,15 +165,16 @@ public static class Gemini
     /// <summary>Seconds Gemini asks us to wait, from Retry-After or the error's RetryInfo ("37s").</summary>
     public static double? RetryDelay(HttpResponseMessage response, string body)
     {
-        if (response.Headers.RetryAfter?.Delta is { } delta) return delta.TotalSeconds;
+        if (response.Headers.RetryAfter?.Delta is { } delta && delta.TotalSeconds >= 0) return delta.TotalSeconds;
         if (response.Headers.TryGetValues("Retry-After", out var values) && double.TryParse(values.FirstOrDefault(), System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var seconds)) return seconds;
+                System.Globalization.CultureInfo.InvariantCulture, out var seconds) && double.IsFinite(seconds) && seconds >= 0) return seconds;
         try
         {
             using var json = JsonDocument.Parse(body);
             foreach (var detail in json.RootElement.GetProperty("error").GetProperty("details").EnumerateArray())
                 if (detail.TryGetProperty("retryDelay", out var value) && value.GetString() is { } text && text.EndsWith('s')
-                    && double.TryParse(text[..^1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsed))
+                    && double.TryParse(text[..^1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsed)
+                    && double.IsFinite(parsed) && parsed >= 0)
                     return parsed;
         }
         catch (Exception) { }

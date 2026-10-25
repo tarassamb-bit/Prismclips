@@ -5,6 +5,66 @@ namespace Prism.Core.Tests;
 
 public class SelectionTests
 {
+    [Theory]
+    [InlineData(VideoType.Podcast, false, CaptionStyle.Podcast)]
+    [InlineData(VideoType.General, true, CaptionStyle.Podcast)]
+    [InlineData(VideoType.Gaming, false, CaptionStyle.BoldCaps)]
+    [InlineData(VideoType.Tutorial, false, CaptionStyle.Minimal)]
+    [InlineData(VideoType.General, false, CaptionStyle.Viral)]
+    public void AutomaticCaptionsMatchTheMacVideoStyle(VideoType type, bool split, CaptionStyle expected)
+    {
+        Assert.Equal(expected, CaptionStyle.Auto.Resolved(type, split));
+        Assert.Equal(CaptionStyle.Classic, CaptionStyle.Classic.Resolved(type, split));
+        var original = new EditSegment { CaptionStyle = CaptionStyle.Auto, VideoType = type, Score = 84 };
+        var restored = PrismJson.Clone(original);
+        Assert.Equal((CaptionStyle.Auto, type, 84), (restored.CaptionStyle, restored.VideoType, restored.Score));
+    }
+
+    [Fact]
+    public async Task CancelledToolRequestsNeverStartAProcess()
+    {
+        using var stop = new CancellationTokenSource();
+        stop.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => FFmpeg.Run("a-program-that-must-not-start", [], stop.Token));
+    }
+
+    [Fact]
+    public async Task FailedOutputCallbacksStopTheirEncoderPromptly()
+    {
+        using var stop = new CancellationTokenSource();
+        try
+        {
+            var operation = FFmpeg.Run(FFmpeg.FFmpegPath,
+                ["-nostdin", "-hide_banner", "-loglevel", "error", "-re", "-f", "lavfi", "-i", "testsrc2=size=16x16:rate=2:duration=30",
+                 "-progress", "pipe:1", "-f", "null", "-"], stop.Token, _ => throw new InvalidOperationException("Progress callback failed"));
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => operation.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Equal("Progress callback failed", error.Message);
+        }
+        finally { stop.Cancel(); }
+    }
+    [Fact]
+    public void CaptionsAreIntersectedWithTheClipInsteadOfShiftedLater()
+    {
+        var segment = new EditSegment
+        {
+            Duration = 4,
+            Captions = [new("Clipped", -1, 2), new("Already over", -3, 1)],
+        };
+        var caption = Assert.Single(CaptionRenderer.Elements(segment));
+        Assert.Equal((0d, 1d), (caption.Start, caption.Duration));
+        segment.Captions = null;
+        segment.Caption = "Overlay"; segment.CaptionStart = -1; segment.CaptionDuration = 2;
+        Assert.Equal(1, Assert.Single(CaptionRenderer.Elements(segment)).Duration);
+    }
+
+    [Fact]
+    public void VeryShortCaptionIntervalsKeepTheirTimeAndDoNotCrash()
+    {
+        var root = Path.Combine(TestSetup.Root, $"tiny-captions-{Guid.NewGuid()}");
+        var file = CaptionRenderer.WriteTrack(new EditSegment { Duration = 0.0001, Caption = "Hi" }, root, 32, 64);
+        Assert.NotNull(file);
+        Assert.Contains("duration 0.0001", File.ReadAllText(file));
+    }
     static TimedCaption Cue(string text, double start, double duration) => new(text, start, duration);
 
     [Fact]
@@ -134,6 +194,17 @@ public class SelectionTests
 
 public class GeminiTests
 {
+    [Theory]
+    [InlineData("-1")]
+    [InlineData("-Infinity")]
+    [InlineData("Infinity")]
+    [InlineData("NaN")]
+    public void MalformedRetryDelaysAreIgnored(string delay)
+    {
+        using var response = new HttpResponseMessage(System.Net.HttpStatusCode.TooManyRequests);
+        response.Headers.TryAddWithoutValidation("Retry-After", delay);
+        Assert.Null(Gemini.RetryDelay(response, JsonSerializer.Serialize(new { error = new { details = new[] { new { retryDelay = delay + "s" } } } })));
+    }
     [Fact]
     public async Task BusyServersAreRetriedThenOtherModelsTried()
     {

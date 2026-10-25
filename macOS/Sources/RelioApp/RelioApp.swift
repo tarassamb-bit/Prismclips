@@ -2,16 +2,11 @@ import SwiftUI
 import AVKit
 import AppKit
 
-struct RelioChatMessage: Identifiable {
-    let id = UUID()
-    let isUser: Bool
-    let text: String
-}
-
 @main
 struct RelioApp: App {
     @State private var model = AppModel()
-    @AppStorage(PrismAppearance.storageKey) private var appearance = PrismAppearance.dark
+    @State private var updater = AppUpdater()
+    @AppStorage(PrismAppearance.storageKey) private var appearance = PrismAppearance.system
     init() { Prism.registerFonts() }
     var body: some Scene {
         WindowGroup("Prism") {
@@ -21,6 +16,50 @@ struct RelioApp: App {
                 .font(Prism.text(13))
                 .foregroundStyle(Prism.text)
                 .buttonStyle(.prismSecondary)
+                .environment(updater)
+        }
+        .commands { PrismCommands(model: model, updater: updater) }
+    }
+}
+
+/// The menu bar: File for new, open and export, Edit's Undo for both text and Short edits, and Settings under the app menu.
+struct PrismCommands: Commands {
+    let model: AppModel
+    let updater: AppUpdater
+    var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            Button("Check for Updates…") { updater.checkForUpdates() }
+                .disabled(!updater.isEnabled || !model.canUseMenus)
+        }
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") { model.showSettings() }
+                .keyboardShortcut(",", modifiers: .command).disabled(!model.canUseMenus)
+        }
+        CommandGroup(replacing: .newItem) {
+            Button("New Shorts Project") { model.startLongVideoToShort() }
+                .keyboardShortcut("n", modifiers: .command).disabled(!model.canUseMenus)
+            Button("Open Video…") { model.openVideoFromMenu() }
+                .keyboardShortcut("o", modifiers: .command).disabled(!model.canUseMenus)
+            Button("Open Project…") { model.openProject() }
+                .keyboardShortcut("o", modifiers: [.command, .shift]).disabled(!model.canUseMenus)
+        }
+        CommandGroup(after: .newItem) {
+            Divider()
+            Button("Export…") { model.chooseExport() }
+                .keyboardShortcut("e", modifiers: .command).disabled(!model.canExport)
+            Button("Show Exports in Finder") { model.revealExports() }
+                .disabled(model.project == nil)
+        }
+        CommandGroup(before: .sidebar) {
+            Button(model.isSidebarCollapsed ? "Show Sidebar" : "Hide Sidebar") { model.isSidebarCollapsed.toggle() }
+                .keyboardShortcut("s", modifiers: [.command, .control])
+                .disabled(model.screen == .editor || !model.hasAIAccess)
+        }
+        CommandGroup(replacing: .undoRedo) {
+            Button("Undo") { model.undoFromMenu() }
+                .keyboardShortcut("z", modifiers: .command)
+            Button("Redo") { model.redoFromMenu() }
+                .keyboardShortcut("z", modifiers: [.command, .shift])
         }
     }
 }
@@ -29,9 +68,15 @@ struct RelioApp: App {
 final class AppModel {
     enum Screen { case home, create, importSource, editor, settings }
     var screen: Screen = .home {
-        didSet { if screen == .editor { isStartingNewVideo = false } }
+        didSet {
+            if screen == .editor { isStartingNewVideo = false }
+            // Back on Home, cards and Shorts counts reload, so Shorts made meanwhile show up.
+            if screen == .home && oldValue != .home { projectListRevision += 1 }
+        }
     }
     var isStartingNewVideo = false
+    /// Prism opens with the narrow icon sidebar; expanding it lasts until the app quits.
+    var isSidebarCollapsed = true
     /// The preview fills the app window.
     var isPlayerExpanded = false
     /// The Short the current player shows; its captions are drawn over the live preview.
@@ -50,13 +95,16 @@ final class AppModel {
     var generationError: GenerationFailure?
     /// The popup's title, advice and buttons follow `kind`, so a busy server is never blamed on the video or its range.
     struct GenerationFailure {
-        enum Kind { case noMoments, settings, temporary, other }
+        enum Kind { case noMoments, settings, temporary, limit, other }
+        /// Raised when Supabase refuses a run: the same limit message as the one kept on this Mac.
+        struct Refusal: LocalizedError { let message: String; var errorDescription: String? { message } }
         var message: String
         var kind: Kind
     }
 
     /// What a failed run needs: another range, a Settings change, or simply another try later.
     nonisolated static func failureKind(_ error: Error) -> GenerationFailure.Kind {
+        if error is GenerationFailure.Refusal { return .limit }
         let error = (error as? GeminiSelection.StageFailure)?.underlying ?? error
         if error is URLError { return .temporary }
         guard let failure = error as? GeminiSelection.Failure else {
@@ -66,8 +114,10 @@ final class AppModel {
         case .noStrongClips, .noDistinctClips, .requestTooLarge: return .noMoments
         case .invalidConfiguration: return .settings
         case .request(let status): return [400, 401, 403, 404].contains(status) ? .settings : .temporary
+        case .server(let status, _): return [400, 401, 403, 404].contains(status) ? .settings : .temporary
         case .invalidResponse, .invalidTiming: return .temporary
         case .audioExport: return .other
+        case .signInUnavailable: return .settings
         }
     }
     private var generationTask: Task<Void, Never>?
@@ -75,7 +125,6 @@ final class AppModel {
     var isExporting = false
     /// Set when an export finishes; shown as a popup with a Finder shortcut.
     var exportSummary: String?
-    let account = Account()
     func cancelGeneration() {
         guard generationTask != nil else { return }
         generationStage = "Cancelling…"
@@ -90,32 +139,22 @@ final class AppModel {
     var isPreviewLoading = false
     var previewError: String?
     private var subjectTrackingRevision: Int?
+    /// Prism AI is framing the previewed Short; the preview waits, the rest of the editor doesn't.
+    var isFramingPreview: Bool { subjectTrackingRevision != nil }
     var projectURL: URL?
     var store: ProjectStore?
     let machine = MachineProfile.detect()
+    /// The optional Prism account: sign-in and one stats row per finished export. Nothing else leaves the Mac.
+    let account = Account()
     var creatorPreferences = ""
     var sourcePath = ""
-    var geminiModel = UserDefaults.standard.string(forKey: "shorts.geminiModel") ?? "gemini-3.1-flash-lite"
-    var geminiKey = ""
-    var revealedGeminiKey = ""
-    private var cachedGeminiKey = ""
-    /// Tests set this so the model never reads the person's real key from Keychain or calls Gemini.
-    var didLoadGeminiKeyFromKeychain = false
-    var isGeminiKeySaved = UserDefaults.standard.bool(forKey: "shorts.geminiKeySaved")
-    var isEditingGeminiKey = false
-    var isShowingGeminiKey = false
-    // Do not query Keychain while the app is launching. On macOS this can raise
-    // an access dialog before the user has chosen to use Cloud AI.
-    var geminiKeyStatus = UserDefaults.standard.bool(forKey: "shorts.geminiKeySaved")
-        ? "Your API key is saved securely in Keychain. For security, the saved value stays hidden."
-        : ""
-    /// Google refused the last key that was checked; the key card shows the reason as a warning.
-    var geminiKeyRejected = false
-    var isTestingGemini = false
     var shortCount = 3
-    var shortDuration = 30.0
+    /// Prism AI decides how many Shorts the video holds instead of a fixed count.
+    var isShortCountAuto = true
+    /// Approximate Short length in seconds; 0 is Auto, where Prism AI gives each Short the length its story needs.
+    var shortDuration = 0.0
     var shortSourceRegion = ShortMaker.SourceRegion.entireVideo
-    var shortCaptionStyle: CaptionStyle = .classic
+    var shortCaptionStyle: CaptionStyle = .auto
     /// Chosen after captions, so it never overrides the caption style picked on the step before.
     var shortVideoType: VideoType = .auto
     var customStartMinutes = "0"
@@ -143,17 +182,13 @@ final class AppModel {
         // Round down so a displayed value never exceeds the actual source duration.
         customEndMinutes = String(format: "%.6f", floor(video.duration / 60 * 1_000_000) / 1_000_000)
     }
-    var chatInput = ""
-    var chatMessages: [RelioChatMessage] = [
-        .init(isUser: false, text: "Tell me what you want to make. I can analyze the imported video, plan a Short, and prepare it for export.")
-    ]
     var editHistory: [[EditSegment]] = []
-    let editingAIName = "Gemini"
+    var redoHistory: [[EditSegment]] = []
     var recentProjectPaths: [String] = UserDefaults.standard.stringArray(forKey: "recentProjects") ?? []
     let libraryURL: URL
 
-    init() {
-        let app = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Relio")
+    init(appDirectory: URL? = nil) {
+        let app = appDirectory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Relio")
         libraryURL = app.appendingPathComponent("Library")
         try? FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: libraryURL.appendingPathComponent("Projects"), withIntermediateDirectories: true)
@@ -162,61 +197,12 @@ final class AppModel {
         restoreSavedProjects()
         screen = .home
     }
-    func saveGeminiKey() {
-        do {
-            try GeminiKeyStore.save(geminiKey)
-            let saved = !geminiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            cachedGeminiKey = geminiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-            didLoadGeminiKeyFromKeychain = true
-            isGeminiKeySaved = saved
-            UserDefaults.standard.set(saved, forKey: "shorts.geminiKeySaved")
-            if saved {
-                // Request Keychain access at save time, when the user expects setup prompts.
-                // Cache the just-entered key so tests and edits don't re-prompt in this session.
-                let accessGranted = GeminiKeyStore.read() == cachedGeminiKey
-                geminiKeyStatus = accessGranted
-                    ? "Saved securely. Choose Always Allow in the macOS prompt to avoid future prompts."
-                    : "Saved securely. macOS access is pending; choose Always Allow when prompted."
-            } else {
-                geminiKeyStatus = "Saved key removed."
-                cachedGeminiKey = ""
-            }
-            geminiKey = ""
-            isEditingGeminiKey = false
-            isShowingGeminiKey = false
-            revealedGeminiKey = ""
-        } catch { geminiKeyStatus = error.localizedDescription }
-    }
-    func editGeminiKey() {
-        geminiKey = ""
-        isShowingGeminiKey = false
-        revealedGeminiKey = ""
-        isEditingGeminiKey = true
-    }
-    func cancelGeminiKeyEdit() {
-        geminiKey = ""
-        isEditingGeminiKey = false
-    }
-    func toggleGeminiKeyVisibility() {
-        if isShowingGeminiKey {
-            revealedGeminiKey = ""
-            isShowingGeminiKey = false
-            return
-        }
-        let savedKey = geminiAPIKey()
-        guard !savedKey.isEmpty else {
-            geminiKeyStatus = "Could not read the saved key from Keychain. You can replace it here."
-            return
-        }
-        revealedGeminiKey = savedKey
-        isShowingGeminiKey = true
-    }
-    /// Gemini is Prism's only AI; nil when no key is saved. Every task shows its retries while they happen, and a switch
-    /// to another model is added to the task's final message (`withModelNote`).
+    /// The AI configuration for a signed-in person: requests go through Prism's server. nil when signed out.
     func geminiConfiguration() -> GeminiConfiguration? {
-        let key = geminiAPIKey()
-        guard !key.isEmpty else { return nil }
-        var configuration = GeminiConfiguration(apiKey: key, model: geminiModel)
+        guard account.isSignedIn else { return nil }
+        var configuration = GeminiConfiguration()
+        let account = self.account
+        configuration.accessToken = { await account.currentAccessToken() }
         configuration.onRetry = { note in
             Task { @MainActor in
                 self.message = note
@@ -235,90 +221,82 @@ final class AppModel {
         modelFallbackNote = nil
         return text + " " + note
     }
-    func geminiAPIKey() -> String {
-        guard !didLoadGeminiKeyFromKeychain else { return cachedGeminiKey }
-        cachedGeminiKey = GeminiKeyStore.read()
-        didLoadGeminiKeyFromKeychain = true
-        return cachedGeminiKey
-    }
-    /// Checks the typed key with one tiny Gemini request, then saves it. A key Google refuses is never saved. When Google
-    /// is busy or the Mac is offline the key is saved anyway, so an outage can't lock anyone out of the app.
-    func verifyAndSaveGeminiKey() {
-        let key = geminiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty, !isTestingGemini else { return }
-        isTestingGemini = true
-        geminiKeyRejected = false
-        geminiKeyStatus = "Checking your key with Google…"
-        let configuration = GeminiConfiguration(apiKey: key, model: geminiModel)
-        Task {
-            defer { isTestingGemini = false }
-            var unconfirmed: String?
-            do {
-                struct Check: Decodable { let ok: Bool }
-                let _: Check = try await GeminiSelection.generate(parts: [["text": "Return ok true."]],
-                    schema: ["type": "OBJECT", "properties": ["ok": ["type": "BOOLEAN"]], "required": ["ok"]], configuration: configuration)
-            } catch GeminiSelection.Failure.request(let status) where [400, 401, 403].contains(status) {
-                geminiKeyRejected = true
-                geminiKeyStatus = "Google didn’t accept this key (HTTP \(status)). Copy the whole key from Google AI Studio and paste it again."
-                return
-            } catch {
-                unconfirmed = "Saved. Google couldn’t confirm the key right now (\(error.localizedDescription)); Prism will use it when Google answers."
-            }
-            saveGeminiKey()
-            if let unconfirmed { geminiKeyStatus = unconfirmed }
-        }
-    }
-
-    func testGeminiKey() {
-        guard !isTestingGemini else { return }
-        let key = geminiAPIKey()
-        guard !key.isEmpty else { geminiKeyStatus = "Save a Google AI Studio key first."; return }
-        guard let configuration = geminiConfiguration() else { return }
-        modelFallbackNote = nil
-        isTestingGemini = true
-        geminiKeyStatus = "Testing Gemini access…"
-        Task {
-            defer { isTestingGemini = false }
-            do {
-                struct Check: Decodable { let ok: Bool }
-                let result: Check = try await GeminiSelection.generate(parts: [["text": "Return ok true."]],
-                    schema: ["type": "OBJECT", "properties": ["ok": ["type": "BOOLEAN"]], "required": ["ok"]], configuration: configuration)
-                geminiKeyStatus = result.ok ? withModelNote("Connected. Gemini is ready for cloud editing.") : "Gemini returned an unexpected response."
-            } catch { geminiKeyStatus = error.localizedDescription }
-        }
-    }
     func create() {
         guard !isBusy else { return }
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH-mm-ss"
         let name = "Video \(formatter.string(from: .now))"
-        let url = libraryURL.appendingPathComponent("Projects").appendingPathComponent("\(name).relio")
+        let url = libraryURL.appendingPathComponent("Projects").appendingPathComponent("\(name) \(UUID().uuidString).relio")
         do {
             try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: url.appendingPathComponent("Media"), withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: url.appendingPathComponent("Exports"), withIntermediateDirectories: true)
+            let nextStore = try ProjectStore(root: url)
+            let nextProject = ProjectData(name: name)
+            try nextStore.save(nextProject, key: "project")
             projectURL = url
-            store = try ProjectStore(root: url)
+            store = nextStore
             player?.pause()
             player = nil
             selection = nil
             previewShortID = nil
+            previewSegment = nil
+            timingShortIDs = []
             isPreviewLoading = false
             previewError = nil
             previewRevision += 1
             sourcePath = ""
             editHistory = []
+            redoHistory = []
             exportedFiles = []
             lastExportFolder = nil
-            chatMessages = []
-            project = ProjectData(name: name)
-            try save()
+            project = nextProject
+            lastSavedAt = .now
             UserDefaults.standard.set(url.path, forKey: "lastProject")
             remember(url)
             screen = .editor
             message = "Import a long video to make your first Short."
         } catch { message = "Could not create project: \(error.localizedDescription)" }
     }
+    /// Menu commands stay off while a task runs or the Prism AI key gate covers the window.
+    /// AI works with a signed-in account (the server holds the key) or with an older key saved on this Mac.
+    var hasAIAccess: Bool { account.isSignedIn }
+    /// Set by the sign-in gate, so Settings opens on its Account page.
+    var opensAccountSettings = false
+    var canUseMenus: Bool { !isBusy && hasAIAccess }
+    var canExport: Bool { canUseMenus && screen == .editor && project?.media.isEmpty == false && exportChoice == nil }
+
+    func showSettings() {
+        guard canUseMenus else { return }
+        player?.pause()
+        screen = .settings
+    }
+
+    /// File › Open Video: the same flow as Create Shorts, starting with the file picker.
+    func openVideoFromMenu() {
+        guard canUseMenus else { return }
+        startLongVideoToShort()
+        importVideo()
+    }
+
+    /// Edit › Undo: text being typed undoes its own typing; otherwise the editor undoes the last Short edit.
+    func undoFromMenu() {
+        if NSApplication.shared.keyWindow?.firstResponder is NSText {
+            NSApplication.shared.sendAction(Selector(("undo:")), to: nil, from: nil)
+        } else if screen == .editor, generationError == nil, exportChoice == nil, exportSummary == nil, !editHistory.isEmpty {
+            undoFromEditor()
+        }
+    }
+
+    /// Text fields keep their own redo history; elsewhere, restore the last undone clip edit.
+    func redoFromMenu() {
+        if NSApplication.shared.keyWindow?.firstResponder is NSText {
+            NSApplication.shared.sendAction(Selector(("redo:")), to: nil, from: nil)
+        } else if screen == .editor, generationError == nil, exportChoice == nil, exportSummary == nil, !redoHistory.isEmpty {
+            redoFromEditor()
+        }
+    }
+
     func startLongVideoToShort() {
         guard !isBusy else { return }
         player?.pause()
@@ -343,20 +321,21 @@ final class AppModel {
             guard var p = try s.load(ProjectData.self, key: "project") else { throw ProjectStore.StoreError.database }
             // Resolve managed assets relative to the project when a project folder is moved.
             for index in p.media.indices {
-                let relocated = url.appendingPathComponent("Media").appendingPathComponent(URL(fileURLWithPath: p.media[index].path).lastPathComponent)
+                let relocated = url.appendingPathComponent("Media").appendingPathComponent(p.media[index].name)
                 if FileManager.default.fileExists(atPath: relocated.path) { p.media[index].path = relocated.path }
                 if let thumbnail = p.media[index].thumbnail {
-                    let relocatedThumbnail = url.appendingPathComponent("Thumbnails").appendingPathComponent(URL(fileURLWithPath: thumbnail).lastPathComponent)
+                    let relocatedThumbnail = url.appendingPathComponent("Thumbnails").appendingPathComponent(MediaItem.fileName(in: thumbnail))
                     if FileManager.default.fileExists(atPath: relocatedThumbnail.path) { p.media[index].thumbnail = relocatedThumbnail.path }
                 }
             }
-            editHistory = []; exportedFiles = []; lastExportFolder = nil; chatMessages = []; store = s; project = p; projectURL = url; selection = p.media.first?.id
+            editHistory = []; redoHistory = []; exportedFiles = []; lastExportFolder = nil; timingShortIDs = []; previewSegment = nil; store = s; project = p; projectURL = url; selection = p.media.first?.id
             lastSavedAt = (try? url.appendingPathComponent("project.sqlite").resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
             UserDefaults.standard.set(url.path, forKey: "lastProject")
             remember(url)
             screen = .editor
-            selectPreview(nil)
-            message = "Project ready."
+            // A project opens on its first Short, the thing you came to review; the source is one click away.
+            selectPreview(p.segments.first?.id)
+            message = ""
         } catch { message = "Could not open project: \(error.localizedDescription)" }
     }
     private func remember(_ url: URL) {
@@ -366,7 +345,8 @@ final class AppModel {
     }
     private func restoreSavedProjects() {
         let fileManager = FileManager.default
-        var paths = recentProjectPaths.filter { fileManager.fileExists(atPath: $0) }
+        var seen = Set<String>()
+        var paths = recentProjectPaths.filter { fileManager.fileExists(atPath: $0) && seen.insert($0).inserted }
         let knownPaths = Set(paths)
         let projectsDirectory = libraryURL.appendingPathComponent("Projects", isDirectory: true)
         let folders = (try? fileManager.contentsOfDirectory(at: projectsDirectory,
@@ -387,7 +367,8 @@ final class AppModel {
     var lastSavedAt: Date?
     func save() throws {
         guard let project else { return }
-        try store?.save(project, key: "project")
+        guard let store else { throw ProjectStore.StoreError.database }
+        try store.save(project, key: "project")
         lastSavedAt = .now
     }
 
@@ -404,11 +385,12 @@ final class AppModel {
 
     /// The same video's cloud transcript from another project (same name, length, size and file size),
     /// so starting over with a video you used before skips uploading and transcribing it again.
-    private func transcriptFromOtherProjects(matching video: MediaItem) -> SentenceTranscript? {
+    /// It opens every listed project, so it runs off the main thread.
+    nonisolated private static func transcript(matching video: MediaItem, inProjects paths: [String]) -> SentenceTranscript? {
         func fileSize(_ path: String) -> Int? { (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int) ?? nil }
         let size = fileSize(video.path)
         var best: SentenceTranscript?
-        for path in recentProjectPaths where path != projectURL?.path {
+        for path in paths {
             guard let other = try? ProjectStore(root: URL(fileURLWithPath: path), create: false).load(ProjectData.self, key: "project") else { continue }
             for media in other.media where media.name == video.name && abs(media.duration - video.duration) < 0.01
                 && media.width == video.width && media.height == video.height && fileSize(media.path) == size {
@@ -448,6 +430,7 @@ final class AppModel {
     func moveProject(_ path: String, toFolder id: UUID?) {
         // Drops can carry any text; only known projects belong in folders.
         guard id == nil || recentProjectPaths.contains(path) else { return }
+        guard id == nil || projectFolders.contains(where: { $0.id == id }) else { return }
         for index in projectFolders.indices { projectFolders[index].projectPaths.removeAll { $0 == path } }
         if let id, let index = projectFolders.firstIndex(where: { $0.id == id }) {
             projectFolders[index].projectPaths.insert(path, at: 0)
@@ -464,8 +447,10 @@ final class AppModel {
         do {
             // The open project is saved from memory, so change it there or the next save would undo the rename.
             if projectURL?.path == path, project != nil {
+                let previous = project?.title
                 project?.title = title
-                try save()
+                do { try save() }
+                catch { project?.title = previous; throw error }
             } else {
                 let projectStore = try ProjectStore(root: URL(fileURLWithPath: path), create: false)
                 guard var stored = try projectStore.load(ProjectData.self, key: "project") else { throw ProjectStore.StoreError.database }
@@ -478,20 +463,34 @@ final class AppModel {
     }
 
     /// Moves the project folder to the Trash, where it can still be restored.
-    func deleteProject(at path: String) {
+    func deleteProject(at path: String, moveToTrash: (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }) {
         guard !isBusy else { return }
-        if projectURL?.path == path {
+        let deletingOpen = projectURL?.path == path
+        let previousSelection = selection
+        let previousShort = previewShortID
+        if deletingOpen {
             player?.pause(); player = nil
-            project = nil; store = nil; projectURL = nil; editHistory = []; previewSegment = nil; lastSavedAt = nil
-            UserDefaults.standard.removeObject(forKey: "lastProject")
+            previewRevision += 1; subjectTrackingRevision = nil; store = nil
         }
         do {
-            try FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
+            try moveToTrash(URL(fileURLWithPath: path))
+            if deletingOpen {
+                project = nil; projectURL = nil; editHistory = []; redoHistory = []; previewSegment = nil; lastSavedAt = nil
+                selection = nil; previewShortID = nil; isPreviewLoading = false; previewError = nil
+                UserDefaults.standard.removeObject(forKey: "lastProject")
+            }
             recentProjectPaths.removeAll { $0 == path }
             UserDefaults.standard.set(recentProjectPaths, forKey: "recentProjects")
             moveProject(path, toFolder: nil)
             message = "Moved the project to the Trash."
-        } catch { message = "Could not delete project: \(error.localizedDescription)" }
+        } catch {
+            if deletingOpen {
+                store = try? ProjectStore(root: URL(fileURLWithPath: path), create: false)
+                selection = previousSelection
+                selectPreview(previousShort)
+            }
+            message = "Could not delete project: \(error.localizedDescription)"
+        }
     }
     func importVideo() {
         guard !isBusy else { return }
@@ -511,10 +510,10 @@ final class AppModel {
         }
         importSource(url)
     }
+    static let importableExtensions: Set<String> = ["mov", "mp4", "m4v", "avi"]
     func importSource(_ url: URL) {
         guard !isBusy else { return }
-        let allowed = ["mov", "mp4", "m4v", "avi"]
-        guard allowed.contains(url.pathExtension.lowercased()) else {
+        guard Self.importableExtensions.contains(url.pathExtension.lowercased()) else {
             message = "Choose a MOV, MP4, M4V, or AVI video."
             return
         }
@@ -535,12 +534,8 @@ final class AppModel {
             try? FileManager.default.createDirectory(at: mediaDirectory, withIntermediateDirectories: true)
             let copiedURL = uniqueDestination(for: url, in: mediaDirectory)
             do {
-                // copyItem clones on APFS: instant and no extra disk space when the video is on the same drive.
-                try await Task.detached(priority: .userInitiated) {
-                    try FileManager.default.copyItem(at: url, to: copiedURL)
-                }.value
+                try await ShortMaker.copySource(url, to: copiedURL)
             } catch {
-                try? FileManager.default.removeItem(at: copiedURL)
                 message = "Could not copy video: \(error.localizedDescription)"
                 isBusy = false
                 return
@@ -555,9 +550,6 @@ final class AppModel {
                 let replaced = !returnToEditor && project?.segments.isEmpty == true ? previousMedia : []
                 project?.media = previousMedia.filter { media in !replaced.contains { $0.id == media.id } } + [item]
                 for old in replaced { project?.transcripts?[old.id.uuidString] = nil }
-                selection = item.id
-                resetSourceRange(for: item)
-                player = AVPlayer(url: copiedURL)
                 do { try save() } catch {
                     project?.media = previousMedia
                     project?.transcripts = previousTranscripts
@@ -566,6 +558,11 @@ final class AppModel {
                     isBusy = false
                     return
                 }
+                selection = item.id
+                resetSourceRange(for: item)
+                player?.pause()
+                player = AVPlayer(url: copiedURL)
+                previewSegment = nil
                 // Only the project's own copies are deleted, never a file outside it.
                 for path in replaced.flatMap({ [$0.path, $0.thumbnail].compactMap { $0 } }) where path.hasPrefix(projectURL.path + "/") {
                     try? FileManager.default.removeItem(atPath: path)
@@ -589,10 +586,6 @@ final class AppModel {
         }
         return destination
     }
-    func makeShort(requestedDuration: Double? = nil) {
-        guard let video = project?.media.first(where: { $0.id == selection }) ?? project?.media.first(where: { $0.kind == "video" }) else { return }
-        makeShorts(for: video, count: 1, duration: requestedDuration ?? shortDuration, sourceRegion: .entireVideo)
-    }
     func continueImport() {
         guard !isBusy, selection != nil else { return }
         screen = .editor
@@ -600,10 +593,7 @@ final class AppModel {
     }
 
     func selectPreview(_ shortID: UUID?) {
-        if subjectTrackingRevision != nil {
-            subjectTrackingRevision = nil
-            isBusy = false
-        }
+        subjectTrackingRevision = nil
         previewShortID = shortID
         previewError = nil
         isPreviewLoading = false
@@ -624,32 +614,34 @@ final class AppModel {
         selection = video.id
         player = nil
         isPreviewLoading = true
-        // Not while another job runs: tracking was the one job that could start mid-job, and its end cleared the
-        // other job's busy state. The Short previews with its saved framing and is tracked next time, or at export.
+        // Framing runs in the background: the editor stays usable and only this preview waits. Not while another job
+        // runs; the Short then previews with its saved framing and is tracked next time, or at export.
         if !isBusy, segment.cropTrackingVersion != SubjectFramer.version && segment.splitScreen != true, let configuration = geminiConfiguration() {
-            isBusy = true
             subjectTrackingRevision = revision
-            message = "Gemini is framing the main subject…"
+            message = "Prism AI is framing the main subject…"
             Task {
                 let path = await ShortMaker.analyzeSubjectPath(
                     URL(fileURLWithPath: video.path), start: segment.start, duration: segment.duration, zoom: segment.cropZoom ?? 1.08, configuration: configuration,
                             speech: segment.captions ?? []
                 )
+                // The path fits the range it was made for; a Short trimmed meanwhile is tracked again next time.
                 guard revision == previewRevision, subjectTrackingRevision == revision,
-                      let index = project?.segments.firstIndex(where: { $0.id == shortID }) else { return }
+                      let index = project?.segments.firstIndex(where: { $0.id == shortID }),
+                      project?.segments[index].start == segment.start, project?.segments[index].duration == segment.duration else { return }
+                let previous = project?.segments[index]
                 project?.segments[index].cropKeyframes = path
                 project?.segments[index].cropTrackingVersion = SubjectFramer.version
                 do {
                     try save()
                     subjectTrackingRevision = nil
-                    isBusy = false
-                    // An empty path means Gemini could not be reached or answered badly; no subject still gives a steady path.
-                    message = withModelNote(path.isEmpty ? "Gemini could not frame this Short, so the crop stays centered. Use Re-track to try again." : "Subject tracking ready.")
+                    // An empty path means Prism AI could not be reached or answered badly; no subject still gives a steady path.
+                    message = withModelNote(path.isEmpty ? "Prism AI could not frame this Short, so the crop stays centered. Use Re-track to try again." : "Subject tracking ready.")
                     selectPreview(shortID)
                 } catch {
+                    if let previous { project?.segments[index] = previous }
                     subjectTrackingRevision = nil
-                    isBusy = false
                     isPreviewLoading = false
+                    previewError = "Could not save subject tracking: \(error.localizedDescription)"
                     message = "Could not save subject tracking: \(error.localizedDescription)"
                 }
             }
@@ -674,7 +666,7 @@ final class AppModel {
 
     func makeConfiguredShorts() {
         guard let video = project?.media.first(where: { $0.id == selection }) ?? project?.media.first(where: { $0.kind == "video" }) else { return }
-        makeShorts(for: video, count: shortCount, duration: shortDuration, sourceRegion: shortSourceRegion)
+        makeShorts(for: video, count: isShortCountAuto ? 0 : shortCount, duration: shortDuration, sourceRegion: shortSourceRegion)
     }
     private func makeShorts(for video: MediaItem, count: Int, duration: Double, sourceRegion: ShortMaker.SourceRegion) {
         guard !isBusy else { return }
@@ -682,22 +674,39 @@ final class AppModel {
         let customStart = sourceRegion == .custom ? minuteSeconds(customStartMinutes) : nil
         let customEnd = sourceRegion == .custom ? minuteSeconds(customEndMinutes) : nil
         guard let configuration = geminiConfiguration() else {
-            message = "Add and save your Gemini key in Settings first."
-            generationError = .init(message: "No Gemini API key is saved. Add your Google AI Studio key in Settings.", kind: .settings)
+            message = "Sign in to your Prism account to make Shorts."
+            generationError = .init(message: "Sign in to your Prism account to make Shorts.", kind: .settings)
+            return
+        }
+        let usageKey = UsageLimit.videoKey(video)
+        let serverUsageKey = UsageLimit.serverKey(video)
+        let usageMinutes = UsageLimit.minutes(of: video)
+        if let refusal = UsageLimit.refusal(for: usageKey, minutes: usageMinutes, entries: UsageLimit.load()) {
+            message = refusal
+            generationError = .init(message: refusal, kind: .limit)
             return
         }
         modelFallbackNote = nil
         isBusy = true; generationProgress = 0; generationError = nil; generationStage = "Preparing video"; message = "Preparing video analysis…"
         let sourceURL = URL(fileURLWithPath: video.path)
         let usedRanges = (project?.segments ?? []).filter { $0.mediaID == video.id }.map { SourceInterval(start: $0.start, end: $0.start + $0.duration) }
-        var savedTranscript = project?.transcripts?[video.id.uuidString]
-        if savedTranscript == nil, let earlier = transcriptFromOtherProjects(matching: video) {
-            savedTranscript = earlier
-            storeTranscript(earlier, for: video.id)
-        }
+        let savedTranscript = project?.transcripts?[video.id.uuidString]
+        let otherProjects = recentProjectPaths.filter { $0 != projectURL?.path }
         let videoType = shortVideoType
+        Notifier.requestPermission()
         generationTask = Task {
             do {
+                // Signed in, Supabase decides; signed out or offline, only the limit kept on this Mac applies.
+                if await account.usageAllowed(video: serverUsageKey, minutes: usageMinutes, on: .now) == false {
+                    throw GenerationFailure.Refusal(message: "You've reached your video limit: \(Int(UsageLimit.perDayMinutes)) minutes a day or \(Int(UsageLimit.perWeekMinutes)) a week. You can start new videos again when it resets.")
+                }
+                var cachedTranscript = savedTranscript
+                if cachedTranscript == nil,
+                   let earlier = await Task.detached(priority: .userInitiated, operation: { Self.transcript(matching: video, inProjects: otherProjects) }).value {
+                    cachedTranscript = earlier
+                    storeTranscript(earlier, for: video.id)
+                }
+                try Task.checkCancellation()
                 let results = try await ShortMaker.analyze(
                     sourceURL,
                     requestedDuration: duration,
@@ -707,7 +716,7 @@ final class AppModel {
                     excluding: usedRanges,
                     gemini: configuration,
                     videoType: videoType,
-                    cachedTranscript: savedTranscript,
+                    cachedTranscript: cachedTranscript,
                     onTranscript: { transcript in
                         Task { @MainActor in self.storeTranscript(transcript, for: video.id) }
                     },
@@ -725,15 +734,21 @@ final class AppModel {
                           fitToFrame: $0.fitToFrame, captions: $0.captions, cropKeyframes: $0.cropKeyframes, cropTrackingVersion: SubjectFramer.version,
                           speechWords: $0.speechWords, suggestedTitle: $0.suggestedTitle, selectionReason: $0.selectionReason,
                           captionNotice: $0.analysisWarning, captionStyle: shortCaptionStyle)
+                    segment.score = $0.score
+                    segment.videoType = $0.videoType
                     // Only an explicit Podcast pick splits the frame; an auto-detected podcast may have one person on camera.
                     if videoType == .podcast { segment.splitScreen = true; segment.captionPosition = .middle }
                     return segment
                 }
-                for index in candidates.indices where candidates[index].splitScreen == true {
+                let splitIndices = candidates.indices.filter { candidates[$0].splitScreen == true }
+                if !splitIndices.isEmpty {
                     try Task.checkCancellation()
-                    generationStage = "Gemini · finding both speakers · Short \(index + 1) of \(candidates.count)"
-                    candidates[index].splitCenters = await ShortMaker.findSplitCenters(sourceURL, start: candidates[index].start, duration: candidates[index].duration,
-                                                                                       configuration: configuration)
+                    generationStage = "Prism AI · finding both speakers in \(splitIndices.count) Shorts"
+                    let ranges = splitIndices.map { (index: $0, start: candidates[$0].start, duration: candidates[$0].duration) }
+                    let centers = try await ShortMaker.concurrentMap(ranges, limit: ShortMaker.parallelRequests) { range in
+                        (range.index, await ShortMaker.findSplitCenters(sourceURL, start: range.start, duration: range.duration, configuration: configuration))
+                    }
+                    for (index, found) in centers { candidates[index].splitCenters = found }
                 }
                 try Task.checkCancellation()
                 let fresh = try appendGeneratedShorts(candidates)
@@ -741,22 +756,33 @@ final class AppModel {
                     message = "No new distinct moments were found in this range. Your existing clips were kept. Try another region or length."
                     generationError = .init(message: message, kind: .noMoments)
                     generationProgress = nil; generationTask = nil; isBusy = false
+                    Notifier.notifyIfInBackground(title: "No new Shorts found", body: message)
                     return
                 }
-                message = "Gemini selected \(fresh.count) complete clip ranges and layouts. Review framing and captions before export."
+                // Only a run that made Shorts uses up the video limit.
+                UsageLimit.record(usageKey, minutes: usageMinutes)
+                usageRevision += 1
+                let usedOn = Date.now
+                Task { await account.recordUsage(video: serverUsageKey, minutes: usageMinutes, on: usedOn) }
+                message = "Prism AI selected \(fresh.count) complete clip ranges and layouts. Review framing and captions before export."
                 let warning = results.compactMap(\.analysisWarning).first
                 if let warning { message += " " + warning }
                 message = withModelNote(message)
-                chatMessages.append(.init(isUser: false, text: message))
                 selectPreview(fresh.first?.id)
+                Notifier.notifyIfInBackground(title: fresh.count == 1 ? "1 Short ready" : "\(fresh.count) Shorts ready", body: project?.displayTitle ?? "Prism")
             } catch {
-                message = Task.isCancelled ? "Generation cancelled. Your existing clips were kept." : "Analysis failed: \(error.localizedDescription)"
-                if !Task.isCancelled { generationError = .init(message: error.localizedDescription, kind: Self.failureKind(error)) }
+                if error is GenerationFailure.Refusal { message = error.localizedDescription }
+                else { message = Task.isCancelled ? "Generation cancelled. Your existing clips were kept." : "Analysis failed: \(error.localizedDescription)" }
+                if !Task.isCancelled {
+                    generationError = .init(message: error.localizedDescription, kind: Self.failureKind(error))
+                    Notifier.notifyIfInBackground(title: "Couldn’t make Shorts", body: error.localizedDescription)
+                }
                 modelFallbackNote = nil
             }
             generationProgress = nil
             generationTask = nil
             isBusy = false
+            if shortCaptionStyle.usesWordTiming { timeWordsForAllShorts() }
         }
     }
     /// Commit a generated batch atomically; regenerating never discards a user's previous work.
@@ -766,6 +792,14 @@ final class AppModel {
         let previous = project?.segments ?? []
         var fresh: [EditSegment] = []
         for candidate in candidates {
+            guard candidate.start.isFinite, candidate.duration.isFinite, candidate.start >= 0, candidate.duration > 0 else {
+                throw ShortMaker.Failure.invalidRange
+            }
+            guard let video = project?.media.first(where: { $0.id == candidate.mediaID && $0.kind == "video" }) else {
+                throw ShortMaker.Failure.noVideo
+            }
+            guard candidate.start + candidate.duration <= video.duration + 0.001 else { throw ShortMaker.Failure.invalidRange }
+            if (previous + fresh).contains(where: { $0.id == candidate.id }) { continue }
             if (previous + fresh).allSatisfy({ existing in
                 existing.mediaID != candidate.mediaID || !TranscriptSelection.overlaps(start: candidate.start, duration: candidate.duration,
                     otherStart: existing.start, otherDuration: existing.duration)
@@ -775,6 +809,7 @@ final class AppModel {
         project?.segments = previous + fresh
         do { try save() } catch { project?.segments = previous; throw error }
         editHistory.append(previous)
+        redoHistory.removeAll()
         return fresh
     }
     /// A Short's title as a file name: no path or Finder-unsafe characters, at most 80 characters.
@@ -784,6 +819,18 @@ final class AppModel {
             .split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
             .trimmingCharacters(in: CharacterSet(charactersIn: ". "))
         return cleaned.isEmpty ? nil : String(cleaned.prefix(80))
+    }
+
+    /// Reserve every name before concurrent renders start, including numbered files already in the folder.
+    static func reserveExportDestination(name: String, folder: URL, reserved: inout Set<String>) -> URL {
+        var destination = folder.appendingPathComponent("\(name).mp4")
+        var copy = 2
+        while FileManager.default.fileExists(atPath: destination.path) || reserved.contains(destination.lastPathComponent.lowercased()) {
+            destination = folder.appendingPathComponent("\(name) \(copy).mp4")
+            copy += 1
+        }
+        reserved.insert(destination.lastPathComponent.lowercased())
+        return destination
     }
 
     /// What the export card is set to; nil while it is closed.
@@ -815,12 +862,6 @@ final class AppModel {
         return downloads.appendingPathComponent("Prism").appendingPathComponent(Self.exportFileName(title: project?.displayTitle) ?? "Prism export")
     }
 
-    /// Exports every Short with the saved quality to the default folder; used by the chat assistant.
-    func exportAll() {
-        chooseExport()
-        if let choice = exportChoice { export(choice) }
-    }
-
     /// Renders the ticked Shorts and copies the main video if asked, into `choice.folder`.
     func export(_ choice: ExportChoice) {
         guard !isBusy, let project else { return }
@@ -845,16 +886,23 @@ final class AppModel {
         lastExportShortCount = segments.count
         isBusy = true; message = total == 1 ? "Exporting 1 file…" : "Exporting \(total) files…"
         isExporting = true; generationProgress = 0; generationStage = "Preparing export"
+        Notifier.requestPermission()
         generationTask = Task {
             do {
-                for (step, (number, originalSegment)) in segments.enumerated() {
-                    try Task.checkCancellation()
-                    generationProgress = Double(step) / Double(total)
-                    generationStage = "Exporting Short \(number + 1) · \(step + 1) of \(total)"
+                // Each Short gets its file name up front, so two rendering side by side never pick the same name.
+                var reserved = Set<String>()
+                let jobs = segments.map { number, segment -> (Int, EditSegment, URL) in
+                    let name = Self.exportFileName(title: segment.suggestedTitle) ?? "\(Self.exportFileName(title: projectName) ?? "Prism") Short \(number + 1)"
+                    let destination = Self.reserveExportDestination(name: name, folder: folder, reserved: &reserved)
+                    return (number, segment, destination)
+                }
+                let configuration = geminiConfiguration()
+                generationStage = total == 1 ? "Exporting 1 Short" : "Exporting \(segments.count) Shorts"
+                // Two Shorts render at once: faster, without starving the Mac's video encoder.
+                _ = try await ShortMaker.concurrentMap(jobs, limit: 2) { number, originalSegment, destination in
                     var segment = originalSegment
                     guard let video = media.first(where: { $0.id == segment.mediaID }) else { throw ShortMaker.Failure.noVideo }
-                    if segment.cropTrackingVersion != SubjectFramer.version && segment.splitScreen != true, let configuration = geminiConfiguration() {
-                        message = "Gemini is framing Short \(number + 1)…"
+                    if segment.cropTrackingVersion != SubjectFramer.version && segment.splitScreen != true, let configuration {
                         segment.cropKeyframes = await ShortMaker.analyzeSubjectPath(
                             URL(fileURLWithPath: video.path), start: segment.start, duration: segment.duration, zoom: segment.cropZoom ?? 1.08, configuration: configuration,
                             speech: segment.captions ?? []
@@ -862,17 +910,28 @@ final class AppModel {
                         // A cancelled analysis returns no path; saving it would freeze this Short's framing.
                         try Task.checkCancellation()
                         segment.cropTrackingVersion = SubjectFramer.version
-                        if let storedIndex = self.project?.segments.firstIndex(where: { $0.id == segment.id }) {
-                            self.project?.segments[storedIndex].cropKeyframes = segment.cropKeyframes
-                            self.project?.segments[storedIndex].cropTrackingVersion = SubjectFramer.version
-                            try save()
+                        let framed = segment
+                        try await MainActor.run {
+                            if let storedIndex = self.project?.segments.firstIndex(where: { $0.id == framed.id }) {
+                                let previous = self.project?.segments[storedIndex]
+                                self.project?.segments[storedIndex].cropKeyframes = framed.cropKeyframes
+                                self.project?.segments[storedIndex].cropTrackingVersion = SubjectFramer.version
+                                do { try self.save() }
+                                catch {
+                                    if let previous { self.project?.segments[storedIndex] = previous }
+                                    throw error
+                                }
+                            }
                         }
                     }
-                    message = "Rendering Short \(number + 1)…"
-                    let name = Self.exportFileName(title: segment.suggestedTitle) ?? "\(Self.exportFileName(title: projectName) ?? "Prism") Short \(number + 1)"
-                    let destination = uniqueDestination(for: URL(fileURLWithPath: "\(name).mp4"), in: folder)
+                    try Task.checkCancellation()
                     try await ShortMaker.export(source: URL(fileURLWithPath: video.path), segment: segment, destination: destination, quality: choice.quality)
-                    exportedFiles.append(destination)
+                    await MainActor.run {
+                        self.exportedFiles.append(destination)
+                        self.generationProgress = Double(self.exportedFiles.count) / Double(total)
+                        self.message = "Exported \(self.exportedFiles.count) of \(total)…"
+                    }
+                    return number
                 }
                 for video in sources {
                     try Task.checkCancellation()
@@ -881,7 +940,7 @@ final class AppModel {
                     let original = URL(fileURLWithPath: video.path)
                     let destination = uniqueDestination(for: original, in: folder)
                     // A copy, not a re-render: the main video keeps its original quality. Same-drive copies are instant clones.
-                    try await Task.detached(priority: .userInitiated) { try FileManager.default.copyItem(at: original, to: destination) }.value
+                    try await ShortMaker.copySource(original, to: destination)
                     exportedFiles.append(destination)
                 }
                 var parts: [String] = []
@@ -889,6 +948,7 @@ final class AppModel {
                 if !sources.isEmpty { parts.append("the main video") }
                 message = withModelNote("Exported \(parts.joined(separator: " and ")) to \(Self.displayPath(folder)).")
                 exportSummary = message
+                Notifier.notifyIfInBackground(title: "Export finished", body: message)
                 let seconds = segments.reduce(0) { $0 + $1.element.duration }
                 Task { await account.recordExport(shortCount: segments.count, seconds: seconds, quality: choice.quality.rawValue) }
             }
@@ -899,6 +959,7 @@ final class AppModel {
                     : completed == 0
                     ? "Export failed: \(error.localizedDescription)"
                     : "Export stopped after \(completed) of \(total) files. Completed files are in \(Self.displayPath(folder)). \(error.localizedDescription)"
+                if !Task.isCancelled { Notifier.notifyIfInBackground(title: "Export failed", body: message) }
             }
             isBusy = false; isExporting = false; generationProgress = nil; generationTask = nil
         }
@@ -927,68 +988,30 @@ final class AppModel {
     private func formatSeconds(_ value: Double) -> String {
         value.rounded() == value ? "\(Int(value)) seconds" : String(format: "%.1f seconds", value)
     }
-    private func number(in text: String, after words: [String]) -> Double? {
-        for word in words {
-            guard let range = text.range(of: word) else { continue }
-            let tail = String(text[range.upperBound...])
-            if let match = tail.range(of: #"\d+(?:\.\d+)?"#, options: .regularExpression) { return Double(tail[match]) }
-        }
-        if let match = text.range(of: #"\d+(?:\.\d+)?\s*(?:seconds?|secs?|s)\b"#, options: .regularExpression) {
-            let value = text[match].replacingOccurrences(of: #"[^0-9.]"#, with: "", options: .regularExpression)
-            return Double(value)
-        }
-        return nil
-    }
-    private func overlayInstruction(in text: String) -> (caption: String, start: Double, duration: Double?)? {
-        // Search the original text: indices from a lowercased copy drift when lowercasing changes a character's length (İ).
-        let markers = ["text overlay", "add text", "put text", "show text", "write text"]
-        guard let markerRange = markers.lazy.compactMap({ text.range(of: $0, options: .caseInsensitive) }).first else { return nil }
-        let originalTail = String(text[markerRange.upperBound...])
-        let timingMarkers = [" in the first ", " in first ", " for the first ", " for first ", " during the first ", " during first ", " from ", " at "]
-        var cut = originalTail.endIndex
-        var timingTail = ""
-        for timing in timingMarkers {
-            if let found = originalTail.range(of: timing, options: .caseInsensitive), found.lowerBound < cut {
-                cut = found.lowerBound
-                timingTail = String(originalTail[found.lowerBound...]).lowercased()
-            }
-        }
-        var caption = String(originalTail[..<cut]).trimmingCharacters(in: .whitespacesAndNewlines)
-        for prefix in ["saying ", "that says ", "with ", ": "] where caption.lowercased().hasPrefix(prefix) {
-            caption = String(caption.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        caption = caption.trimmingCharacters(in: CharacterSet(charactersIn: " \"“”'"))
-        guard !caption.isEmpty else { return nil }
-        let value = number(in: timingTail, after: ["first", "from", "at"])
-        if timingTail.contains(" at ") || timingTail.hasPrefix("at ") {
-            return (caption, value ?? 0, nil)
-        }
-        return (caption, 0, value)
-    }
-    private func ensureSegment() -> Bool {
-        if project?.segments.isEmpty == false { return true }
-        guard let video = project?.media.first(where: { $0.kind == "video" }) else { return false }
-        rememberEdit()
-        project?.segments = [.init(mediaID: video.id, duration: min(video.duration, 30))]
-        return true
-    }
     /// `captionsOnly` edits swap the caption overlay in place, so the player keeps its playhead.
     /// `id` edits that Short even when another one is open, without switching the preview to it.
     private func applyEdit(to id: UUID? = nil, captionsOnly: Bool = false, _ change: (inout EditSegment, MediaItem) -> String?) -> String? {
-        guard ensureSegment(),
-              let index = project?.segments.firstIndex(where: { $0.id == (id ?? previewShortID) }) ?? (id == nil ? project?.segments.indices.first : nil),
-              var segment = project?.segments[index],
-              let video = project?.media.first(where: { $0.id == segment.mediaID }) else { return nil }
-        rememberEdit()
-        guard let reply = change(&segment, video) else { editHistory.removeLast(); return nil }
-        project?.segments[index] = segment
+        guard let previous = project?.segments else { return nil }
+        var segments = previous
+        if segments.isEmpty, id == nil, let video = project?.media.first(where: { $0.kind == "video" }) {
+            segments = [.init(mediaID: video.id, duration: min(video.duration, 30))]
+        }
+        guard let index = segments.firstIndex(where: { $0.id == (id ?? previewShortID) }) ?? (id == nil ? segments.indices.first : nil),
+              let video = project?.media.first(where: { $0.id == segments[index].mediaID }) else { return nil }
+        var segment = segments[index]
+        guard let reply = change(&segment, video) else { return nil }
+        segments[index] = segment
+        guard segments != previous else { message = reply; return reply }
+        project?.segments = segments
         do {
             try save()
+            editHistory.append(previous)
+            redoHistory.removeAll()
             if captionsOnly && player != nil && previewSegment?.id == segment.id { previewSegment = segment }
             else if id == nil || id == previewShortID { selectPreview(segment.id) }
             message = reply; return reply
         } catch {
-            if let previous = editHistory.popLast() { project?.segments = previous }
+            project?.segments = previous
             return "Could not save the edit: \(error.localizedDescription)"
         }
     }
@@ -1012,9 +1035,9 @@ final class AppModel {
             }
             return
         }
-        guard let configuration = geminiConfiguration() else { message = "Save your Google AI Studio key in Settings first."; return }
+        guard let configuration = geminiConfiguration() else { message = "Sign in to your Prism account first."; return }
         isBusy = true
-        message = "Gemini is finding both speakers…"
+        message = "Prism AI is finding both speakers…"
         Task {
             let centers = await ShortMaker.findSplitCenters(URL(fileURLWithPath: video.path), start: segment.start, duration: segment.duration,
                                                            configuration: configuration)
@@ -1047,9 +1070,9 @@ final class AppModel {
             return
         }
         let segmentID = segment.id
-        guard let configuration = geminiConfiguration() else { message = "Save your Google AI Studio key in Settings first."; return }
+        guard let configuration = geminiConfiguration() else { message = "Sign in to your Prism account first."; return }
         isBusy = true
-        message = "Gemini is transcribing this Short…"
+        message = "Prism AI is transcribing this Short…"
         Task {
             let result: CaptionGenerationResult
             do {
@@ -1080,8 +1103,9 @@ final class AppModel {
             project?.segments[index].captionNotice = result.notice
             do {
                 try save()
+                redoHistory.removeAll()
                 isBusy = false
-                if previewShortID == segmentID { selectPreview(segmentID) }
+                if previewSegment?.id == segmentID { previewSegment = project?.segments[index] }
                 message = withModelNote("Added \(result.cues.count) timed subtitle phrases." + (result.notice.map { " " + $0 } ?? ""))
             } catch {
                 if let previous = editHistory.popLast() { project?.segments = previous }
@@ -1091,11 +1115,25 @@ final class AppModel {
         }
     }
 
+    /// ↑ and ↓ in the editor: the previous or next Short, in the order the Shorts list shows them.
+    func selectAdjacentShort(_ step: Int) {
+        guard !isBusy, var shorts = project?.segments, !shorts.isEmpty else { return }
+        if UserDefaults.standard.bool(forKey: "editor.shortsBestFirst") {
+            let order = Dictionary(uniqueKeysWithValues: shorts.enumerated().map { ($1.id, $0) })
+            shorts.sort { ($0.score ?? -1, -order[$0.id]!) > ($1.score ?? -1, -order[$1.id]!) }
+        }
+        let current = shorts.firstIndex { $0.id == previewShortID }
+        let next = current.map { min(shorts.count - 1, max(0, $0 + step)) } ?? (step > 0 ? 0 : shorts.count - 1)
+        guard shorts[next].id != previewShortID else { return }
+        selectPreview(shorts[next].id)
+    }
+
     var activeSegment: EditSegment? {
         project?.segments.first(where: { $0.id == previewShortID })
     }
 
     func undoFromEditor() { guard !isBusy else { return }; message = undoEdit() }
+    func redoFromEditor() { guard !isBusy else { return }; message = redoEdit() }
 
     func removeShort(_ id: UUID) {
         guard !isBusy, let index = project?.segments.firstIndex(where: { $0.id == id }) else { return }
@@ -1105,6 +1143,7 @@ final class AppModel {
         project?.segments.remove(at: index)
         do {
             try save()
+            redoHistory.removeAll()
             if wasPreviewed { selectPreview(previousSelection) }
             message = "Removed Short. Use Undo to restore it."
         } catch {
@@ -1127,6 +1166,72 @@ final class AppModel {
             segment.captionStyle = style
             return "\(style.title) subtitles applied."
         }) { message = reply }
+        // Word-by-word styles need exact timing, so every Short still without it starts transcribing now.
+        if style.usesWordTiming { timeWordsForAllShorts() }
+    }
+
+    /// Bumped when the video limit counts a video, so Settings › Usage redraws.
+    var usageRevision = 0
+    /// Set by the limit popup's "See usage", so Settings opens on its Usage page.
+    var opensUsageSettings = false
+
+    /// Shorts whose words Prism AI is timing in the background.
+    var timingShortIDs: Set<UUID> = []
+
+    /// Transcribes every Short in the project that has speech but no exact word timing, several at a time, in the
+    /// background. The editor stays usable; each Short updates as soon as its timing arrives.
+    func timeWordsForAllShorts() {
+        guard let project, let projectURL, let configuration = geminiConfiguration() else { return }
+        let pending = project.segments.filter { segment in
+            segment.speechWords?.isEmpty != false && !timingShortIDs.contains(segment.id)
+                && project.media.first(where: { $0.id == segment.mediaID })?.hasAudio == true
+        }
+        guard !pending.isEmpty else { return }
+        // The project's saved sentence transcript covers most Shorts, so only their words need a new transcription.
+        let jobs = pending.compactMap { segment in
+            project.media.first(where: { $0.id == segment.mediaID }).map {
+                (segment, URL(fileURLWithPath: $0.path),
+                 project.transcripts?[$0.id.uuidString]?.cues(covering: (segment.start, segment.start + segment.duration)))
+            }
+        }
+        timingShortIDs.formUnion(jobs.map(\.0.id))
+        Task {
+            await withTaskGroup(of: (EditSegment, GeminiSelection.CloudCaptions?).self) { group in
+                var next = 0
+                func startNext() {
+                    guard next < jobs.count else { return }
+                    let (segment, url, saved) = jobs[next]; next += 1
+                    group.addTask {
+                        let cloud = try? await GeminiSelection.regenerateCaptions(url: url, interval: (segment.start, segment.start + segment.duration),
+                                                                                  configuration: configuration, saved: saved)
+                        return (segment, cloud)
+                    }
+                }
+                for _ in 0..<ShortMaker.parallelRequests { startNext() }
+                while let (segment, cloud) = await group.next() {
+                    timingShortIDs.remove(segment.id)
+                    if let cloud, self.projectURL == projectURL { applyWordTiming(cloud, to: segment) }
+                    startNext()
+                }
+            }
+        }
+    }
+
+    /// Stores timing for the Short it was made for, as long as its range hasn't moved meanwhile. Caption lines the
+    /// person edited in the meantime are kept; only untouched lines are replaced by the timed transcript.
+    private func applyWordTiming(_ cloud: GeminiSelection.CloudCaptions, to snapshot: EditSegment) {
+        guard let index = project?.segments.firstIndex(where: { $0.id == snapshot.id }), let current = project?.segments[index],
+              current.start == snapshot.start, current.duration == snapshot.duration else { return }
+        let words = cloud.words.map { TimedSpeechWord(text: $0.text, start: $0.start - snapshot.start, duration: $0.duration) }
+        let cues = cloud.cues.map { TimedCaption(text: $0.text, start: $0.start - snapshot.start, duration: $0.duration) }
+        var updated = current
+        if !cues.isEmpty, current.captions == snapshot.captions { updated.captions = cues }
+        if !words.isEmpty { updated.speechWords = words; updated.captionNotice = nil }
+        guard updated != current else { return }
+        project?.segments[index] = updated
+        try? save()
+        // Captions draw over the player, so the preview keeps playing where it is.
+        if previewSegment?.id == snapshot.id { previewSegment = updated }
     }
 
     /// Subtitle placement, size and pop-in for the selected Short; nil leaves that setting unchanged.
@@ -1248,8 +1353,17 @@ final class AppModel {
         _ = applyEdit { segment, _ in
             // Path points are stored without the tracking offset (cropPosition − 0.5) that preview, export and the
             // focus track add on top, so the offset is taken off the clicked position and the starting points sit at 0.5.
-            let stored = position - ((segment.cropPosition ?? 0.5) - 0.5)
+            let bias = (segment.cropPosition ?? 0.5) - 0.5
+            var stored = position - bias
             var points = segment.cropKeyframes ?? [CropKeyframe(time: 0, position: 0.5), CropKeyframe(time: segment.duration, position: 0.5)]
+            // A strong tracking offset can put the clicked point outside the stored 0–1 range. Bake the offset
+            // into the existing path first, preserving its visible framing, so either edge remains reachable.
+            if !(0...1).contains(stored) {
+                points = points.map { .init(time: $0.time, position: min(1, max(0, $0.position + bias)),
+                                           isSceneCut: $0.isSceneCut, preserveWholeFrame: $0.preserveWholeFrame) }
+                segment.cropPosition = 0.5
+                stored = position
+            }
             if insert {
                 if let nearest = points.indices.min(by: { abs(points[$0].time - targetTime) < abs(points[$1].time - targetTime) }),
                    abs(points[nearest].time - targetTime) < 0.18 {
@@ -1270,7 +1384,10 @@ final class AppModel {
             var unique: [CropKeyframe] = []
             for point in points {
                 if let last = unique.last, abs(last.time - point.time) < 0.02 {
-                    unique[unique.count - 1] = point
+                    var merged = point
+                    if last.isSceneCut == true { merged.isSceneCut = true }
+                    merged.preserveWholeFrame = point.preserveWholeFrame ?? last.preserveWholeFrame
+                    unique[unique.count - 1] = merged
                 } else { unique.append(point) }
             }
             segment.cropKeyframes = unique
@@ -1281,11 +1398,14 @@ final class AppModel {
     func retrackSelectedSubject() {
         guard !isBusy, let clip = activeSegment,
               let index = project?.segments.firstIndex(where: { $0.id == clip.id }) else { return }
+        let previous = project?.segments ?? []
         project?.segments[index].cropTrackingVersion = 0
         do {
             try save()
+            if previous != project?.segments { editHistory.append(previous); redoHistory.removeAll() }
             selectPreview(clip.id)
         } catch {
+            project?.segments = previous
             message = "Could not refresh subject tracking: \(error.localizedDescription)"
         }
     }
@@ -1295,11 +1415,12 @@ final class AppModel {
         let time = previewShortID == nil ? player?.currentTime().seconds ?? 0 : 0
         let start = min(max(0, time.isFinite ? time : 0), max(0, video.duration - 1))
         let previous = project?.segments ?? []
-        let clip = EditSegment(mediaID: video.id, start: start, duration: min(shortDuration, video.duration - start))
+        let clip = EditSegment(mediaID: video.id, start: start, duration: min(shortDuration > 0 ? shortDuration : 30, video.duration - start))
         rememberEdit()
         project?.segments.append(clip)
         do {
             try save()
+            redoHistory.removeAll()
             selectPreview(clip.id)
             message = "Clip added. Adjust its timing in the inspector."
         } catch {
@@ -1329,114 +1450,14 @@ final class AppModel {
         player?.seek(to: CMTime(seconds: max(0, min(seconds, limit)), preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
     }
 
-    func sendChat(_ suggestedText: String? = nil) {
-        guard !isBusy else { return }
-        let text = (suggestedText ?? chatInput).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        chatInput = ""
-        chatMessages.append(.init(isUser: true, text: text))
-        guard project?.media.isEmpty == false else {
-            chatMessages.append(.init(isUser: false, text: "Import a video first, then I can edit it."))
-            return
-        }
-        guard let configuration = geminiConfiguration() else {
-            message = "Save your Google AI Studio key in Settings first."
-            chatMessages.append(.init(isUser: false, text: message))
-            return
-        }
-        isBusy = true
-        message = "Gemini is planning your edit…"
-        Task {
-            do {
-                let media = project?.media.first
-                let segment = activeSegment ?? project?.segments.first
-                let summary = "video \(formatSeconds(media?.duration ?? 0)); current edit \(formatSeconds(segment?.duration ?? 0)); caption \(segment?.caption ?? "none")"
-                let conversation = chatMessages.dropLast().suffix(6).map { ($0.isUser ? "User: " : "Assistant: ") + $0.text }.joined(separator: " / ")
-                let command = try await GeminiSelection.interpret(text, summary: summary, conversation: conversation, configuration: configuration)
-                isBusy = false
-                executeAICommand(command, originalRequest: text)
-                if let note = modelFallbackNote {
-                    modelFallbackNote = nil
-                    chatMessages.append(.init(isUser: false, text: note))
-                }
-                return
-            } catch {
-                isBusy = false
-                message = "Gemini could not plan this edit: \(error.localizedDescription)"
-                chatMessages.append(.init(isUser: false, text: message))
-                return
-            }
-        }
-    }
-
-    private func executeAICommand(_ command: GeminiSelection.EditCommand, originalRequest: String) {
-        func value(_ index: Int) -> Double? {
-            guard command.arguments.indices.contains(index), let value = Double(command.arguments[index].trimmingCharacters(in: .whitespaces)), value.isFinite else { return nil }
-            return value
-        }
-        switch command.action {
-        case "OVERLAY":
-            guard let caption = command.arguments.first, !caption.isEmpty else { handleFallback(originalRequest); return }
-            let start = value(1) ?? 0; let duration = value(2)
-            let reply = applyEdit { segment, _ in
-                segment.caption = caption
-                segment.captionStart = min(max(0, start), segment.duration)
-                segment.captionDuration = min(duration ?? (segment.duration - (segment.captionStart ?? 0)), segment.duration - (segment.captionStart ?? 0))
-                let end = (segment.captionStart ?? 0) + (segment.captionDuration ?? segment.duration)
-                return "\(editingAIName) added “\(caption)” from \(formatSeconds(segment.captionStart ?? 0)) to \(formatSeconds(end))."
-            }
-            chatMessages.append(.init(isUser: false, text: reply ?? "I couldn't apply that overlay."))
-        case "TRIM":
-            guard let duration = value(0) else { handleFallback(originalRequest); return }
-            let reply = applyEdit { segment, video in
-                rebase(&segment, media: video, start: segment.start, duration: max(0.25, min(duration, video.duration - segment.start)))
-                    ? "\(editingAIName) trimmed the edit to \(formatSeconds(segment.duration))." : nil
-            }
-            chatMessages.append(.init(isUser: false, text: reply ?? "I couldn't trim the edit."))
-        case "START":
-            guard let start = value(0) else { handleFallback(originalRequest); return }
-            let reply = applyEdit { segment, video in
-                let newStart = max(0, min(start, video.duration - 0.25))
-                return rebase(&segment, media: video, start: newStart, duration: min(segment.duration, video.duration - newStart))
-                    ? "\(editingAIName) moved the edit to \(formatSeconds(segment.start))." : nil
-            }
-            chatMessages.append(.init(isUser: false, text: reply ?? "I couldn't move the edit."))
-        case "SHORT": makeShort(requestedDuration: value(0))
-        case "SUBTITLES":
-            chatMessages.append(.init(isUser: false, text: "I’m transcribing the selected Short using your Auto Shorts settings and adding timed subtitles."))
-            regenerateSelectedSubtitles()
-        case "MUTE":
-            let reply = applyEdit { segment, _ in segment.isMuted = true; return "\(editingAIName) muted the audio." }
-            chatMessages.append(.init(isUser: false, text: reply ?? "I couldn't mute the edit."))
-        case "UNMUTE":
-            let reply = applyEdit { segment, _ in segment.isMuted = false; return "\(editingAIName) restored the source audio." }
-            chatMessages.append(.init(isUser: false, text: reply ?? "I couldn't restore the audio."))
-        case "REMOVE_OVERLAY":
-            let reply = applyEdit { segment, _ in segment.caption = ""; segment.captionStart = 0; segment.captionDuration = nil; return "\(editingAIName) removed the text overlay. Speech subtitles are unchanged." }
-            chatMessages.append(.init(isUser: false, text: reply ?? "I couldn't remove the text overlay."))
-        case "REMOVE_SUBTITLES":
-            let reply = applyEdit { segment, _ in segment.captions = []; return "\(editingAIName) removed the speech subtitles. The text overlay is unchanged." }
-            chatMessages.append(.init(isUser: false, text: reply ?? "I couldn't remove the speech subtitles."))
-        case "REMOVE_TEXT":
-            let reply = applyEdit { segment, _ in segment.caption = ""; segment.captions = []; segment.captionStart = 0; segment.captionDuration = nil; return "\(editingAIName) removed the text overlay and speech subtitles." }
-            chatMessages.append(.init(isUser: false, text: reply ?? "I couldn't remove the text."))
-        case "EXPORT": chatMessages.append(.init(isUser: false, text: "\(editingAIName) is exporting every Short to Downloads.")); exportAll()
-        case "UNDO":
-            chatMessages.append(.init(isUser: false, text: undoEdit()))
-        case "CHAT":
-            chatMessages.append(.init(isUser: false, text: command.arguments.joined(separator: "|")))
-            message = "\(editingAIName) answered."
-        default: handleFallback(originalRequest)
-        }
-    }
-
     private func undoEdit() -> String {
-        guard let previous = editHistory.last else { return "There isn’t an edit to undo yet." }
+        guard project != nil, let previous = editHistory.last else { return "There isn’t an edit to undo yet." }
         let current = project?.segments ?? []
         project?.segments = previous
         do {
             try save()
             editHistory.removeLast()
+            redoHistory.append(current)
             let restoredSelection = previous.contains(where: { $0.id == previewShortID }) ? previewShortID : previous.first?.id
             selectPreview(restoredSelection)
             return "Undone. I restored the previous timeline edit."
@@ -1446,81 +1467,23 @@ final class AppModel {
         }
     }
 
-    private func handleFallback(_ text: String) {
-        let request = text.lowercased()
-        if request == "undo" || request.contains("undo last") {
-            chatMessages.append(.init(isUser: false, text: undoEdit()))
-        } else if let overlay = overlayInstruction(in: text) {
-            let reply = applyEdit { segment, _ in
-            segment.caption = overlay.caption
-                segment.captionStart = min(overlay.start, segment.duration)
-                segment.captionDuration = min(overlay.duration ?? (segment.duration - (segment.captionStart ?? 0)), segment.duration - (segment.captionStart ?? 0))
-                let start = segment.captionStart ?? 0
-                let length = segment.captionDuration ?? segment.duration
-                return "Done — I added “\(overlay.caption)” from \(formatSeconds(start)) to \(formatSeconds(start + length))."
-            }
-            chatMessages.append(.init(isUser: false, text: reply ?? "I couldn't add that text overlay."))
-        } else if request.contains("remove subtitles") || request.contains("delete subtitles") || request.contains("remove speech captions")
-                    || request.contains("hide subtitles") || request.contains("don't show subtitles") || request.contains("do not show subtitles") {
-            let reply = applyEdit { segment, _ in segment.captions = []; return "Done — I removed the speech subtitles. The text overlay is unchanged." }
-            chatMessages.append(.init(isUser: false, text: reply ?? "I couldn't remove the speech subtitles."))
-        } else if request.contains("remove title") || request.contains("delete title") || request.contains("remove overlay") || request.contains("delete overlay")
-                    || request.contains("hide title") || request.contains("hide overlay") {
-            let reply = applyEdit { segment, _ in segment.caption = ""; segment.captionStart = 0; segment.captionDuration = nil; return "Done — I removed the text overlay. Speech subtitles are unchanged." }
-            chatMessages.append(.init(isUser: false, text: reply ?? "I couldn't remove the text overlay."))
-        } else if request.contains("remove caption") || request.contains("delete caption") || request.contains("no caption") || request.contains("remove text") {
-            let reply = applyEdit { segment, _ in segment.caption = ""; segment.captions = []; segment.captionStart = 0; segment.captionDuration = nil; return "Done — I removed the text overlay and speech subtitles." }
-            chatMessages.append(.init(isUser: false, text: reply ?? "I couldn't change the captions."))
-        } else if request.contains("caption to ") || request.contains("text to ") {
-            let marker = request.contains("caption to ") ? "caption to " : "text to "
-            let caption = (text.range(of: marker, options: .caseInsensitive).map { String(text[$0.upperBound...]) } ?? "")
-                .trimmingCharacters(in: CharacterSet(charactersIn: " \"“”'"))
-            let reply = caption.isEmpty ? nil : applyEdit { segment, _ in segment.caption = caption; segment.captionStart = 0; segment.captionDuration = segment.duration; return "Done — I changed the on-screen caption to “\(caption)”." }
-            chatMessages.append(.init(isUser: false, text: reply ?? "Tell me the caption text after “caption to”."))
-        } else if request.contains("unmute") || request.contains("restore audio") {
-            let reply = applyEdit { segment, _ in segment.isMuted = false; return "Done — I restored the source audio." }
-            chatMessages.append(.init(isUser: false, text: reply ?? "I couldn't restore the audio."))
-        } else if request.contains("mute") || request.contains("remove audio") || request.contains("no audio") {
-            let reply = applyEdit { segment, _ in segment.isMuted = true; return "Done — I muted the audio. The next export will be silent." }
-            chatMessages.append(.init(isUser: false, text: reply ?? "I couldn't mute this edit."))
-        } else if request.contains("start at") || request.contains("begin at") {
-            let value = number(in: request, after: ["start at", "begin at"])
-            let reply = value.flatMap { newStart in applyEdit { segment, video in
-                let start = max(0, min(newStart, max(0, video.duration - 0.25)))
-                return rebase(&segment, media: video, start: start, duration: min(segment.duration, video.duration - start))
-                    ? "Done — the edit now starts at \(formatSeconds(segment.start))." : nil
-            }}
-            chatMessages.append(.init(isUser: false, text: reply ?? "Tell me a start time, for example “start at 12 seconds”."))
-        } else if request.contains("make it") || request.contains("trim to") || request.contains("duration") {
-            let value = number(in: request, after: ["make it", "trim to", "duration"])
-            let reply = value.flatMap { newDuration in applyEdit { segment, video in
-                rebase(&segment, media: video, start: segment.start, duration: max(0.25, min(newDuration, video.duration - segment.start)))
-                    ? "Done — I trimmed the edit to \(formatSeconds(segment.duration))." : nil
-            }}
-            chatMessages.append(.init(isUser: false, text: reply ?? "Tell me a duration, for example “make it 20 seconds”."))
-        } else if request.contains("short") || request.contains("analy") || request.contains("best moment") {
-            chatMessages.append(.init(isUser: false, text: "Gemini is analyzing the video for a complete moment."))
-            makeShort(requestedDuration: number(in: request, after: ["short", "make", "create"]))
-        } else if request.contains("export") {
-            let reply = project?.segments.isEmpty == false
-                ? "I’m exporting every Short as an MP4 to Downloads › Prism."
-                : "Create a Short first, then I can prepare it for export."
-            chatMessages.append(.init(isUser: false, text: reply))
-            if project?.segments.isEmpty == false { exportAll() }
-        } else if request.contains("caption") {
-            let reply: String
-            if let segment = project?.segments.first {
-                reply = segment.captions?.isEmpty == false
-                    ? "This Short already has generated speech subtitles on the Text track."
-                    : "This Short has no generated speech subtitles yet. Select it and choose Transcribe in the Clip inspector."
-            } else {
-                reply = "Create a Short and I’ll add detected speech to the Captions track."
-            }
-            chatMessages.append(.init(isUser: false, text: reply))
-        } else {
-            chatMessages.append(.init(isUser: false, text: "I can create or trim a Short, move its start time, change or remove captions, mute audio, undo an edit, and export. Try “make it 12 seconds”."))
+    private func redoEdit() -> String {
+        guard project != nil, let next = redoHistory.last else { return "There isn’t an edit to redo yet." }
+        let current = project?.segments ?? []
+        project?.segments = next
+        do {
+            try save()
+            redoHistory.removeLast()
+            editHistory.append(current)
+            let restoredSelection = next.contains(where: { $0.id == previewShortID }) ? previewShortID : next.first?.id
+            selectPreview(restoredSelection)
+            return "Redone. Restored the timeline edit."
+        } catch {
+            project?.segments = current
+            return "Could not save redo: \(error.localizedDescription)"
         }
     }
+
 }
 
 private struct PointerFeedback: ViewModifier {
@@ -1613,7 +1576,7 @@ private struct SettingsCategoryTile: View {
 struct ContentView: View {
     @Bindable var model: AppModel
     @State private var isDropTarget = false
-    @State private var sidebarCollapsed = false
+    @State private var isHomeDropTarget = false
     @State private var choosingCaptions = false
     @State private var choosingType = false
     @State private var showAllProjects = false
@@ -1631,12 +1594,14 @@ struct ContentView: View {
     /// The export card's Shorts list height, measured so a short list leaves no empty space.
     @State var exportListHeight: CGFloat = 0
     @FocusState private var keyFieldFocused: Bool
-    @AppStorage(PrismAppearance.storageKey) var appearance = PrismAppearance.dark
+    @AppStorage(PrismAppearance.storageKey) var appearance = PrismAppearance.system
     @AppStorage("editor.leftSidebarWidth") var leftSidebarWidth = 248.0
     @AppStorage("editor.rightSidebarWidth") var rightSidebarWidth = 282.0
     @AppStorage("editor.timelineHeight") var timelineHeight = 278.0
     @AppStorage("system.resourceRefreshSeconds") private var resourceRefreshSeconds = 60.0
-    @State private var selectedSettingsCategory: SettingsCategory = .aiCloud
+    @State private var selectedSettingsCategory: SettingsCategory = .account
+    /// This account's video counts from Supabase, when signed in; nil shows the count kept on this Mac.
+    @State private var serverUsage: (day: Double, week: Double)?
     private let resourceRefreshOptions: [ResourceRefreshOption] = [
         .init(title: "1 second", seconds: 1), .init(title: "5 seconds", seconds: 5),
         .init(title: "10 seconds", seconds: 10), .init(title: "30 seconds", seconds: 30),
@@ -1645,12 +1610,13 @@ struct ContentView: View {
         .init(title: "30 minutes", seconds: 1_800), .init(title: "45 minutes", seconds: 2_700),
         .init(title: "60 minutes", seconds: 3_600)
     ]
-    private enum SettingsCategory { case aiCloud, account, systemResources }
+    private enum SettingsCategory { case account, usage, systemResources, updates }
     @State private var accountEmail = ""
     @State private var accountPassword = ""
+    @Environment(AppUpdater.self) var updater
     var body: some View {
         HStack(spacing: 0) {
-            if model.screen != .editor { sidebar.frame(width: sidebarCollapsed ? 76 : 252) }
+            if model.screen != .editor { sidebar.frame(width: model.isSidebarCollapsed ? 76 : 252) }
             VStack(spacing: 0) {
                 if model.screen == .editor { editorHeader } else { topbar }
                 if model.screen == .home { dashboard }
@@ -1672,61 +1638,52 @@ struct ContentView: View {
             else if model.screen == .editor, let summary = model.exportSummary { exportDoneOverlay(summary) }
             else if model.screen == .editor, let choice = model.exportChoice { exportChoiceOverlay(choice) }
         }
-        .overlay { if !model.isGeminiKeySaved { apiKeyGate } }
+        .overlay(alignment: .bottom) {
+            if updater.updatedVersion != nil { updatedBanner }
+            else if updater.readyVersion != nil, !updater.isBannerDismissed { updateBanner }
+        }
+        .overlay { if !model.hasAIAccess { signInGate } }
         .tint(Prism.accent)
-        .animation(.easeInOut(duration: 0.2), value: sidebarCollapsed)
+        // The title bar names the open project in the editor, like other Mac document apps.
+        .navigationTitle(model.screen == .editor ? (model.project?.displayTitle ?? "Prism") : "Prism")
+        .animation(.easeInOut(duration: 0.2), value: model.isSidebarCollapsed)
     }
-    /// Prism can't do anything without Gemini, so while no key is saved this card covers the whole app and blocks it.
-    var apiKeyGate: some View {
+    /// Prism can't do anything without Prism AI, so while no key is saved this card covers the whole app and blocks it.
+    /// Until someone signs in, Prism's AI can't run. Signing in replaces the old key-entry step.
+    /// Until someone signs in, Prism's AI can't run, so this card covers the app. It signs in or creates the account in place.
+    var signInGate: some View {
         ZStack {
             Color.black.opacity(0.72).contentShape(Rectangle()).onTapGesture {}
             VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 10) {
                     PrismMark().frame(height: 26)
-                    Text("Welcome to Prism").font(Prism.display(22))
+                    Text("Sign in to Prism").font(Prism.display(22))
                 }
-                Text("Prism uses Google Gemini to find, cut, caption and frame your Shorts, so it needs your own Gemini API key before it can work. Google bills your AI Studio account for what Prism uses; the free tier works too.")
+                Text("Sign in or create a free account to start. Prism's AI runs on our server, so you don't need an API key.")
                     .font(Prism.text(13)).foregroundStyle(Prism.textSecondary).fixedSize(horizontal: false, vertical: true)
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("1. Create a key").font(Prism.text(13, .medium))
-                    Link("Open Google AI Studio › API keys", destination: URL(string: "https://aistudio.google.com/apikey")!)
-                        .font(Prism.text(13))
-                    Text("2. Paste it here").font(Prism.text(13, .medium)).padding(.top, 6)
-                    HStack(spacing: 10) {
-                        Image(systemName: "key.fill").foregroundStyle(Prism.textSecondary)
-                        SecureField("Paste your API key", text: $model.geminiKey)
-                            .textFieldStyle(.plain)
-                            .focused($keyFieldFocused)
-                            .onSubmit { model.verifyAndSaveGeminiKey() }
-                            .accessibilityLabel("Gemini API key")
-                    }
-                    .padding(11)
-                    .background(Prism.surface2, in: RoundedRectangle(cornerRadius: 12))
-                    .disabled(model.isTestingGemini)
-                }
-                if !model.geminiKeyStatus.isEmpty {
-                    Label(model.geminiKeyStatus, systemImage: model.geminiKeyRejected ? "exclamationmark.triangle" : "info.circle")
-                        .font(Prism.text(12)).foregroundStyle(model.geminiKeyRejected ? Prism.amber : Prism.textSecondary)
+                TextField("Email", text: $accountEmail)
+                    .textFieldStyle(.roundedBorder).textContentType(.username)
+                SecureField("Password (at least 6 characters)", text: $accountPassword)
+                    .textFieldStyle(.roundedBorder).textContentType(.password)
+                    .onSubmit { Task { await model.account.signIn(email: accountEmail, password: accountPassword); if model.account.isSignedIn { accountPassword = "" } } }
+                if !model.account.status.isEmpty {
+                    Text(model.account.status).font(Prism.text(12)).foregroundStyle(Prism.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Text("The key stays in your Mac’s Keychain. Audio, transcripts and sampled frames from your videos are sent to Google.")
-                    .font(Prism.text(11)).foregroundStyle(Prism.textSecondary).fixedSize(horizontal: false, vertical: true)
                 HStack {
+                    Button("Create account") { Task { await model.account.signUp(email: accountEmail, password: accountPassword); accountPassword = "" } }
                     Spacer()
-                    if model.isTestingGemini { ProgressView().controlSize(.small) }
-                    Button("Save and continue") { model.verifyAndSaveGeminiKey() }
+                    if model.account.isWorking { ProgressView().controlSize(.small) }
+                    Button("Sign in") { Task { await model.account.signIn(email: accountEmail, password: accountPassword); if model.account.isSignedIn { accountPassword = "" } } }
                         .buttonStyle(.prismPrimary).keyboardShortcut(.defaultAction)
-                        .disabled(model.geminiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isTestingGemini)
                 }
+                .disabled(model.account.isWorking || accountEmail.isEmpty || accountPassword.isEmpty)
             }
             .padding(28)
-            .frame(width: 500)
+            .frame(width: 460)
             .background(Prism.surface1, in: RoundedRectangle(cornerRadius: 16))
             .overlay(RoundedRectangle(cornerRadius: 16).stroke(Prism.border))
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("Add your Gemini API key")
         }
-        .onAppear { keyFieldFocused = true }
     }
     /// Fills the app window (not macOS full screen), so it opens and closes instantly.
     func expandedPlayer(_ player: AVPlayer) -> some View {
@@ -1746,17 +1703,19 @@ struct ContentView: View {
     }
     var sidebar: some View {
         VStack(alignment: .leading, spacing: 17) {
-            if sidebarCollapsed {
-                Button { sidebarCollapsed = false } label: {
-                    Image(systemName: "sidebar.right").font(Prism.text(18)).frame(maxWidth: .infinity)
-                }.buttonStyle(.prismLink).pointerFeedback().help("Expand sidebar")
+            if model.isSidebarCollapsed {
+                PrismMark().frame(height: 24).frame(maxWidth: .infinity).accessibilityHidden(true)
+                Button { model.isSidebarCollapsed = false } label: {
+                    Image(systemName: "sidebar.right").font(Prism.text(16)).frame(maxWidth: .infinity)
+                }.buttonStyle(.prismLink).pointerFeedback().foregroundStyle(Prism.textSecondary)
+                    .help("Expand sidebar · ⌃⌘S").accessibilityLabel("Expand sidebar")
             } else {
                 HStack(spacing: 10) {
                     PrismMark().frame(height: 24)
                     Text("Prism").font(Prism.display(24)).tracking(-0.5)
                     Spacer()
-                    Button { sidebarCollapsed = true } label: { Image(systemName: "sidebar.left") }.buttonStyle(.prismIcon)
-                        .pointerFeedback().foregroundStyle(Prism.textSecondary).help("Collapse sidebar")
+                    Button { model.isSidebarCollapsed = true } label: { Image(systemName: "sidebar.left") }.buttonStyle(.prismIcon)
+                        .pointerFeedback().foregroundStyle(Prism.textSecondary).help("Collapse sidebar · ⌃⌘S").accessibilityLabel("Collapse sidebar")
                 }
         Text("Your video editor · Cloud AI").font(Prism.text(12)).foregroundStyle(Prism.textSecondary)
             }
@@ -1770,21 +1729,9 @@ struct ContentView: View {
             sidebarButton("Settings", icon: "gearshape.fill", selected: model.screen == .settings) { model.screen = .settings }
             TimelineView(.periodic(from: .now, by: min(3_600, max(1, resourceRefreshSeconds)))) { _ in
                 let machine = MachineProfile.detect()
-                if sidebarCollapsed {
-                    ZStack {
-                        Circle().stroke(Prism.border, lineWidth: 4)
-                        Circle()
-                            .trim(from: 0, to: machine.memoryUsage)
-                            .stroke(Prism.text, style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                            .rotationEffect(.degrees(-90))
-                        VStack(spacing: 0) {
-                            Text("\(Int(machine.memoryUsage * 100))%")
-                                .font(Prism.display(10))
-                            Text("RAM").font(Prism.text(7, .medium)).foregroundStyle(Prism.textSecondary)
-                        }
-                    }
-                    .frame(width: 44, height: 44)
-                    .frame(maxWidth: .infinity)
+                if model.isSidebarCollapsed {
+                    resourceRing(memory: machine.memoryUsage, storage: machine.freeStorageRatio, freeGB: machine.freeGB)
+                        .frame(maxWidth: .infinity)
                     .help("RAM used: \(String(format: "%.1f", machine.memoryUsedGB)) of \(machine.memoryGB) GB · Storage free: \(machine.freeGB) of \(machine.storageGB) GB")
                     .accessibilityLabel("RAM \(Int(machine.memoryUsage * 100)) percent used; \(machine.freeGB) gigabytes of storage free")
                 } else {
@@ -1817,36 +1764,249 @@ struct ContentView: View {
                 }
             }
         }
-        .padding(sidebarCollapsed ? 14 : 24)
+        .padding(model.isSidebarCollapsed ? 14 : 24)
         .frame(maxHeight: .infinity, alignment: .topLeading)
         .background(Prism.surface1)
     }
+
+    /// One ring for the collapsed sidebar: RAM used on the outer arc, free storage on the inner blue arc, both numbers inside.
+    private func resourceRing(memory: Double, storage: Double, freeGB: Int) -> some View {
+        ZStack {
+            arc(memory, color: Prism.text, width: 4)
+            arc(storage, color: Prism.accent, width: 3).padding(6)
+            VStack(spacing: 0) {
+                Text("\(Int(memory * 100))%").font(Prism.display(9))
+                Text("\(freeGB)G").font(Prism.text(7, .medium)).foregroundStyle(Prism.accent)
+            }
+            .lineLimit(1).minimumScaleFactor(0.6)
+            .padding(.horizontal, 11)
+        }
+        .frame(width: 50, height: 50)
+    }
+
+    private func arc(_ fraction: Double, color: Color, width: CGFloat) -> some View {
+        ZStack {
+            Circle().stroke(Prism.border, lineWidth: width)
+            Circle()
+                .trim(from: 0, to: fraction)
+                .stroke(color, style: StrokeStyle(lineWidth: width, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+        }
+    }
     func sidebarButton(_ title: String, icon: String, selected: Bool = false, prominent: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            if sidebarCollapsed {
-                Image(systemName: icon).frame(maxWidth: .infinity)
-            } else {
-                Label(title, systemImage: icon)
-                    .font(prominent || selected ? Prism.text(14, .medium) : Prism.text(14))
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            // The padding and fill sit inside the button, so the whole highlighted pill takes the click, not only the label.
+            Group {
+                if model.isSidebarCollapsed {
+                    Image(systemName: icon).font(Prism.text(17, .medium)).frame(maxWidth: .infinity)
+                } else {
+                    Label(title, systemImage: icon)
+                        .font(prominent || selected ? Prism.text(14, .medium) : Prism.text(14))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, prominent ? 13 : 10)
+            .foregroundStyle(prominent ? Prism.ink : Prism.text)
+            .background(prominent ? Prism.action : (selected ? Prism.surface2 : .clear), in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain).pointerFeedback()
-        .padding(.horizontal, 12)
-        .padding(.vertical, prominent ? 13 : 10)
-        .foregroundStyle(prominent ? Prism.ink : Prism.text)
-        .background(prominent ? Prism.action : (selected ? Prism.surface2 : .clear), in: RoundedRectangle(cornerRadius: 8))
         .help(title)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
     var topbar: some View {
         HStack {
             Text(model.screen == .settings ? "Settings" : model.screen == .home ? "Home" : (model.screen == .create || model.screen == .importSource ? "Create Shorts" : (model.project?.displayTitle ?? "Editor"))).font(Prism.display(18))
             Spacer()
             if model.isBusy { ProgressView().controlSize(.small) }
-            if model.screen == .editor || model.screen == .importSource { Text(model.message).font(Prism.text(12)).foregroundStyle(Prism.textSecondary).lineLimit(1) }
+            if model.isBusy && (model.screen == .editor || model.screen == .importSource) { Text(model.message).font(Prism.text(12)).foregroundStyle(Prism.textSecondary).lineLimit(1) }
             AppearanceSwitch(selection: $appearance).padding(.leading, 12)
         }.padding(20)
     }
+    /// A downloaded update: small and calm, at the bottom, never over a popup. Restarting waits for exports and AI tasks.
+    var updateBanner: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: "arrow.down.circle.fill").font(Prism.text(18)).foregroundStyle(Prism.accent)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("New version ready — Restart to update").font(Prism.text(13, .medium))
+                if let version = updater.readyVersion {
+                    Text("Prism \(version)").font(Prism.mono(11)).foregroundStyle(Prism.textSecondary)
+                }
+                ForEach(updater.releaseNotes, id: \.self) { line in
+                    Text("• " + line).font(Prism.text(12)).foregroundStyle(Prism.textSecondary).lineLimit(1)
+                }
+                if model.isBusy {
+                    Text("Available when the current export or AI task finishes.").font(Prism.text(11)).foregroundStyle(Prism.textSecondary)
+                }
+            }
+            Spacer(minLength: 12)
+            Button("Later") { updater.isBannerDismissed = true }.buttonStyle(.prismGhost)
+            Button("Restart to update") { updater.restartToUpdate() }
+                .buttonStyle(.prismPrimary).disabled(model.isBusy)
+                .help(model.isBusy ? "Prism restarts once the export or AI task has finished" : "Install the update and reopen Prism")
+        }
+        .padding(16)
+        .frame(maxWidth: 560)
+        .background(Prism.surface1, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Prism.border))
+        .shadow(color: .black.opacity(0.18), radius: 16, y: 6)
+        .padding(.bottom, 24)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("New version ready")
+    }
+
+    /// The first launch after an update says what changed, in the same calm card.
+    var updatedBanner: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: "checkmark.circle.fill").font(Prism.text(18)).foregroundStyle(Prism.accent)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Updated to Prism \(updater.updatedVersion ?? updater.version)").font(Prism.text(13, .medium))
+                if updater.updatedNotes.isEmpty {
+                    Text("You're on the latest version.").font(Prism.text(12)).foregroundStyle(Prism.textSecondary)
+                } else {
+                    Text("What's new").font(Prism.text(11, .medium)).foregroundStyle(Prism.textSecondary).padding(.top, 2)
+                    ForEach(updater.updatedNotes, id: \.self) { line in
+                        Text("• " + line).font(Prism.text(12)).foregroundStyle(Prism.textSecondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            Spacer(minLength: 12)
+            Button("Got it") { withAnimation(.easeOut(duration: 0.2)) { updater.updatedVersion = nil } }
+                .buttonStyle(.prismPrimary).keyboardShortcut(.defaultAction)
+        }
+        .padding(16)
+        .frame(maxWidth: 560)
+        .background(Prism.surface1, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Prism.border))
+        .shadow(color: .black.opacity(0.18), radius: 16, y: 6)
+        .padding(.bottom, 24)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Prism was updated")
+    }
+
+    var usageTileDetail: String {
+        _ = model.usageRevision
+        return "\(minutesText(UsageLimit.used(.day, entries: UsageLimit.load()))) of \(Int(UsageLimit.perDayMinutes)) min today"
+    }
+
+    func minutesText(_ value: Double) -> String { "\(Int(value.rounded(.down))) min" }
+
+    /// The video limit: how many minutes of today's and this week's allowance are used, and when each resets.
+    var usageSettings: some View {
+        let _ = model.usageRevision
+        let entries = UsageLimit.load()
+        let today = serverUsage?.day ?? UsageLimit.used(.day, entries: entries)
+        let week = serverUsage?.week ?? UsageLimit.used(.weekOfYear, entries: entries)
+        let weekEnd = Calendar.current.dateInterval(of: .weekOfYear, for: .now)?.end ?? .now
+        return VStack(alignment: .leading, spacing: 18) {
+            Label("Usage", systemImage: "gauge.with.dots.needle.33percent").font(Prism.display(20))
+            Text("You can make Shorts from \(Int(UsageLimit.perDayMinutes)) minutes of video a day and \(Int(UsageLimit.perWeekMinutes)) a week. A video you already used that day or week doesn't count again, and a run that makes no Shorts isn't counted.")
+                .font(Prism.text(13)).foregroundStyle(Prism.textSecondary).fixedSize(horizontal: false, vertical: true)
+            Divider()
+            usageRow("Today", used: today, limit: UsageLimit.perDayMinutes, resets: "Resets at midnight")
+            usageRow("This week", used: week, limit: UsageLimit.perWeekMinutes, resets: "Resets \(weekEnd.formatted(.dateTime.weekday(.wide))) at midnight")
+        }
+        .padding(24)
+        .background(Prism.surface1, in: RoundedRectangle(cornerRadius: 16))
+        .task { serverUsage = await model.account.usageCounts() }
+    }
+
+    func usageRow(_ title: String, used: Double, limit: Double, resets: String) -> some View {
+        let next = resets.prefix(1).lowercased() + resets.dropFirst()
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title).font(Prism.text(14, .medium))
+                Spacer()
+                Text("\(minutesText(used)) of \(Int(limit)) min").font(Prism.mono(13)).foregroundStyle(used >= limit ? Prism.amber : Prism.textSecondary)
+            }
+            PrismProgressLine(value: min(1, used / limit))
+            Text(used >= limit ? "Limit reached · \(next)" : "\(minutesText(limit - used)) left · \(next)")
+                .font(Prism.text(12)).foregroundStyle(Prism.textSecondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    var updateSettings: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Label("Updates", systemImage: "arrow.triangle.2.circlepath").font(Prism.display(20))
+            Text("Prism checks for updates when it opens and every few hours, downloads them in the background and asks you to restart when one is ready. Every update is signed, and Prism refuses any it can't verify.")
+                .font(Prism.text(13)).foregroundStyle(Prism.textSecondary).fixedSize(horizontal: false, vertical: true)
+            Divider()
+            HStack {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Current version").font(Prism.text(14, .medium))
+                    Text("Prism \(updater.version) (\(updater.build))").font(Prism.mono(13)).foregroundStyle(Prism.textSecondary).textSelection(.enabled)
+                }
+                Spacer()
+                Button("Check for updates…") { updater.checkForUpdates() }
+                    .disabled(!updater.isEnabled || model.isBusy)
+            }
+            updateStatus
+            if let lastCheck = updater.lastCheck {
+                Text("Last checked \(lastCheck.formatted(date: .abbreviated, time: .shortened))").font(Prism.text(12)).foregroundStyle(Prism.textSecondary)
+            }
+            if !updater.isEnabled {
+                Label("Updates are off in this build. Install Prism from prismclips.app to get updates.", systemImage: "info.circle")
+                    .font(Prism.text(12)).foregroundStyle(Prism.textSecondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Divider()
+            Text("What changed").font(Prism.text(14, .medium))
+            if updater.history.isEmpty {
+                Text("Versions you run will be listed here with their changes.").font(Prism.text(12)).foregroundStyle(Prism.textSecondary)
+            }
+            ForEach(updater.history.reversed()) { release in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(release.version == updater.version ? "Prism \(release.version) · current" : "Prism \(release.version)")
+                        .font(Prism.text(13, .medium))
+                    if release.notes.isEmpty {
+                        Text("No notes were published for this version.").font(Prism.text(12)).foregroundStyle(Prism.textSecondary)
+                    } else {
+                        ForEach(release.notes, id: \.self) { line in
+                            Text("• " + line).font(Prism.text(12)).foregroundStyle(Prism.textSecondary).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                .padding(.bottom, 4)
+            }
+            Divider()
+        }
+        .padding(24)
+        .background(Prism.surface1, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    /// Whether an update is ready, found, or the last check came back clean.
+    @ViewBuilder var updateStatus: some View {
+        if let version = updater.readyVersion {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Prism \(version) is downloaded and ready.", systemImage: "arrow.down.circle.fill")
+                    .font(Prism.text(13, .medium)).foregroundStyle(Prism.accent)
+                ForEach(updater.releaseNotes, id: \.self) { line in
+                    Text("• " + line).font(Prism.text(12)).foregroundStyle(Prism.textSecondary)
+                }
+                Button("Restart to update") { updater.restartToUpdate() }
+                    .buttonStyle(.prismPrimary).disabled(model.isBusy)
+                if model.isBusy {
+                    Text("Available when the current export or AI task finishes.").font(Prism.text(11)).foregroundStyle(Prism.textSecondary)
+                }
+            }
+        } else if let version = updater.availableVersion {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Prism \(version) is available. It is downloading.", systemImage: "arrow.down.circle")
+                    .font(Prism.text(13, .medium)).foregroundStyle(Prism.accent)
+                ForEach(updater.availableNotes, id: \.self) { line in
+                    Text("• " + line).font(Prism.text(12)).foregroundStyle(Prism.textSecondary)
+                }
+            }
+        } else if let result = updater.checkResult {
+            Label(result, systemImage: "checkmark.circle")
+                .font(Prism.text(13, .medium)).foregroundStyle(Prism.textSecondary)
+        }
+    }
+
     var accountSettings: some View {
         VStack(alignment: .leading, spacing: 18) {
             Label("Account", systemImage: "person.crop.circle").font(Prism.display(20))
@@ -1887,127 +2047,27 @@ struct ContentView: View {
                     .foregroundStyle(Prism.textSecondary)
             }
             HStack(spacing: 14) {
-                SettingsCategoryTile(title: "AI & Cloud", detail: "Provider, key, and model", icon: "sparkles", isSelected: selectedSettingsCategory == .aiCloud) {
-                    withAnimation(.easeInOut(duration: 0.2)) { selectedSettingsCategory = .aiCloud }
-                }
                 SettingsCategoryTile(title: "Account", detail: model.account.email ?? "Sign in to track your stats", icon: "person.crop.circle", isSelected: selectedSettingsCategory == .account) {
                     withAnimation(.easeInOut(duration: 0.2)) { selectedSettingsCategory = .account }
+                }
+                SettingsCategoryTile(title: "Usage", detail: usageTileDetail, icon: "gauge.with.dots.needle.33percent", isSelected: selectedSettingsCategory == .usage) {
+                    withAnimation(.easeInOut(duration: 0.2)) { selectedSettingsCategory = .usage }
                 }
                 SettingsCategoryTile(title: "System resources", detail: "RAM and storage updates", icon: "chart.bar.xaxis", isSelected: selectedSettingsCategory == .systemResources) {
                     withAnimation(.easeInOut(duration: 0.2)) { selectedSettingsCategory = .systemResources }
                 }
+                SettingsCategoryTile(title: "Updates", detail: "Prism \(updater.version)", icon: "arrow.triangle.2.circlepath", isSelected: selectedSettingsCategory == .updates) {
+                    withAnimation(.easeInOut(duration: 0.2)) { selectedSettingsCategory = .updates }
+                }
             }
             ScrollView {
                 Group {
-                    if selectedSettingsCategory == .aiCloud {
-                        VStack(alignment: .leading, spacing: 18) {
-                        Label("AI & Cloud", systemImage: "sparkles").font(Prism.display(20))
-                        Text("Gemini handles clip selection, transcription, subtitles, framing and editor chat.")
-                            .font(Prism.text(13)).foregroundStyle(Prism.textSecondary)
-                        Divider()
-                        Text("Google AI Studio API key").font(Prism.text(14, .medium))
-                        HStack(spacing: 10) {
-                            Image(systemName: model.isGeminiKeySaved ? "checkmark.shield.fill" : "key.fill")
-                                .foregroundStyle(model.isGeminiKeySaved ? Prism.accent : Prism.textSecondary)
-                            Text(model.isGeminiKeySaved ? "API key saved securely" : "No API key saved")
-                                .font(Prism.text(13, .medium))
-                            Spacer()
-                            if model.isGeminiKeySaved {
-                                Text("Hidden for security").font(Prism.text(12)).foregroundStyle(Prism.textSecondary)
-                            }
-                        }
-                        .padding(12)
-                        .background(Prism.surface1, in: RoundedRectangle(cornerRadius: 12))
-                        if model.isGeminiKeySaved {
-                            HStack(spacing: 10) {
-                                Image(systemName: model.isEditingGeminiKey ? "key.fill" : "lock.fill")
-                                    .foregroundStyle(Prism.textSecondary)
-                                if model.isEditingGeminiKey {
-                                    SecureField("Enter a new API key", text: $model.geminiKey)
-                                        .textFieldStyle(.plain)
-                                } else if model.isShowingGeminiKey {
-                                    ScrollView(.horizontal) {
-                                        Text(model.revealedGeminiKey)
-                                            .font(Prism.mono(13))
-                                            .textSelection(.enabled)
-                                            .lineLimit(1)
-                                            .fixedSize(horizontal: true, vertical: false)
-                                    }
-                                } else {
-                                    Text(String(repeating: "•", count: 24))
-                                        .font(Prism.mono(13))
-                                        .foregroundStyle(Prism.textSecondary)
-                                }
-                                Spacer(minLength: 0)
-                                if model.isEditingGeminiKey {
-                                    Button("Cancel") { model.cancelGeminiKeyEdit() }
-                                        .buttonStyle(.borderless)
-                                    Button("Save") { model.verifyAndSaveGeminiKey() }
-                                        .buttonStyle(.prismPrimary)
-                                        .disabled(model.geminiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isTestingGemini)
-                                } else {
-                                    Button { model.toggleGeminiKeyVisibility() } label: {
-                                        Image(systemName: model.isShowingGeminiKey ? "eye.slash" : "eye")
-                                    }
-                                    .buttonStyle(.borderless)
-                                    .help(model.isShowingGeminiKey ? "Hide API key" : "Show API key")
-                                    .accessibilityLabel(model.isShowingGeminiKey ? "Hide API key" : "Show API key")
-                                    Button { model.editGeminiKey() } label: {
-                                        Image(systemName: "pencil")
-                                    }
-                                    .buttonStyle(.borderless)
-                                    .help("Edit API key")
-                                    .accessibilityLabel("Edit API key")
-                                }
-                            }
-                            .padding(11)
-                            .background(Prism.surface2, in: RoundedRectangle(cornerRadius: 12))
-                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Prism.surface2, lineWidth: 1))
-                        } else {
-                            HStack(spacing: 10) {
-                                Image(systemName: "key.fill").foregroundStyle(Prism.textSecondary)
-                                SecureField("Paste your API key", text: $model.geminiKey)
-                                    .textFieldStyle(.plain)
-                                Button("Save key") { model.verifyAndSaveGeminiKey() }
-                                    .buttonStyle(.prismPrimary)
-                                    .disabled(model.geminiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isTestingGemini)
-                            }
-                            .padding(11)
-                            .background(Prism.surface2, in: RoundedRectangle(cornerRadius: 12))
-                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Prism.surface2, lineWidth: 1))
-                        }
-                        HStack {
-                            Button(model.isTestingGemini ? "Testing…" : "Test connection") { model.testGeminiKey() }
-                                .disabled(model.isTestingGemini)
-                            if model.isGeminiKeySaved {
-                                Button("Remove saved key", role: .destructive) { model.geminiKey = ""; model.saveGeminiKey() }
-                                    .disabled(model.isTestingGemini || model.isEditingGeminiKey)
-                            }
-                        }
-                        Text(model.geminiKeyStatus).font(Prism.text(12)).foregroundStyle(Prism.textSecondary)
-                        Link("Get a key from Google AI Studio", destination: URL(string: "https://aistudio.google.com/apikey")!)
-                        Divider()
-                        HStack(alignment: .center, spacing: 18) {
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text("Gemini model").font(Prism.text(14, .medium))
-                                Text("The default is recommended. Change it if you prefer.")
-                                    .font(Prism.text(12)).foregroundStyle(Prism.textSecondary)
-                            }
-                            Spacer(minLength: 8)
-                            Picker("Gemini model", selection: $model.geminiModel) {
-                                Text("Gemini 3.1 Flash-Lite · Recommended").tag("gemini-3.1-flash-lite")
-                                Text("Gemini 3.5 Flash-Lite · Low cost").tag("gemini-3.5-flash-lite")
-                                Text("Gemini 3.6 Flash · Higher capability").tag("gemini-3.6-flash")
-                            }
-                            .pickerStyle(.menu)
-                            .onChange(of: model.geminiModel) { _, value in UserDefaults.standard.set(value, forKey: "shorts.geminiModel") }
-                        }
-                        Text("Cloud AI sends audio, transcripts and sampled frames to Google. Chat sends your request, recent conversation and edit summary. Google API charges may apply. Video rendering and subject tracking run on your Mac.")
-                            .font(Prism.text(12)).foregroundStyle(Prism.textSecondary).fixedSize(horizontal: false, vertical: true)
-                        }
-                        .disabled(model.isBusy)
-                    } else if selectedSettingsCategory == .account {
+                    if selectedSettingsCategory == .account {
                         accountSettings
+                    } else if selectedSettingsCategory == .updates {
+                        updateSettings
+                    } else if selectedSettingsCategory == .usage {
+                        usageSettings
                     } else {
                         TimelineView(.periodic(from: .now, by: min(3_600, max(1, resourceRefreshSeconds)))) { _ in
                             let machine = MachineProfile.detect()
@@ -2048,6 +2108,10 @@ struct ContentView: View {
         }
         .padding(32)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onAppear {
+            if model.opensUsageSettings { selectedSettingsCategory = .usage; model.opensUsageSettings = false }
+            if model.opensAccountSettings { selectedSettingsCategory = .account; model.opensAccountSettings = false }
+        }
     }
 
     private func resourceSummary(title: String, value: String, fraction: Double, tint: Color) -> some View {
@@ -2094,7 +2158,6 @@ struct ContentView: View {
                     .foregroundStyle(Prism.ink)
                     .background(Prism.action, in: RoundedRectangle(cornerRadius: 16))
                     .pointerFeedback()
-                    .keyboardShortcut("n", modifiers: .command)
                     .help("Start creating · ⌘N")
                 }
 
@@ -2176,7 +2239,28 @@ struct ContentView: View {
                 }
             }.padding(24).frame(maxWidth: 1800, alignment: .leading).frame(maxWidth: .infinity)
         }
-        .task(id: model.recentProjectPaths) { projectShortCounts = await Self.shortCounts(model.recentProjectPaths) }
+        // A video dropped from Finder anywhere on Home starts a new Shorts project with it.
+        .dropDestination(for: URL.self) { urls, _ in
+            guard let url = urls.first, url.isFileURL, AppModel.importableExtensions.contains(url.pathExtension.lowercased()), !model.isBusy else { return false }
+            model.startLongVideoToShort()
+            model.importSource(url)
+            return true
+        } isTargeted: { isHomeDropTarget = $0 }
+        .overlay {
+            if isHomeDropTarget {
+                VStack(spacing: 12) {
+                    Image(systemName: "arrow.down.circle.fill").font(Prism.text(44))
+                    Text("Drop to create Shorts").font(Prism.display(22))
+                    Text("MOV, MP4, M4V or AVI").font(Prism.text(12)).foregroundStyle(Prism.textSecondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Prism.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 16))
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(style: StrokeStyle(lineWidth: 2, dash: [10, 8])).foregroundStyle(Prism.accent))
+                .padding(16)
+                .allowsHitTesting(false)
+            }
+        }
+        .task(id: model.recentProjectPaths + ["\(model.projectListRevision)"]) { projectShortCounts = await Self.shortCounts(model.recentProjectPaths) }
         .alert(folderNamePrompt?.folderID == nil ? "New folder" : "Rename folder",
                isPresented: Binding(get: { folderNamePrompt != nil }, set: { if !$0 { folderNamePrompt = nil } })) {
             TextField("Folder name", text: $folderNameText)
@@ -2341,7 +2425,7 @@ struct ContentView: View {
                          : choosingCaptions ? "Choose your captions" : "Choose your Short settings")
                         .font(Prism.display(36))
                     Text(model.shortsSource == nil ? "Upload a video first. Then choose clip lengths and which part to analyze."
-                         : choosingType ? "This tells Prism what to look for and how to lay out each Short. You can change the layout for each Short in the editor."
+                         : choosingType ? "This tells Prism what to look for, how to lay out each Short and which captions Auto picks."
                          : choosingCaptions ? "Pick how speech appears on your Shorts. You can change it for each Short in the editor."
                          : "Your video is ready. Choose how to turn it into Shorts.")
                         .font(Prism.text(16)).foregroundStyle(Prism.textSecondary)
@@ -2410,14 +2494,20 @@ struct ContentView: View {
                     VStack(alignment: .leading, spacing: 7) {
                         Label("How many", systemImage: "square.stack.3d.up")
                             .font(Prism.text(12)).foregroundStyle(Prism.textSecondary)
-                        Stepper("\(model.shortCount) Shorts", value: $model.shortCount, in: 1...10)
+                        Toggle("Auto", isOn: $model.isShortCountAuto)
                             .font(Prism.text(13, .medium))
+                            .help("Prism AI finds every strong moment, up to one Short per minute of video and 20 in all")
+                        if !model.isShortCountAuto {
+                            Stepper("\(model.shortCount) Shorts", value: $model.shortCount, in: 1...ShortMaker.maxShorts)
+                                .font(Prism.text(13, .medium))
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     VStack(alignment: .leading, spacing: 7) {
                         Label("Approx. length", systemImage: "clock")
                             .font(Prism.text(12)).foregroundStyle(Prism.textSecondary)
                         Picker("Approximate Short length", selection: $model.shortDuration) {
+                            Text("Auto").tag(0.0)
                             ForEach([15.0, 30.0, 45.0, 60.0], id: \.self) { seconds in
                                 Text("\(Int(seconds)) seconds").tag(seconds)
                             }
@@ -2440,7 +2530,7 @@ struct ContentView: View {
                 if model.shortSourceRegion == .custom {
                     customRangeFields
                 }
-                Text("Prism will analyze frames and available speech, then suggest up to \(model.shortCount) distinct moments of about \(Int(model.shortDuration)) seconds in the \(model.shortSourceRegion.title.lowercased()). Review every pick before exporting.")
+                Text("Prism analyzes the speech and frames of the \(model.shortSourceRegion.title.lowercased()) and suggests \(model.isShortCountAuto ? "every strong moment it finds, up to \(ShortMaker.maxShorts)" : model.shortCount == 1 ? "1 moment" : "up to \(model.shortCount) moments"), \(model.shortDuration > 0 ? "about \(Int(model.shortDuration)) seconds each" : "each 15–60 seconds, as long as its story needs"). Shorts never overlap. Review every pick before exporting.")
                     .font(Prism.text(12)).foregroundStyle(Prism.textSecondary)
             }
             .padding(18)
@@ -2482,7 +2572,7 @@ struct ContentView: View {
                 }
             }
             if model.shortCaptionStyle.usesWordTiming {
-                Text("This style follows each spoken word. Gemini times the words; if a clip has none, its captions show as whole phrases.")
+                Text("This style follows each spoken word. Prism AI times the words of every Short after it is made.")
                     .font(Prism.text(12)).foregroundStyle(Prism.textSecondary)
             }
         }
@@ -2550,7 +2640,7 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Or paste a file path").font(Prism.text(12, .medium)).foregroundStyle(Prism.textSecondary)
                 HStack(spacing: 10) {
-                    TextField("/Users/you/Movies/my-video.mp4", text: $model.sourcePath)
+                    TextField("Video file path", text: $model.sourcePath, prompt: Text("/Users/you/Movies/my-video.mp4").foregroundStyle(Prism.textSecondary))
                         .textFieldStyle(.plain).font(Prism.mono(13)).padding(13)
                         .background(Prism.surface2, in: RoundedRectangle(cornerRadius: 12))
                         .onSubmit { model.importFromPath() }
@@ -2774,6 +2864,7 @@ private struct RecentProjectCard: View {
         return String(format: "%d:%02d", total / 60, total % 60)
     }
 
+    nonisolated(unsafe) private static let posterCache = NSCache<NSString, AnyObject>()
     private func loadSummary() async {
         let projectPath = path
         let loaded = await Task.detached(priority: .utility) { () -> RecentProjectSummary in
@@ -2789,12 +2880,19 @@ private struct RecentProjectCard: View {
                 // Moved projects keep their media inside the project folder.
                 let stored = URL(fileURLWithPath: video.path)
                 let source = FileManager.default.fileExists(atPath: stored.path) ? stored
-                    : root.appendingPathComponent("Media").appendingPathComponent(stored.lastPathComponent)
-                let generator = AVAssetImageGenerator(asset: AVURLAsset(url: source))
-                generator.appliesPreferredTrackTransform = true
-                generator.maximumSize = CGSize(width: 480, height: 270)
+                    : root.appendingPathComponent("Media").appendingPathComponent(video.name)
                 let time = firstShort.map { $0.start + min(1, $0.duration / 2) } ?? 1
-                poster = try? generator.copyCGImage(at: CMTime(seconds: time, preferredTimescale: 600), actualTime: nil)
+                // Home reloads its cards on every visit; the poster only changes with the video or the first Short.
+                let key = "\(source.path)|\(time)" as NSString
+                if let cached = Self.posterCache.object(forKey: key) {
+                    poster = (cached as! CGImage)
+                } else {
+                    let generator = AVAssetImageGenerator(asset: AVURLAsset(url: source))
+                    generator.appliesPreferredTrackTransform = true
+                    generator.maximumSize = CGSize(width: 480, height: 270)
+                    poster = try? generator.copyCGImage(at: CMTime(seconds: time, preferredTimescale: 600), actualTime: nil)
+                    if let poster { Self.posterCache.setObject(poster, forKey: key) }
+                }
             }
             return RecentProjectSummary(title: project.displayTitle, duration: video?.duration, shortCount: project.segments.count,
                                         created: project.created, poster: poster)

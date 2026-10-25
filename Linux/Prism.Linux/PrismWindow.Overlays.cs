@@ -76,7 +76,7 @@ public sealed partial class PrismWindow
         var row = Row(8);
         row.MarginTop = 6;
         row.Append(left);
-        row.Append(Spacer());
+        row.Append(Gap());
         foreach (var widget in right) row.Append(widget);
         return row;
     }
@@ -299,6 +299,16 @@ public sealed partial class PrismWindow
             qualityDetail.SetText(choice.Quality.Detail() + " Applies to Shorts; the main video keeps its original quality.");
         };
         return card;
+    }
+
+    /// Escape closes the popup that offers a way out, as Cancel or Close would; progress, the key gate and work in flight stay.
+    bool Dismiss()
+    {
+        if (localCard is not null) { CloseLocal(); return true; }
+        if (modalKind.StartsWith("error:", StringComparison.Ordinal)) { session.GenerationError = null; return true; }
+        if (modalKind.StartsWith("done:", StringComparison.Ordinal)) { session.ExportSummary = null; return true; }
+        if (modalKind == "export") { session.ExportChoice = null; return true; }
+        return false;
     }
 
     void ShowLocal(Gtk.Box card) { localCard = card; localRevision++; RefreshModal(); }

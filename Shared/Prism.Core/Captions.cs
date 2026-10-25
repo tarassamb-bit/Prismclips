@@ -37,14 +37,16 @@ public static class CaptionRenderer
         var pops = segment.CaptionAnimated == true;
         // The on-screen text overlay moves out of the subtitles' way.
         var overlayY = captions.Count == 0 ? 220 : position == CaptionPosition.Top ? 330 : 1450;
-        var style = (segment.CaptionStyle ?? CaptionStyle.Classic).Resolved();
+        var style = (segment.CaptionStyle ?? CaptionStyle.Classic).Resolved(segment.VideoType, segment.SplitScreen == true);
         // Word-following styles need real word timings; estimated timings would mark the wrong word.
         var timedWords = style.UsesWordTiming() || style == CaptionStyle.BoldCaps ? segment.SpeechWords ?? [] : [];
         void Add(string text, double start, double duration, double layerY, CaptionStyle layerStyle, double layerScale, int? highlighted, bool pop)
         {
-            if (!double.IsFinite(start) || !double.IsFinite(duration) || total <= 0 || start >= total || duration <= 0) return;
+            if (!double.IsFinite(start) || !double.IsFinite(duration) || !double.IsFinite(total) || total <= 0 || start >= total || duration <= 0) return;
             var overlayStart = Math.Clamp(start, 0, total);
-            result.Add(new Element(text, overlayStart, Math.Min(duration, total - overlayStart), layerY, layerStyle, layerScale, highlighted, pop));
+            var overlayEnd = Math.Min(total, start + duration);
+            if (overlayEnd <= overlayStart) return;
+            result.Add(new Element(text, overlayStart, overlayEnd - overlayStart, layerY, layerStyle, layerScale, highlighted, pop));
         }
         foreach (var cue in captions)
         {
@@ -249,7 +251,7 @@ public static class CaptionRenderer
         for (var index = 0; index + 1 < boundaries.Count; index++)
         {
             double from = boundaries[index], to = boundaries[index + 1];
-            if (to - from < 0.0005) continue;
+            if (to <= from) continue;
             var middle = (from + to) / 2;
             var active = elements.Select((element, n) => (element, n)).Where(e => e.element.Start <= middle && middle < e.element.Start + e.element.Duration)
                                  .Select(e => (e.element, e.n, Scale: PopScale(e.element, from))).ToList();

@@ -16,9 +16,12 @@ public sealed class Account : INotifyPropertyChanged
     public static readonly Uri ProjectUrl = new("https://isdplhahgggundbohmlr.supabase.co/");
     const string PublishableKey = "sb_publishable_ATTcp2-mrca0swMStHHdYQ_Le851b8l";
     public const string StatsPage = "https://tarassamb-bit.github.io/prism-website/#account";
-    static readonly HttpClient Client = new() { Timeout = TimeSpan.FromSeconds(20) };
+    static readonly HttpClient SharedClient = new() { Timeout = TimeSpan.FromSeconds(20) };
 
     readonly IKeyStore store;
+    readonly HttpClient client;
+    readonly SemaphoreSlim gate = new(1, 1);
+    long sessionRevision, authenticationRequest;
     string? email;
     string status = "";
     bool isWorking;
@@ -29,9 +32,10 @@ public sealed class Account : INotifyPropertyChanged
     public bool IsWorking { get => isWorking; private set => Set(ref isWorking, value); }
     public bool IsSignedIn => Email is not null;
 
-    public Account(IKeyStore store)
+    public Account(IKeyStore store, HttpClient? client = null)
     {
         this.store = store;
+        this.client = client ?? SharedClient;
         email = SavedSession()?.Email;
     }
 
@@ -40,50 +44,75 @@ public sealed class Account : INotifyPropertyChanged
 
     public void SignOut()
     {
-        Forget();
+        // Revoke pending sign-ins even when the credential store fails to clear the current session.
+        authenticationRequest++;
+        IsWorking = false;
+        try { store.Save(""); }
+        catch (Exception error) { Status = "Could not sign out: " + error.Message; return; }
+        sessionRevision++;
+        Email = null;
         Status = "Signed out. Exports are no longer counted.";
     }
 
     /// Adds one export to the account's stats. Failures never affect the export; they only show in Settings.
     public async Task RecordExport(int shortCount, double seconds, string quality)
     {
-        if (!IsSignedIn || shortCount <= 0 || await AccessToken() is not { } token) return;
-        var body = new JsonObject { ["short_count"] = shortCount, ["seconds"] = seconds, ["quality"] = quality };
-        var (ok, _, message) = await Send("rest/v1/exports", body, token, minimal: true);
-        if (!ok) Status = $"Could not add this export to your stats: {message}";
+        if (!IsSignedIn || shortCount <= 0) return;
+        var revision = sessionRevision;
+        // One at a time: each refresh rotates the saved token, so two overlapping refreshes would spend the same one.
+        await gate.WaitAsync();
+        try
+        {
+            if (revision != sessionRevision || await AccessToken(revision) is not { } token) return;
+            var body = new JsonObject { ["short_count"] = shortCount, ["seconds"] = seconds, ["quality"] = quality };
+            var (ok, _, message, _) = await Send("rest/v1/exports", body, token, minimal: true);
+            if (!ok && revision == sessionRevision) Status = $"Could not add this export to your stats: {message}";
+        }
+        finally { gate.Release(); }
     }
 
     sealed record Session(string Email, string RefreshToken);
 
     async Task Authenticate(string path, string address, string password)
     {
+        if (IsWorking) return;
         address = address.Trim();
         if (address.Length == 0 || password.Length < 6) { Status = "Enter your email and a password of at least 6 characters."; return; }
+        var request = ++authenticationRequest;
+        var revision = sessionRevision;
         IsWorking = true;
+        await gate.WaitAsync();
         try
         {
-            var (ok, reply, message) = await Send(path, new JsonObject { ["email"] = address, ["password"] = password });
+            if (request != authenticationRequest || revision != sessionRevision) return;
+            revision = ++sessionRevision;
+            var (ok, reply, message, _) = await Send(path, new JsonObject { ["email"] = address, ["password"] = password });
+            if (request != authenticationRequest || revision != sessionRevision) return;
             if (!ok) { Status = message; return; }
             // Sign-up without a session means Supabase sent a confirmation email first.
-            if (reply?["refresh_token"] is null) { Status = "Check your inbox to confirm your email, then sign in."; return; }
+            if (Field(reply, "refresh_token") is null) { Status = "Check your inbox to confirm your email, then sign in."; return; }
             if (!Store(reply, address)) return;
+            // Exports queued while the old account was still visible belong to that account.
+            sessionRevision++;
             Status = "Signed in. Each export now adds to your stats.";
         }
-        finally { IsWorking = false; }
+        finally { gate.Release(); if (request == authenticationRequest) IsWorking = false; }
     }
 
     /// A fresh access token from the saved refresh token. Supabase rotates refresh tokens, so the new one is saved each time.
-    async Task<string?> AccessToken()
+    async Task<string?> AccessToken(long revision)
     {
         if (SavedSession() is not { } saved) { Email = null; return null; }
-        var (ok, reply, message) = await Send("auth/v1/token?grant_type=refresh_token", new JsonObject { ["refresh_token"] = saved.RefreshToken });
+        var (ok, reply, message, code) = await Send("auth/v1/token?grant_type=refresh_token", new JsonObject { ["refresh_token"] = saved.RefreshToken });
+        if (revision != sessionRevision) return null;
         if (!ok)
         {
-            Status = $"Your sign-in expired ({message}). Sign in again to keep counting exports.";
-            Forget();
+            // Only a rejected sign-in ends it; being offline or a server hiccup keeps the account for the next export.
+            if (code is 400 or 401 or 403) { Status = $"Your sign-in expired ({message}). Sign in again to keep counting exports."; Forget(); }
+            else Status = $"Could not reach your Prism account, so this export was not counted: {message}";
             return null;
         }
-        return Store(reply, saved.Email) ? reply?["access_token"]?.GetValue<string>() : null;
+        return Store(reply, saved.Email) ? Field(reply, "access_token") : null;
     }
 
     void Forget()
@@ -95,7 +124,9 @@ public sealed class Account : INotifyPropertyChanged
     /// Saves the session from an auth response; false when the response has none.
     bool Store(JsonNode? reply, string address)
     {
-        if (reply?["refresh_token"]?.GetValue<string>() is not { Length: > 0 } refresh) return false;
+        if (Field(reply, "refresh_token") is not { Length: > 0 } refresh || string.IsNullOrWhiteSpace(refresh)
+            || string.IsNullOrWhiteSpace(Field(reply, "access_token")))
+        { Status = "The account service returned an incomplete sign-in. Please try again."; return false; }
         try { store.Save(JsonSerializer.Serialize(new Session(address, refresh))); }
         catch (Exception error) { Status = "Could not save your sign-in: " + error.Message; return false; }
         Email = address;
@@ -107,12 +138,17 @@ public sealed class Account : INotifyPropertyChanged
         try
         {
             var text = store.Read();
-            return text.Length == 0 ? null : JsonSerializer.Deserialize<Session>(text);
+            var session = text.Length == 0 ? null : JsonSerializer.Deserialize<Session>(text);
+            return session is not null && !string.IsNullOrWhiteSpace(session.Email) && !string.IsNullOrWhiteSpace(session.RefreshToken) ? session : null;
         }
         catch (Exception) { return null; }
     }
 
-    static async Task<(bool Ok, JsonNode? Reply, string Message)> Send(string path, JsonObject body, string? token = null, bool minimal = false)
+    /// A text field of a JSON reply, or null when it is missing or not text.
+    static string? Field(JsonNode? reply, string name) => reply is JsonObject node && node[name] is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+
+    /// The reply, or why it failed; Code is the HTTP status, or 0 when the server could not be reached.
+    async Task<(bool Ok, JsonNode? Reply, string Message, int Code)> Send(string path, JsonObject body, string? token = null, bool minimal = false)
     {
         try
         {
@@ -123,17 +159,17 @@ public sealed class Account : INotifyPropertyChanged
             request.Headers.Add("apikey", PublishableKey);
             if (token is not null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             if (minimal) request.Headers.Add("Prefer", "return=minimal");
-            using var response = await Client.SendAsync(request);
+            using var response = await client.SendAsync(request);
             var text = await response.Content.ReadAsStringAsync();
             JsonNode? reply = null;
             try { reply = text.Length > 0 ? JsonNode.Parse(text) : null; } catch (JsonException) { }
-            if (response.IsSuccessStatusCode) return (true, reply, "");
+            if (response.IsSuccessStatusCode) return (true, reply, "", (int)response.StatusCode);
             var reason = reply is JsonObject failure
                 ? (failure["msg"] ?? failure["error_description"] ?? failure["message"])?.ToString()
                 : null;
-            return (false, reply, reason ?? $"HTTP {(int)response.StatusCode}");
+            return (false, reply, reason ?? $"HTTP {(int)response.StatusCode}", (int)response.StatusCode);
         }
-        catch (Exception error) { return (false, null, error.Message); }
+        catch (Exception error) { return (false, null, error.Message, 0); }
     }
 
     void Set<T>(ref T field, T value, [CallerMemberName] string? name = null)
