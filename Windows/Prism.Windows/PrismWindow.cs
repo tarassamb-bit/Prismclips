@@ -57,7 +57,7 @@ public sealed partial class PrismWindow : Window
         MinWidth = 900; MinHeight = 620;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         UseLayoutRounding = true; SnapsToDevicePixels = true;
-        // Prism draws its own title bar, with Mac-style window lights, so the page runs to the top edge like the Mac app.
+        // Prism draws its own title bar and caption buttons, so the page runs to the top edge like the Mac app.
         System.Windows.Shell.WindowChrome.SetWindowChrome(this, new System.Windows.Shell.WindowChrome { CaptionHeight = 0, ResizeBorderThickness = new Thickness(6), GlassFrameThickness = new Thickness(0, 0, 0, 1), UseAeroCaptionButtons = false });
         StateChanged += (_, _) => { FitMaximized(); ((TextBlock)maximize!.Content).Text = WindowState == WindowState.Maximized ? "\uE923" : "\uE922"; };
         Activated += (_, _) => TintCaption(); Deactivated += (_, _) => TintCaption();
@@ -111,6 +111,7 @@ public sealed partial class PrismWindow : Window
         {
             if (args.Key == Key.N && Keyboard.Modifiers == ModifierKeys.Control && session.Screen == Screen.Home && !session.IsBusy && modalKind.Length == 0)
             { args.Handled = true; StartCreate(); }
+            else if (args.Key == Key.Escape && Dismiss()) args.Handled = true;
         };
         SizeChanged += (_, _) => { if (overlayHost.Children.Count > 0 && overlayHost.Children[0] is Border { Child: ScrollViewer scroll }) scroll.MaxHeight = Math.Max(300, ActualHeight - 90); };
         resourceTimer.Tick += (_, _) => RefreshResources();

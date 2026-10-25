@@ -15,12 +15,14 @@ function readBody(req) {
 }
 
 function verify(raw, header, secret) {
-  const parts = Object.fromEntries(String(header || '').split(';').map((part) => part.split('=')));
-  const ts = Number(parts.ts);
-  if (!parts.h1 || !ts || Math.abs(Date.now() / 1000 - ts) > 300) return false;
-  const expected = crypto.createHmac('sha256', secret).update(`${parts.ts}:${raw}`).digest('hex');
-  return expected.length === parts.h1.length
-    && crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(parts.h1));
+  const parts = String(header || '').split(';').map((part) => part.trim().split('='));
+  const timestamp = parts.find(([name]) => name === 'ts')?.[1];
+  const ts = Number(timestamp);
+  if (!Number.isSafeInteger(ts) || ts <= 0 || Math.abs(Date.now() / 1000 - ts) > 300) return false;
+  const expected = crypto.createHmac('sha256', secret).update(`${timestamp}:${raw}`).digest();
+  // Reject malformed input before comparing bytes, and accept any valid signature during key rotation.
+  return parts.some(([name, value]) => name === 'h1' && /^[a-f0-9]{64}$/i.test(value || '')
+    && crypto.timingSafeEqual(expected, Buffer.from(value, 'hex')));
 }
 
 async function handler(req, res) {
@@ -33,9 +35,11 @@ async function handler(req, res) {
     }
     let event;
     try { event = JSON.parse(raw); } catch { throw new HttpError(400, 'Invalid JSON.'); }
-    if (!event.event_type?.startsWith('subscription.') || typeof event.data?.id !== 'string') {
+    if (!event || typeof event !== 'object' || typeof event.event_type !== 'string') throw new HttpError(400, 'Invalid event.');
+    if (!event.event_type.startsWith('subscription.')) {
       return send(res, 200, { ignored: true });
     }
+    if (typeof event.data?.id !== 'string' || !/^sub_[a-z0-9]+$/.test(event.data.id)) throw new HttpError(400, 'Invalid subscription ID.');
     // Any error answer makes Paddle retry later.
     send(res, 200, { result: await syncSubscription(event.data.id) });
   } catch (error) {

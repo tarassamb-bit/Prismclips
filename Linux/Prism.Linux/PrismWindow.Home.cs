@@ -50,7 +50,7 @@ public sealed partial class PrismWindow
 
         if (folder is null && session.ProjectFolders.Count > 0)
         {
-            var folders = Grid(170);
+            var folders = Grid();
             folders.MarginBottom = 18;
             foreach (var item in session.ProjectFolders) folders.Append(FolderTile(item));
             page.Append(folders);
@@ -62,7 +62,7 @@ public sealed partial class PrismWindow
         else
         {
             // Newest first; two rows keep Home calm, the rest are one click away.
-            var grid = Grid(170);
+            var grid = Grid();
             foreach (var path in finished.Take(showAll ? int.MaxValue : 12)) grid.Append(ProjectTile(path, counts.GetValueOrDefault(path)));
             page.Append(grid);
             if (finished.Count > 12)
@@ -79,7 +79,7 @@ public sealed partial class PrismWindow
                 var note = Label("A video was uploaded, but no Shorts were made yet.", "muted");
                 note.MarginBottom = 10;
                 page.Append(note);
-                var rest = Grid(170);
+                var rest = Grid();
                 foreach (var path in unfinished) rest.Append(ProjectTile(path, 0));
                 page.Append(rest);
             }
@@ -137,8 +137,8 @@ public sealed partial class PrismWindow
         return panel;
     }
 
-    /// Columns of at least `width` that share the row, like SwiftUI's adaptive grid.
-    static Gtk.FlowBox Grid(int width)
+    /// An adaptive grid like SwiftUI's: each child's minimum width sets how many fit in a row.
+    static Gtk.FlowBox Grid()
     {
         var flow = Gtk.FlowBox.New();
         flow.SelectionMode = Gtk.SelectionMode.None;
@@ -149,15 +149,6 @@ public sealed partial class PrismWindow
         flow.Homogeneous = true;
         flow.Hexpand = true;
         flow.Valign = Gtk.Align.Start;
-        flow.Name = width.ToString(CultureInfo.InvariantCulture);
-        return flow;
-    }
-
-    static Gtk.FlowBox Flow(int width, uint spacing)
-    {
-        var flow = Grid(width);
-        flow.ColumnSpacing = spacing;
-        flow.RowSpacing = spacing;
         return flow;
     }
 
@@ -289,24 +280,25 @@ public sealed partial class PrismWindow
     /// Right-click opens the actions, like the Mac app's context menus.
     void AttachMenu(Gtk.Widget target, (string Title, Action Action)[] actions)
     {
-        var popover = Gtk.Popover.New();
-        popover.SetParent(target);
-        popover.HasArrow = false;
-        var entries = Column(0);
-        foreach (var (title, action) in actions)
-        {
-            var item = Button(title, () => { popover.Popdown(); action(); }, title.Contains("Trash") ? "danger" : null);
-            item.Halign = Gtk.Align.Fill;
-            if (item.Child is Gtk.Label label) label.Xalign = 0;
-            entries.Append(item);
-        }
-        popover.Child = entries;
         var click = Gtk.GestureClick.New();
         click.Button = 3;
         click.OnPressed += (_, args) =>
         {
-            var spot = new Gdk.Rectangle { X = (int)args.X, Y = (int)args.Y, Width = 1, Height = 1 };
-            popover.SetPointingTo(spot);
+            // Made on demand and unparented on close: a popover still parented to a card would outlive the page and leak.
+            var popover = Gtk.Popover.New();
+            popover.SetParent(target);
+            popover.HasArrow = false;
+            var entries = Column(0);
+            foreach (var (title, action) in actions)
+            {
+                var item = Button(title, () => { popover.Popdown(); action(); }, title.Contains("Trash") ? "danger" : null);
+                item.Halign = Gtk.Align.Fill;
+                if (item.Child is Gtk.Label label) label.Xalign = 0;
+                entries.Append(item);
+            }
+            popover.Child = entries;
+            popover.OnClosed += (_, _) => popover.Unparent();
+            popover.SetPointingTo(new Gdk.Rectangle { X = (int)args.X, Y = (int)args.Y, Width = 1, Height = 1 });
             popover.Popup();
         };
         target.AddController(click);

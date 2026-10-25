@@ -9,7 +9,7 @@ struct FramingSample {
     var preserveWholeFrame: Bool = false
 }
 
-/// Gemini locates the subject in frames sampled across the Short; pixel-difference cut detection and `plan`
+/// Prism AI locates the subject in frames sampled across the Short; pixel-difference cut detection and `plan`
 /// turn those positions into a smooth camera path with hard changes on scene cuts.
 enum SubjectFramer {
     static let version = 19
@@ -26,12 +26,12 @@ enum SubjectFramer {
         let wholeFrame: Bool
     }
 
-    /// `speech` is the Short's timed captions (seconds from its start); it tells Gemini who is talking at each frame.
+    /// `speech` is the Short's timed captions (seconds from its start); it tells Prism AI who is talking at each frame.
     static func analyze(_ url: URL, start: Double, duration: Double, zoom: Double, configuration: GeminiConfiguration, speech: [TimedCaption] = [],
                         session: URLSession? = nil, progress: @escaping @Sendable (Double) -> Void = { _ in }) async -> [CropKeyframe] {
         guard start.isFinite, duration.isFinite, duration > 0 else { return [] }
         // About one frame a second, capped so long Shorts stay one modest request.
-        let step = max(0.5, duration / 60)
+        let step = max(1, duration / 60)
         let count = max(1, Int(ceil(duration / step)))
         let scan = await Task.detached(priority: .utility) { () -> (frames: [(time: Double, image: CGImage, cutTime: Double?)], size: CGSize) in
             let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
@@ -102,7 +102,7 @@ enum SubjectFramer {
         return plan(samples, duration: duration, imageSize: scan.size, zoom: zoom)
     }
 
-    /// Asks Gemini where the subject and every face sit in each frame; nil on any failure, so framing holds steady.
+    /// Asks Prism AI where the subject and every face sit in each frame; nil on any failure, so framing holds steady.
     static func locate(_ images: [CGImage], times: [Double] = [], speech: [TimedCaption] = [],
                        configuration: GeminiConfiguration, session: URLSession? = nil) async -> Response? {
         var parts: [[String: Any]] = [["text": """

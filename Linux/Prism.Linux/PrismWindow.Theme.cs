@@ -3,6 +3,7 @@ namespace Prism.Linux;
 public sealed partial class PrismWindow
 {
     readonly List<Action> appearanceUpdates = [];
+    bool cssInstalled;
 
     /// The Prism design system as GTK CSS: the Mac app's surfaces, type scale, buttons and cards.
     void ApplyTheme()
@@ -30,7 +31,7 @@ public sealed partial class PrismWindow
             .title { font-family: 'Space Grotesk'; font-size: 32px; font-weight: 500; }
             .subtitle { font-family: 'Space Grotesk'; font-size: 20px; font-weight: 500; }
             .medium { font-weight: 500; }
-            .t16 { font-size: 16px; } .t14 { font-size: 14px; } .t12 { font-size: 12px; } .t11 { font-size: 11px; } .t10 { font-size: 10px; } .t9 { font-size: 9px; }
+            .t16 { font-size: 16px; } .t14 { font-size: 14px; } .t13 { font-size: 13px; } .t12 { font-size: 12px; } .t11 { font-size: 11px; } .t10 { font-size: 10px; } .t9 { font-size: 9px; }
             .muted, .muted label { color: {{muted}}; }
             .muted { font-size: 12px; }
             .mono { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: {{muted}}; }
@@ -71,7 +72,7 @@ public sealed partial class PrismWindow
             button.hero:hover { background: #57B4F7; }
             button.hero label { color: #0E0F14; }
             .plus-tile { background: #0E0F14; border-radius: 6px; }
-            .plus-tile label { color: #3FA9F5; font-weight: 700; }
+            .plus-tile label, button.hero .plus-tile label, button.nav.prominent .plus-tile label { color: #3FA9F5; font-weight: 700; }
 
             button.tile { background: {{surface}}; border: 2px solid transparent; border-radius: 12px; padding: 8px; min-height: 0; font-weight: 400; font-size: 13px; }
             button.tile:hover { background: mix({{surface}}, {{text}}, 0.04); }
@@ -170,7 +171,8 @@ public sealed partial class PrismWindow
             .toolbar { padding: 0 20px; min-height: 54px; border-bottom: 1px solid {{border}}; background: {{surface}}; }
             .statusbar { padding: 0 16px; min-height: 28px; border-top: 1px solid {{border}}; background: {{surface}}; }
             """);
-        Gtk.StyleContext.AddProviderForDisplay(window.GetDisplay(), css, 800);
+        // The provider is registered once; later theme switches only reload its stylesheet.
+        if (!cssInstalled) { Gtk.StyleContext.AddProviderForDisplay(window.GetDisplay(), css, 800); cssInstalled = true; }
         foreach (var update in appearanceUpdates) update();
     }
 }

@@ -69,12 +69,13 @@ public sealed class ProjectStore : IDisposable
         var file = System.IO.Path.Combine(root, "project.sqlite");
         if (create) Directory.CreateDirectory(root);
         else if (!File.Exists(file)) throw new StoreException("This folder is not a Prism project.");
-        connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = file, Pooling = false }.ToString());
+        connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        { DataSource = file, Mode = create ? SqliteOpenMode.ReadWriteCreate : SqliteOpenMode.ReadWrite, Pooling = false }.ToString());
         try
         {
             connection.Open();
             Execute("PRAGMA journal_mode=WAL");
-            Execute("CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value BLOB NOT NULL)");
+            if (create) Execute("CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value BLOB NOT NULL)");
         }
         catch (SqliteException error) { connection.Dispose(); throw new StoreException($"The project database could not be read or saved. {error.Message}"); }
     }
@@ -105,7 +106,11 @@ public sealed class ProjectStore : IDisposable
         using var reader = command.ExecuteReader();
         if (!reader.Read()) return default;
         var bytes = (byte[])reader.GetValue(0);
-        return JsonSerializer.Deserialize<T>(bytes, PrismJson.Options);
+        var value = JsonSerializer.Deserialize<T>(bytes, PrismJson.Options);
+        if (value is ProjectData project && (project.Media is null || project.Segments is null
+            || project.Media.Any(media => media is null) || project.Segments.Any(segment => segment is null)))
+            throw new StoreException("The saved project contains invalid media or clips.");
+        return value;
     }
 
     /// <summary>The saved project, or null when the folder isn't a readable Prism project.</summary>
@@ -121,6 +126,7 @@ public sealed class ProjectStore : IDisposable
 /// Where Prism keeps its library and settings on each system.
 public static class AppPaths
 {
+    public static StringComparer PathComparer => OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
     /// <summary>%LOCALAPPDATA%\Prism on Windows, ~/.local/share/prism on Linux (XDG_DATA_HOME). Never the macOS app's library.</summary>
     public static string AppData { get; set; } = DefaultAppData();
     /// <summary>%APPDATA%\Prism on Windows, ~/.config/prism on Linux (XDG_CONFIG_HOME).</summary>
@@ -156,12 +162,32 @@ public sealed class AppSettings
     public double LeftSidebarWidth { get; set; } = 248;
     public double RightSidebarWidth { get; set; } = 282;
     public double TimelineHeight { get; set; } = 278;
+    public bool ShortsBestFirst { get; set; }
+    public bool ShortsCollapsed { get; set; }
+    public bool MainVideoCollapsed { get; set; }
+    public bool CaptionStyleCollapsed { get; set; }
+    public bool CaptionTextCollapsed { get; set; }
+
 
     static string FilePath => System.IO.Path.Combine(AppPaths.Config, "settings.json");
 
     public static AppSettings Load()
     {
-        try { return PrismJson.Deserialize<AppSettings>(File.ReadAllText(FilePath)) ?? new AppSettings(); }
+        try
+        {
+            var settings = PrismJson.Deserialize<AppSettings>(File.ReadAllText(FilePath)) ?? new AppSettings();
+            settings.RecentProjects ??= [];
+            settings.ProjectFolders = (settings.ProjectFolders ?? []).Where(folder => folder is not null).ToList();
+            foreach (var folder in settings.ProjectFolders) { folder.ProjectPaths ??= []; folder.Name ??= "Folder"; }
+            if (string.IsNullOrWhiteSpace(settings.GeminiModel)) settings.GeminiModel = "gemini-3.1-flash-lite";
+            if (!Enum.IsDefined(settings.ExportQuality)) settings.ExportQuality = ExportQuality.Full;
+            static double Positive(double value, double fallback) => double.IsFinite(value) && value > 0 ? value : fallback;
+            settings.ResourceRefreshSeconds = Math.Clamp(Positive(settings.ResourceRefreshSeconds, 60), 1, 3600);
+            settings.LeftSidebarWidth = Positive(settings.LeftSidebarWidth, 248);
+            settings.RightSidebarWidth = Positive(settings.RightSidebarWidth, 282);
+            settings.TimelineHeight = Positive(settings.TimelineHeight, 278);
+            return settings;
+        }
         catch (Exception) { return new AppSettings(); }
     }
 

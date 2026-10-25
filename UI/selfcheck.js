@@ -6,7 +6,7 @@ const { Readable } = require('stream');
 Object.assign(process.env, {
   PADDLE_ENV: 'sandbox', PADDLE_API_KEY: 'pdl_test', SUPABASE_SERVICE_ROLE_KEY: 'sb_secret_test', PADDLE_WEBHOOK_SECRET: 'whsec',
 });
-const { syncSubscription } = require('./api/_lib');
+const { syncSubscription, paddle } = require('./api/_lib');
 const webhook = require('./api/paddle-webhook');
 
 const USER = '4ab15da9-b1b9-464a-b2a6-edf1d7e7dc8c';
@@ -66,9 +66,26 @@ const sign = (body, ts = Math.floor(Date.now() / 1000)) =>
   assert.strictEqual((await post(event, 'ts=1;h1=bad')).status, 401);
   assert.strictEqual((await post(event, sign(event, Math.floor(Date.now() / 1000) - 600))).status, 401, 'old signatures are refused');
   assert.strictEqual((await post(event.replace('updated', 'created'), sign(event))).status, 401, 'tampered bodies are refused');
+  const now = Math.floor(Date.now() / 1000);
+  assert.strictEqual((await post(event, `ts=${now};h1=${'é'.repeat(64)}`)).status, 401, 'non-ASCII signatures are rejected without throwing');
+  assert.strictEqual((await post(event, `ts=${now};h1=${'z'.repeat(64)}`)).status, 401, 'non-hex signatures are rejected');
+  assert.strictEqual(webhook.verify(event, `${sign(event, now)};h1=${'0'.repeat(64)}`, 'whsec'), true, 'key rotation accepts any valid signature');
+  assert.strictEqual(webhook.verify(event, `ts=NaN;h1=${'0'.repeat(64)}`, 'whsec'), false, 'invalid timestamps are rejected');
   const other = JSON.stringify({ event_type: 'transaction.paid', data: { id: 'txn_1' } });
   assert.deepStrictEqual((await post(other, sign(other))).body, { ignored: true });
   assert.deepStrictEqual(await post(event, sign(event)), { status: 200, body: { result: 'synced' } });
+  for (const malformed of ['null', '{"event_type":42}', '{"event_type":"subscription.updated","data":{"id":"../invalid"}}']) {
+    assert.strictEqual((await post(malformed, sign(malformed))).status, 400, 'signed malformed events are rejected without a server error');
+  }
+  const savedFetch = global.fetch;
+  try {
+    global.fetch = async () => ({ ok: true, status: 200, text: async () => { throw new Error('Response stream closed'); } });
+    await assert.rejects(() => paddle('/subscriptions/sub_1'), (error) => error.status === 502 && /didn’t respond/.test(error.message));
+    for (const body of ['not JSON', '{"data":null}', '{}']) {
+      global.fetch = async () => new Response(body);
+      await assert.rejects(() => paddle('/subscriptions/sub_1'), (error) => error.status === 502, 'bad upstream envelopes must be reported as service failures');
+    }
+  } finally { global.fetch = savedFetch; }
 
   console.log('selfcheck: all payment checks passed');
 })().catch((error) => {

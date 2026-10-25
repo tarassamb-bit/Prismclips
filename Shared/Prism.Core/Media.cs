@@ -53,6 +53,7 @@ public static class FFmpeg
     public static async Task<Result> Run(string tool, IEnumerable<string> arguments, CancellationToken cancellation = default,
                                          Action<string>? onOutputLine = null)
     {
+        cancellation.ThrowIfCancellationRequested();
         var start = new ProcessStartInfo(tool)
         {
             RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true,
@@ -62,15 +63,22 @@ public static class FFmpeg
         using var process = Process.Start(start) ?? throw new FFmpegMissingException();
         process.StandardInput.Close();
         using var registration = cancellation.Register(() => { try { process.Kill(entireProcessTree: true); } catch { } });
-        var output = new MemoryStream();
+        using var output = new MemoryStream();
         Task readOutput;
         if (onOutputLine is null) readOutput = process.StandardOutput.BaseStream.CopyToAsync(output);
         else readOutput = Task.Run(async () =>
         {
-            while (await process.StandardOutput.ReadLineAsync() is { } line) onOutputLine(line);
+            try { while (await process.StandardOutput.ReadLineAsync() is { } line) onOutputLine(line); }
+            catch
+            {
+                // A failed progress callback must not leave the encoder running or blocked on a full stdout pipe.
+                try { process.Kill(entireProcessTree: true); } catch { }
+                throw;
+            }
         });
         var readErrors = process.StandardError.ReadToEndAsync();
-        await Task.WhenAll(readOutput, readErrors, process.WaitForExitAsync());
+        try { await Task.WhenAll(readOutput, readErrors, process.WaitForExitAsync()); }
+        catch { cancellation.ThrowIfCancellationRequested(); throw; }
         cancellation.ThrowIfCancellationRequested();
         return new Result(process.ExitCode, output.ToArray(), readErrors.Result);
     }

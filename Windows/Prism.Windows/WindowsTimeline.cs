@@ -47,6 +47,7 @@ public sealed class WindowsTimeline : IDisposable
     readonly Grid root = new();
     readonly TrackSurface surface;
     readonly Button undo = new() { Content = "\uE7A7", FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), ToolTip = "Undo edit · Ctrl+Z" };
+    readonly Button redo = new() { Content = "\uE7A6", FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), ToolTip = "Redo edit · Ctrl+Shift+Z or Ctrl+Y" };
     readonly Button audio = new() { Content = "\uE767", FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), ToolTip = "Toggle clip audio" };
     readonly Button add = new() { Content = "Add clip" };
     readonly Button generate = new() { Content = "✦  Auto Shorts" };
@@ -89,20 +90,27 @@ public sealed class WindowsTimeline : IDisposable
         var toolbar = new DockPanel { Margin = new Thickness(16, 0, 16, 0), Height = 42, LastChildFill = true };
         var leading = new StackPanel { Orientation = Orientation.Horizontal };
         var trailing = new StackPanel { Orientation = Orientation.Horizontal };
-        foreach (var button in new[] { undo, audio, add, generate, settings })
+        foreach (var button in new[] { undo, redo, audio, add, generate, settings })
         { button.Margin = new Thickness(0, 0, 4, 0); button.BorderBrush = Brushes.Transparent; button.Padding = new Thickness(9, 5, 9, 5); button.FontSize = 12; button.VerticalAlignment = VerticalAlignment.Center; }
         var rule = new Border { Width = 1, Height = 16, Margin = new Thickness(10, 0, 14, 0), VerticalAlignment = VerticalAlignment.Center }; rule.SetResourceReference(Border.BackgroundProperty, "Line");
         title.FontSize = 11; title.FontWeight = FontWeights.Medium;
-        leading.Children.Add(undo); leading.Children.Add(audio); leading.Children.Add(rule);
+        leading.Children.Add(undo); leading.Children.Add(redo); leading.Children.Add(audio); leading.Children.Add(rule);
         trailing.Children.Add(add); trailing.Children.Add(generate); trailing.Children.Add(settings);
         DockPanel.SetDock(leading, Dock.Left); DockPanel.SetDock(trailing, Dock.Right);
         toolbar.Children.Add(leading); toolbar.Children.Add(trailing); toolbar.Children.Add(title);
         root.Children.Add(toolbar); Grid.SetRow(surface, 1); root.Children.Add(surface);
-        undo.Click += (_, _) => session.UndoFromEditor();
-        audio.Click += (_, _) => session.ToggleSelectedAudio();
-        add.Click += (_, _) => session.AddManualClip();
-        generate.Click += async (_, _) => await session.MakeConfiguredShorts();
-        settings.Click += (_, _) => session.Screen = Screen.ImportSource;
+        // A failed action reports on the status line instead of taking the window down.
+        void Safely(Action action) { try { action(); } catch (Exception error) { session.Message = error.Message; } }
+        undo.Click += (_, _) => Safely(session.UndoFromEditor);
+        redo.Click += (_, _) => Safely(session.RedoFromEditor);
+        System.Windows.Automation.AutomationProperties.SetName(redo, "Redo edit");
+        audio.Click += (_, _) => Safely(session.ToggleSelectedAudio);
+        add.Click += (_, _) => Safely(session.AddManualClip);
+        generate.Click += async (_, _) => { try { await session.MakeConfiguredShorts(); } catch (Exception error) { session.Message = error.Message; } };
+        settings.Click += (_, _) => Safely(() => session.Screen = Screen.ImportSource);
+        // Theme resources, so a dark/light switch repaints the toolbar at once.
+        title.SetResourceReference(TextBlock.ForegroundProperty, "Ink");
+        root.SetResourceReference(Panel.BackgroundProperty, "Surface1");
         timer = new DispatcherTimer(DispatcherPriority.Background, surface.Dispatcher) { Interval = TimeSpan.FromMilliseconds(100) };
         timer.Tick += Tick;
         timer.Start();
@@ -120,7 +128,7 @@ public sealed class WindowsTimeline : IDisposable
     void Changed(object? sender, PropertyChangedEventArgs args)
     {
         if (args.PropertyName is nameof(AppSession.Project) or nameof(AppSession.Selection) or nameof(AppSession.PreviewShortId)
-            or nameof(AppSession.IsBusy) or nameof(AppSession.CanUndo) or nameof(AppSession.IsGeminiKeySaved)
+            or nameof(AppSession.IsBusy) or nameof(AppSession.CanUndo) or nameof(AppSession.CanRedo) or nameof(AppSession.IsGeminiKeySaved)
             or nameof(AppSession.ExportChoice) or nameof(AppSession.ExportSummary) or nameof(AppSession.GenerationError)) Refresh();
     }
 
@@ -128,10 +136,9 @@ public sealed class WindowsTimeline : IDisposable
     {
         if (disposed) return;
         title.Text = session.ActiveSegment is null ? "Source timeline" : "Short timeline";
-        title.Foreground = Brush("F6F3EC", "0E0F14");
         title.FontFamily = bodyFont;
-        root.Background = Brush("171920", "FFFFFF");
         undo.IsEnabled = session.CanUndo && !Blocked;
+        redo.IsEnabled = session.CanRedo && !Blocked;
         audio.IsEnabled = session.ActiveSegment is not null && !Blocked;
         audio.Content = session.ActiveSegment?.IsMuted == true ? "\uE74F" : "\uE767";
         add.IsEnabled = generate.IsEnabled = Media is not null && !Blocked;

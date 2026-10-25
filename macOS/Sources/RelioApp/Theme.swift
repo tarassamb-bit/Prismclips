@@ -63,24 +63,27 @@ private extension NSColor {
     }
 }
 
-/// The app's appearance setting: Dark is the brand's primary theme.
+/// The app's appearance setting. System follows macOS light and dark mode, and is the default.
 enum PrismAppearance: String, CaseIterable, Identifiable {
-    case dark, light
+    case system, dark, light
     var id: String { rawValue }
-    var title: String { self == .dark ? "Dark" : "Light" }
-    var colorScheme: ColorScheme { self == .dark ? .dark : .light }
+    var title: String { switch self { case .system: "System"; case .dark: "Dark"; case .light: "Light" } }
+    /// nil lets the window follow macOS.
+    var colorScheme: ColorScheme? { switch self { case .system: nil; case .dark: .dark; case .light: .light } }
+    var icon: String { switch self { case .system: "circle.lefthalf.filled"; case .dark: "moon.fill"; case .light: "sun.max.fill" } }
     static let storageKey = "appearance"
 }
 
-/// The dark/light switch for the top-right corner: two icon segments in a pill.
+/// The appearance switch for the top-right corner: Dark and Light as icon segments in a pill.
 struct AppearanceSwitch: View {
     @Binding var selection: PrismAppearance
     var body: some View {
         HStack(spacing: 2) {
-            ForEach(PrismAppearance.allCases) { option in
+            // Dark and Light only; until one is picked Prism follows macOS.
+            ForEach([PrismAppearance.dark, .light]) { option in
                 let selected = selection == option
                 Button { selection = option } label: {
-                    Image(systemName: option == .dark ? "moon.fill" : "sun.max.fill")
+                    Image(systemName: option.icon)
                         .font(Prism.text(12, .medium))
                         .foregroundStyle(selected ? Prism.text : Prism.textSecondary)
                         .frame(width: 30, height: 24)
@@ -89,8 +92,8 @@ struct AppearanceSwitch: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("\(option.title) mode")
-                .accessibilityLabel("\(option.title) mode")
+                .help(option == .system ? "Match macOS appearance" : "\(option.title) mode")
+                .accessibilityLabel(option == .system ? "Match macOS appearance" : "\(option.title) mode")
                 .accessibilityAddTraits(selected ? .isSelected : [])
             }
         }

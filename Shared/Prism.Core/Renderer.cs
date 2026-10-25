@@ -41,7 +41,7 @@ public static class Renderer
     public static async Task<string> Preview(string source, EditSegment segment, CancellationToken cancellation = default)
     {
         var file = new FileInfo(source);
-        var key = $"preview-v1|{source}|{(file.Exists ? file.Length : 0)}|{(file.Exists ? file.LastWriteTimeUtc.Ticks : 0)}|{PrismJson.Serialize(segment)}";
+        var key = $"preview-v2|{source}|{(file.Exists ? file.Length : 0)}|{(file.Exists ? file.LastWriteTimeUtc.Ticks : 0)}|{PrismJson.Serialize(segment)}";
         var cached = Path.Combine(CacheDirectory, $"preview-{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key)))[..32]}.mp4");
         if (File.Exists(cached)) { File.SetLastWriteTimeUtc(cached, DateTime.UtcNow); return cached; }
         Directory.CreateDirectory(CacheDirectory);
@@ -50,7 +50,7 @@ public static class Renderer
         {
             await Render(source, segment, temporary, 540, 960, ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "28"], "96k", null, cancellation);
             // Fails only if a parallel render stored the same preview first.
-            try { File.Move(temporary, cached); } catch (IOException) { }
+            try { File.Move(temporary, cached); } catch (IOException) when (File.Exists(cached)) { }
             Prune();
             return cached;
         }

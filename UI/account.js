@@ -214,6 +214,16 @@
     const user = session?.user;
     const userId = user?.id || null;
     const page = document.body.dataset.authPage;
+    const changed = userId !== currentUserId;
+    if (changed) {
+      // Revoke old queries before redirects: navigation can be delayed or restored from the browser cache.
+      statsRequest += 1;
+      currentUserId = userId;
+      clearStats();
+      signedIn.hidden = true;
+      signedIn.setAttribute('aria-busy', 'false');
+      if (byId('who')) byId('who').textContent = '';
+    }
     if (userId && page === 'login') {
       location.replace(nextPath() || `/dashboard_${userId}`);
       return;
@@ -232,14 +242,11 @@
       ? 'Track your exports, Shorts, and time created with Prism for Mac.'
       : signedOutDescription;
     document.querySelectorAll('.nav-signin').forEach((link) => { link.textContent = userId ? 'Your account' : 'Sign in'; });
-    if (userId === currentUserId) {
+    if (!changed) {
       if (!userId) account.dataset.state = 'signed-out';
       return;
     }
-    currentUserId = userId;
     if (!userId) {
-      statsRequest += 1;
-      clearStats();
       if (byId('who')) byId('who').textContent = '';
       signedIn.setAttribute('aria-busy', 'false');
       account.dataset.state = 'signed-out';
@@ -311,6 +318,7 @@
     if (authRevision === initialRevision) showSession(data?.session || null);
     if (!currentUserId) say('');
   }).catch((error) => {
+    if (authRevision !== initialRevision) return;
     say(`Couldn’t restore your session. ${error?.message || 'Please sign in again.'}`, 'error');
     account.dataset.state = 'signed-out';
   }).finally(() => {

@@ -25,6 +25,8 @@ import Foundation
         precondition(TranscriptSelection.overlaps(start: 0, duration: 60, otherStart: 35, otherDuration: 60))
         precondition(!TranscriptSelection.overlaps(start: 0, duration: 60, otherStart: 60, otherDuration: 30))
         precondition(TranscriptSelection.overlaps(start: 0, duration: 60, otherStart: 10, otherDuration: 10))
+        precondition(TranscriptSelection.overlaps(start: 0, duration: 60, otherStart: 55, otherDuration: 60), "Five shared seconds are an overlap")
+        precondition(!TranscriptSelection.overlaps(start: 0, duration: 60, otherStart: 59.8, otherDuration: 30), "Touching ends are not")
         let phrase = TranscriptSelection.phraseRange(start: 10.4, duration: 30, cues: cues, interval: (0, 1200))
         precondition(phrase.start == 10 && phrase.start + phrase.duration == 38)
         let fallback = TranscriptSelection.phraseRange(start: 90, duration: 10, cues: [], interval: (0, 100))

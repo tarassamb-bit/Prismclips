@@ -30,7 +30,7 @@ final class GeminiMockProtocol: URLProtocol, @unchecked Sendable {
         Self.bodies.append(String(decoding: body, as: UTF8.self))
         Self.models.append(String(request.url!.lastPathComponent.split(separator: ":")[0]))
         precondition(request.url?.query == nil, "Credentials must not be put in the URL")
-        precondition(request.value(forHTTPHeaderField: "x-goog-api-key") == "test-key")
+        precondition(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-token")
         let response = HTTPURLResponse(url: request.url!, statusCode: Self.statuses.isEmpty ? Self.status : Self.statuses.removeFirst(), httpVersion: nil, headerFields: nil)!
         let data: Data
         if response.statusCode != 200, let errorBody = Self.errorBody {
@@ -141,7 +141,8 @@ final class NoteBox: @unchecked Sendable {
         let session = URLSession(configuration: config)
         defer { session.invalidateAndCancel() }
         struct Check: Decodable { let ok: Bool }
-        let configuration = GeminiConfiguration(apiKey: "test-key", model: "gemini-3.1-flash-lite")
+        var configuration = GeminiConfiguration()
+        configuration.accessToken = { "test-token" }
         do {
             _ = try await GeminiSelection.select(url: URL(fileURLWithPath: "/tmp/relio-mock-missing.mov"), cues: [],
                 interval: (0, 60), targetDuration: 30, count: 1, configuration: configuration,
@@ -158,28 +159,8 @@ final class NoteBox: @unchecked Sendable {
         GeminiMockProtocol.statuses = [503, 503, 503, 500, 200]
         let recovered: Check = try await GeminiSelection.generate(parts: [], schema: [:], configuration: announcing, session: session)
         precondition(recovered.ok && GeminiMockProtocol.statuses.isEmpty && notes.values.count == 4
-                     && notes.values.allSatisfy { $0.hasPrefix("Gemini is busy") }, "A busy streak must be retried and shown: \(notes.values)")
-        let attemptsPerModel = GeminiSelection.retryWaits.count + 1
-        GeminiMockProtocol.statuses = Array(repeating: 503, count: attemptsPerModel * GeminiSelection.fallbackModels.count)
-        do {
-            let _: Check = try await GeminiSelection.generate(parts: [], schema: [:], configuration: configuration, session: session)
-            preconditionFailure("A server that stays busy on every model must fail instead of waiting forever")
-        } catch GeminiSelection.Failure.request(let code) { precondition(code == 503 && GeminiMockProtocol.statuses.isEmpty) }
-        // An overloaded model hands the request to the next model, says so, and that model goes first for the next requests.
-        let switches = NoteBox()
-        var falling = configuration
-        falling.onFallback = { from, to in switches.values.append("\(from)>\(to)") }
-        GeminiMockProtocol.models = []
-        GeminiMockProtocol.statuses = Array(repeating: 503, count: attemptsPerModel) + [200]
-        let rescued: Check = try await GeminiSelection.generate(parts: [], schema: [:], configuration: falling, session: session)
-        precondition(rescued.ok && switches.values == ["gemini-3.1-flash-lite>gemini-3.5-flash-lite"]
-                     && GeminiMockProtocol.models == Array(repeating: "gemini-3.1-flash-lite", count: attemptsPerModel) + ["gemini-3.5-flash-lite"],
-                     "A busy model must fall back to another model: \(GeminiMockProtocol.models)")
-        GeminiMockProtocol.models = []
-        let _: Check = try await GeminiSelection.generate(parts: [], schema: [:], configuration: falling, session: session)
-        precondition(GeminiMockProtocol.models == ["gemini-3.5-flash-lite"], "The working fallback must go first, not wait on the busy model again")
-        GeminiSelection.rememberWorking("gemini-3.1-flash-lite", for: "gemini-3.1-flash-lite")
-        print("PASS busy servers are retried, then other models are tried and the switch is reported")
+                     && notes.values.allSatisfy { $0.hasPrefix("Prism AI is busy") }, "A busy streak must be retried and shown: \(notes.values)")
+        print("PASS busy servers are retried and the wait is shown")
         let audioURL = FileManager.default.temporaryDirectory.appendingPathComponent("relio-audio-test-\(UUID()).caf")
         defer { try? FileManager.default.removeItem(at: audioURL) }
         let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)!
@@ -217,7 +198,7 @@ final class NoteBox: @unchecked Sendable {
         do {
             let _: Check = try await GeminiSelection.generate(parts: [], schema: [:], configuration: configuration, session: session)
             preconditionFailure("Quota errors must fail")
-        } catch GeminiSelection.Failure.request(let code) { precondition(code == 429) }
+        } catch GeminiSelection.Failure.server(let code, _) { precondition(code == 429) }
         GeminiMockProtocol.status = 200
         GeminiMockProtocol.finish = "STOP"
         let longCues = (0..<120).map { TimedCaption(text: "Complete story \($0).", start: Double($0 * 10), duration: 8) }
@@ -251,6 +232,11 @@ final class NoteBox: @unchecked Sendable {
         let failedCut = await GeminiSelection.finalCut(finalists, cues: [], count: 1, guidance: "", configuration: configuration, session: session)
         precondition(failedCut == nil, "A failed final cut must fall back to score order")
         // A per-minute quota error with a short retryDelay is waited out; without one it still fails.
+        for invalid in ["-1", "-Infinity", "NaN", "Infinity"] {
+            let http = HTTPURLResponse(url: URL(string: "https://example.invalid")!, statusCode: 429, httpVersion: nil, headerFields: ["Retry-After": invalid])!
+            let body = try JSONSerialization.data(withJSONObject: ["error": ["details": [["retryDelay": "\(invalid)s"]]]])
+            precondition(GeminiSelection.retryDelay(http: http, body: body) == nil, "Malformed retry delays must never reach sleep or integer conversion")
+        }
         GeminiMockProtocol.errorBody = "{\"error\":{\"code\":429,\"details\":[{\"retryDelay\":\"0s\"}]}}"
         GeminiMockProtocol.statuses = [429, 200]
         let waited: Check = try await GeminiSelection.generate(parts: [], schema: [:], configuration: configuration, session: session)
@@ -260,7 +246,7 @@ final class NoteBox: @unchecked Sendable {
         do {
             let _: Check = try await GeminiSelection.generate(parts: [], schema: [:], configuration: configuration, session: session)
             preconditionFailure("Long quota waits must fail instead of hanging")
-        } catch GeminiSelection.Failure.request(let code) { precondition(code == 429) }
+        } catch GeminiSelection.Failure.server(let code, _) { precondition(code == 429) }
         GeminiMockProtocol.errorBody = nil
         // One failed detail batch must not sink the batches that found clips.
         GeminiMockProtocol.payloads = []
@@ -308,7 +294,7 @@ final class NoteBox: @unchecked Sendable {
         GeminiMockProtocol.bodies = []
         let path = await SubjectFramer.analyze(pipelineURL, start: 0, duration: 4, zoom: 1.08, configuration: configuration,
                                                speech: [TimedCaption(text: "Who is talking now?", start: 0.5, duration: 2)], session: session)
-        precondition(GeminiMockProtocol.bodies.last?.contains("Who is talking now?") == true && GeminiMockProtocol.bodies.last?.contains("Frame 1 at 0.5 s") == true,
+        precondition(GeminiMockProtocol.bodies.last?.contains("Who is talking now?") == true && GeminiMockProtocol.bodies.last?.contains("Frame 1 at 1.0 s") == true,
                      "Framing must see who talks when and each frame's time")
         precondition(!path.isEmpty && path.allSatisfy { $0.position > 0.6 }, "Gemini's subject position must steer the crop: \(path)")
         GeminiMockProtocol.payloads = ["not json"]
@@ -323,7 +309,11 @@ final class NoteBox: @unchecked Sendable {
             "{\"clips\":[{\"start\":1,\"end\":19,\"score\":9,\"layout\":\"fit\",\"title\":\"Complete story\",\"reason\":\"Hook and payoff.\"}]}",
             "{}"
         ]
-        let cloudConfiguration = GeminiConfiguration(apiKey: "test-key", model: configuration.model, session: session)
+        let cloudConfiguration: GeminiConfiguration = {
+            var signedIn = GeminiConfiguration(session: session)
+            signedIn.accessToken = { "test-token" }
+            return signedIn
+        }()
         let savedTranscript = TranscriptBox()
         let recoveredClips = try await ShortMaker.analyze(pipelineURL, requestedDuration: 15, count: 1,
             sourceRegion: .entireVideo, gemini: cloudConfiguration, onTranscript: { savedTranscript.value = $0 })

@@ -168,7 +168,7 @@ public sealed partial class PrismWindow
 
     void CaptionStep(Gtk.Box page)
     {
-        var grid = Grid(200);
+        var grid = Grid();
         var cards = new Dictionary<CaptionStyle, (Gtk.Button Card, Gtk.DrawingArea Check)>();
         foreach (var style in CaptionStyles.Choices)
         {
@@ -181,7 +181,7 @@ public sealed partial class PrismWindow
             name.MarginTop = 12;
             name.Append(check);
             name.Append(Label(style.Title(), "t14", "medium"));
-            var detail = Text(style.Detail(), "muted");
+            var detail = Text(style.Detail(), "muted"); detail.MaxWidthChars = 26;
             detail.Lines = 2;
             detail.Ellipsize = Pango.EllipsizeMode.End;
             detail.SetSizeRequest(-1, 34);
@@ -209,7 +209,7 @@ public sealed partial class PrismWindow
 
     void TypeStep(Gtk.Box page)
     {
-        var grid = Grid(250);
+        var grid = Grid();
         var cards = new Dictionary<VideoType, (Gtk.Button Card, Gtk.DrawingArea Check)>();
         foreach (var type in VideoTypes.All)
         {
@@ -219,7 +219,7 @@ public sealed partial class PrismWindow
             name.Hexpand = true;
             top.Append(name);
             top.Append(check);
-            var detail = Text(type.Detail(), "muted");
+            var detail = Text(type.Detail(), "muted"); detail.MaxWidthChars = 32;
             detail.Lines = 3;
             detail.Ellipsize = Pango.EllipsizeMode.End;
             detail.SetSizeRequest(-1, 50);
@@ -280,7 +280,7 @@ public sealed partial class PrismWindow
         row.MarginTop = 16;
         var previous = IconText("go-previous-symbolic", back, () => { createStep = backStep; InvalidateScreen(); });
         row.Append(previous);
-        row.Append(Spacer());
+        row.Append(Gap());
         row.Append(forward);
         return row;
     }

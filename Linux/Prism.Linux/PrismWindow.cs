@@ -81,7 +81,8 @@ public sealed partial class PrismWindow : IDisposable
         var shortcuts = Gtk.EventControllerKey.New();
         shortcuts.OnKeyPressed += (_, args) =>
         {
-            if (args.Keyval != 'n' || (args.State & Gdk.ModifierType.ControlMask) == 0 || session.Screen != Screen.Home || session.IsBusy || modalKind.Length > 0) return false;
+            if (args.Keyval == 0xff1b) return Dismiss();
+            if (args.Keyval is not ('n' or 'N') || (args.State & Gdk.ModifierType.ControlMask) == 0 || session.Screen != Screen.Home || session.IsBusy || modalKind.Length > 0) return false;
             StartCreate();
             return true;
         };
@@ -394,6 +395,8 @@ public sealed partial class PrismWindow : IDisposable
     static Gtk.Box Column(int spacing = 12) => Gtk.Box.New(Gtk.Orientation.Vertical, spacing);
     static Gtk.Box Row(int spacing = 8) => Gtk.Box.New(Gtk.Orientation.Horizontal, spacing);
     static Gtk.Box Spacer() { var box = Column(0); box.Hexpand = true; box.Vexpand = true; return box; }
+    /// Pushes the next items in a row to the right without stretching the row vertically.
+    static Gtk.Box Gap() { var box = Column(0); box.Hexpand = true; return box; }
     static Gtk.Box Divider() { var line = Column(0); line.AddCssClass("divider"); return line; }
     /// Wrapping text, for paragraphs.
     static Gtk.Label Text(string text, params string[] classes)
@@ -559,7 +562,7 @@ public sealed partial class PrismWindow : IDisposable
         return picture;
     }
 
-    /// The image redrawn at exactly 2 × (width × height), cropped to fill or fitted inside.
+    /// The image redrawn at exactly width × height pixels, cropped to fill or fitted inside; GTK sizes a picture by its pixels.
     internal static byte[] Scaled(byte[] bytes, int width, int height, bool fit)
     {
         try
@@ -567,7 +570,7 @@ public sealed partial class PrismWindow : IDisposable
             using var source = SkiaSharp.SKBitmap.Decode(bytes);
             if (source is not null)
             {
-                using var target = new SkiaSharp.SKBitmap(width * 2, height * 2);
+                using var target = new SkiaSharp.SKBitmap(width, height);
                 using (var canvas = new SkiaSharp.SKCanvas(target))
                 {
                     canvas.Clear(SkiaSharp.SKColors.Transparent);

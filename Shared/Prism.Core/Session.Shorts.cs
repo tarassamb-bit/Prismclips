@@ -243,10 +243,10 @@ public sealed partial class AppSession
                 MediaId = video.Id, Start = result.Start, Duration = result.Duration, Caption = result.Caption,
                 FitToFrame = result.FitToFrame, Captions = result.Captions, CropKeyframes = result.CropKeyframes,
                 CropTrackingVersion = SubjectFramer.Version, SpeechWords = result.SpeechWords,
-                SuggestedTitle = result.SuggestedTitle, SelectionReason = result.SelectionReason,
-                CaptionNotice = result.AnalysisWarning, CaptionStyle = captionStyle,
-                SplitScreen = videoType == VideoType.Podcast ? true : null,
-                CaptionPosition = videoType == VideoType.Podcast ? Prism.Core.CaptionPosition.Middle : null,
+                SuggestedTitle = result.SuggestedTitle, Score = result.Score, SelectionReason = result.SelectionReason,
+                CaptionNotice = result.AnalysisWarning, CaptionStyle = captionStyle, VideoType = result.VideoType,
+                SplitScreen = result.VideoType == VideoType.Podcast ? true : null,
+                CaptionPosition = result.VideoType == VideoType.Podcast ? Prism.Core.CaptionPosition.Middle : null,
             }).ToList();
             for (var index = 0; index < candidates.Count; index++)
             {
@@ -332,6 +332,7 @@ public sealed partial class AppSession
         project.Segments = [.. previous, .. fresh];
         try { Save(); }
         catch { project.Segments = previous; throw; }
+        ClearRedo();
         editHistory.Add(snapshot);
         Changed(nameof(CanUndo));
         ProjectChanged();
