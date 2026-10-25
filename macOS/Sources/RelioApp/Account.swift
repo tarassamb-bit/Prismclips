@@ -76,25 +76,30 @@ final class Account {
         }
     }
 
-    /// Minutes of different videos the account used today and this week, read from Supabase; nil when unavailable.
-    func usageCounts(now: Date = .now) async -> (day: Double, week: Double)? {
+    /// Minutes this account has used and its allowance (60 plus redeemed promo codes); nil when unavailable.
+    func usageStatus() async -> (used: Double, allowance: Double)? {
         guard isSignedIn, let token = await accessToken() else { return nil }
-        var calendar = Calendar.current
-        calendar.firstWeekday = 2
-        guard let week = calendar.dateInterval(of: .weekOfYear, for: now) else { return nil }
-        var request = Self.request("rest/v1/usage_videos?select=video,day,minutes&day=gte.\(Self.dayString(week.start))", method: "GET")
+        var request = Self.request("rest/v1/rpc/my_usage")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = Data("{}".utf8)
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200,
-              let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return nil }
-        let today = Self.dayString(now)
-        var weekLongest: [String: Double] = [:], dayLongest: [String: Double] = [:]
-        for row in rows {
-            guard let video = row["video"] as? String, let minutes = row["minutes"] as? Double else { continue }
-            weekLongest[video] = max(weekLongest[video] ?? 0, minutes)
-            if row["day"] as? String == today { dayLongest[video] = max(dayLongest[video] ?? 0, minutes) }
+              let row = (try? JSONSerialization.jsonObject(with: data) as? [[String: Any]])?.first,
+              let used = (row["used"] as? NSNumber)?.doubleValue,
+              let allowance = (row["allowance"] as? NSNumber)?.doubleValue else { return nil }
+        return (used, allowance)
+    }
+
+    /// Adds a promo code's minutes to this account. Returns what to show the person.
+    func redeemPromo(_ code: String) async -> String {
+        guard isSignedIn, let token = await accessToken() else { return "Sign in to redeem a promo code." }
+        var request = Self.request("rest/v1/rpc/redeem_promo")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["p_code": code.trimmingCharacters(in: .whitespacesAndNewlines)])
+        switch await Self.send(request) {
+        case .success: return "Promo code added. Your allowance is updated."
+        case .failure(let message, _): return message
         }
-        return (dayLongest.values.reduce(0, +), weekLongest.values.reduce(0, +))
     }
 
     /// The local calendar day as the database stores it, yyyy-MM-dd.

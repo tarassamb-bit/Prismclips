@@ -467,12 +467,11 @@ enum MediaEngine {
     }
 }
 
-/// How much video Shorts can be made from: 60 minutes a calendar day and 300 a week. A video already counted that day
-/// or week costs nothing extra, and a run that makes no Shorts isn't counted. Each video counts once, at its length.
-// shortcut: counted on this Mac in UserDefaults; the account's copy in Supabase decides when signed in.
+/// The beta allowance: 60 minutes of video in total per account, each video counted once. Promo codes add minutes;
+/// the server keeps the real count when signed in, and this copy covers the Mac when the server can't be reached.
+// shortcut: counted on this Mac for offline use only; when signed in, the server's count decides.
 enum UsageLimit {
-    static let perDayMinutes = 60.0
-    static let perWeekMinutes = 300.0
+    static let allowance = 60.0
     static let storageKey = "usage.videos"
 
     struct Entry: Codable, Equatable {
@@ -493,37 +492,22 @@ enum UsageLimit {
         (UserDefaults.standard.data(forKey: storageKey)).flatMap { try? JSONDecoder().decode([Entry].self, from: $0) } ?? []
     }
 
-    /// Minutes of different videos used in the day or week that contains `now`.
-    static func used(_ period: Calendar.Component, entries: [Entry], now: Date = .now, calendar: Calendar = .current) -> Double {
+    /// Minutes of different videos used so far.
+    static func used(entries: [Entry]) -> Double {
         var longest: [String: Double] = [:]
-        for entry in entries where calendar.isDate(entry.date, equalTo: now, toGranularity: period) {
-            longest[entry.video] = max(longest[entry.video] ?? 0, entry.minutes)
-        }
+        for entry in entries { longest[entry.video] = max(longest[entry.video] ?? 0, entry.minutes) }
         return longest.values.reduce(0, +)
     }
 
     /// Why a video of `minutes` length can't be used now, or nil when it can.
-    static func refusal(for video: String, minutes: Double, entries: [Entry], now: Date = .now, calendar: Calendar = .current) -> String? {
-        func counted(_ period: Calendar.Component) -> Bool {
-            entries.contains { $0.video == video && calendar.isDate($0.date, equalTo: now, toGranularity: period) }
-        }
-        if !counted(.weekOfYear), used(.weekOfYear, entries: entries, now: now, calendar: calendar) + minutes > perWeekMinutes {
-            let reset = calendar.dateInterval(of: .weekOfYear, for: now)?.end ?? now
-            return "You've reached your weekly limit of \(Int(perWeekMinutes)) minutes of video. You can start new videos again \(reset.formatted(.dateTime.weekday(.wide)))."
-        }
-        if !counted(.day), used(.day, entries: entries, now: now, calendar: calendar) + minutes > perDayMinutes {
-            return "You've reached your daily limit of \(Int(perDayMinutes)) minutes of video. You can start new videos again tomorrow."
-        }
-        return nil
+    static func refusal(for video: String, minutes: Double, entries: [Entry]) -> String? {
+        if entries.contains(where: { $0.video == video }) { return nil }
+        guard used(entries: entries) + minutes > allowance else { return nil }
+        return "You've used your \(Int(allowance)) beta minutes. Ask for a promo code to get more, then enter it in Settings › Usage."
     }
 
-    /// Counts `video` once for today; entries older than two weeks are dropped.
-    static func recorded(_ video: String, minutes: Double, in entries: [Entry], now: Date = .now, calendar: Calendar = .current) -> [Entry] {
-        var kept = entries.filter { now.timeIntervalSince($0.date) < 14 * 86_400 }
-        if !kept.contains(where: { $0.video == video && calendar.isDate($0.date, inSameDayAs: now) }) {
-            kept.append(.init(video: video, date: now, minutes: minutes))
-        }
-        return kept
+    static func recorded(_ video: String, minutes: Double, in entries: [Entry], now: Date = .now) -> [Entry] {
+        entries.contains(where: { $0.video == video }) ? entries : entries + [.init(video: video, date: now, minutes: minutes)]
     }
 
     static func record(_ video: String, minutes: Double) {

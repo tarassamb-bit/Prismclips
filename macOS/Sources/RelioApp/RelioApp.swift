@@ -702,7 +702,7 @@ final class AppModel {
             do {
                 // Signed in, Supabase decides; signed out or offline, only the limit kept on this Mac applies.
                 if await account.usageAllowed(video: serverUsageKey, minutes: usageMinutes, on: .now) == false {
-                    throw GenerationFailure.Refusal(message: "You've reached your video limit: \(Int(UsageLimit.perDayMinutes)) minutes a day or \(Int(UsageLimit.perWeekMinutes)) a week. You can start new videos again when it resets.")
+                    throw GenerationFailure.Refusal(message: "You've used your \(Int(UsageLimit.allowance)) beta minutes. Ask for a promo code to get more, then enter it in Settings › Usage.")
                 }
                 var cachedTranscript = savedTranscript
                 if cachedTranscript == nil,
@@ -1604,7 +1604,9 @@ struct ContentView: View {
     @AppStorage("system.resourceRefreshSeconds") private var resourceRefreshSeconds = 60.0
     @State private var selectedSettingsCategory: SettingsCategory = .account
     /// This account's video counts from Supabase, when signed in; nil shows the count kept on this Mac.
-    @State private var serverUsage: (day: Double, week: Double)?
+    @State private var serverUsage: (used: Double, allowance: Double)?
+    @State private var promoCode = ""
+    @State private var promoStatus = ""
     private let resourceRefreshOptions: [ResourceRefreshOption] = [
         .init(title: "1 second", seconds: 1), .init(title: "5 seconds", seconds: 5),
         .init(title: "10 seconds", seconds: 10), .init(title: "30 seconds", seconds: 30),
@@ -1893,41 +1895,62 @@ struct ContentView: View {
 
     var usageTileDetail: String {
         _ = model.usageRevision
-        return "\(minutesText(UsageLimit.used(.day, entries: UsageLimit.load()))) of \(Int(UsageLimit.perDayMinutes)) min today"
+        let used = serverUsage?.used ?? UsageLimit.used(entries: UsageLimit.load())
+        let allowance = serverUsage?.allowance ?? UsageLimit.allowance
+        return "\(minutesText(used)) of \(Int(allowance)) min used"
     }
 
     func minutesText(_ value: Double) -> String { "\(Int(value.rounded(.down))) min" }
 
-    /// The video limit: how many minutes of today's and this week's allowance are used, and when each resets.
+    /// The beta allowance: minutes used so far, what is left, and where a promo code goes.
     var usageSettings: some View {
         let _ = model.usageRevision
-        let entries = UsageLimit.load()
-        let today = serverUsage?.day ?? UsageLimit.used(.day, entries: entries)
-        let week = serverUsage?.week ?? UsageLimit.used(.weekOfYear, entries: entries)
-        let weekEnd = Calendar.current.dateInterval(of: .weekOfYear, for: .now)?.end ?? .now
+        let used = serverUsage?.used ?? UsageLimit.used(entries: UsageLimit.load())
+        let allowance = serverUsage?.allowance ?? UsageLimit.allowance
         return VStack(alignment: .leading, spacing: 18) {
             Label("Usage", systemImage: "gauge.with.dots.needle.33percent").font(Prism.display(20))
-            Text("You can make Shorts from \(Int(UsageLimit.perDayMinutes)) minutes of video a day and \(Int(UsageLimit.perWeekMinutes)) a week. A video you already used that day or week doesn't count again, and a run that makes no Shorts isn't counted.")
+            Text("Beta accounts get \(Int(UsageLimit.allowance)) minutes of video to make Shorts from. A video you already used doesn't count again. Need more? Ask me for a promo code, then enter it below.")
                 .font(Prism.text(13)).foregroundStyle(Prism.textSecondary).fixedSize(horizontal: false, vertical: true)
             Divider()
-            usageRow("Today", used: today, limit: UsageLimit.perDayMinutes, resets: "Resets at midnight")
-            usageRow("This week", used: week, limit: UsageLimit.perWeekMinutes, resets: "Resets \(weekEnd.formatted(.dateTime.weekday(.wide))) at midnight")
+            usageRow(used: used, limit: allowance)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Promo code").font(Prism.text(14, .medium))
+                HStack(spacing: 10) {
+                    TextField("Enter code", text: $promoCode)
+                        .textFieldStyle(.roundedBorder).controlSize(.large)
+                        .onSubmit { redeemPromo() }
+                    Button("Redeem") { redeemPromo() }
+                        .buttonStyle(PrismButtonStyle(kind: .primary))
+                        .disabled(promoCode.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                if !promoStatus.isEmpty {
+                    Text(promoStatus).font(Prism.text(12)).foregroundStyle(Prism.textSecondary)
+                }
+            }
         }
         .padding(24)
         .background(Prism.surface1, in: RoundedRectangle(cornerRadius: 16))
-        .task { serverUsage = await model.account.usageCounts() }
+        .task { serverUsage = await model.account.usageStatus() }
     }
 
-    func usageRow(_ title: String, used: Double, limit: Double, resets: String) -> some View {
-        let next = resets.prefix(1).lowercased() + resets.dropFirst()
-        return VStack(alignment: .leading, spacing: 6) {
+    func redeemPromo() {
+        let code = promoCode
+        Task {
+            promoStatus = await model.account.redeemPromo(code)
+            promoCode = ""
+            serverUsage = await model.account.usageStatus()
+        }
+    }
+
+    func usageRow(used: Double, limit: Double) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(title).font(Prism.text(14, .medium))
+                Text("Used").font(Prism.text(14, .medium))
                 Spacer()
                 Text("\(minutesText(used)) of \(Int(limit)) min").font(Prism.mono(13)).foregroundStyle(used >= limit ? Prism.amber : Prism.textSecondary)
             }
             PrismProgressLine(value: min(1, used / limit))
-            Text(used >= limit ? "Limit reached · \(next)" : "\(minutesText(limit - used)) left · \(next)")
+            Text(used >= limit ? "All minutes used · ask for a promo code" : "\(minutesText(limit - used)) left")
                 .font(Prism.text(12)).foregroundStyle(Prism.textSecondary)
         }
         .accessibilityElement(children: .combine)

@@ -188,25 +188,14 @@ import CSQLite
         model.selectPreview(nil)
         model.project?.segments = []
         print("PASS arrow keys move between Shorts in the order the list shows")
-        // Video limit: 60 minutes a calendar day and 300 a week; a video counts once, at its length.
-        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(identifier: "UTC")!; calendar.firstWeekday = 2
-        let monday = Date(timeIntervalSince1970: 1_793_059_200) // Monday 2026-10-26 00:00 UTC
-        var usage: [UsageLimit.Entry] = []
-        for index in 0..<3 { usage = UsageLimit.recorded("video \(index)", minutes: 20, in: usage, now: monday.addingTimeInterval(Double(index) * 60), calendar: calendar) }
-        let noon = monday.addingTimeInterval(12 * 3_600)
-        precondition(UsageLimit.used(.day, entries: usage, now: noon, calendar: calendar) == 60)
-        precondition(UsageLimit.refusal(for: "video 9", minutes: 5, entries: usage, now: noon, calendar: calendar)?.contains("daily") == true, "Going past 60 minutes today must be refused")
-        precondition(UsageLimit.refusal(for: "video 1", minutes: 20, entries: usage, now: noon, calendar: calendar) == nil, "A video already used today is free to make again")
-        precondition(UsageLimit.recorded("video 1", minutes: 20, in: usage, now: noon, calendar: calendar).count == 3, "The same video is counted once a day")
-        for day in 1..<5 {
-            usage = UsageLimit.recorded("day \(day) video", minutes: 60, in: usage, now: monday.addingTimeInterval(Double(day) * 86_400), calendar: calendar)
-        }
-        let saturday = monday.addingTimeInterval(5 * 86_400 + 3_600)
-        precondition(UsageLimit.used(.weekOfYear, entries: usage, now: saturday, calendar: calendar) == 300)
-        precondition(UsageLimit.refusal(for: "new", minutes: 5, entries: usage, now: saturday, calendar: calendar)?.contains("weekly") == true, "Going past 300 minutes this week must be refused")
-        precondition(UsageLimit.refusal(for: "video 0", minutes: 20, entries: usage, now: saturday, calendar: calendar) == nil, "A video already used this week doesn't count again")
-        precondition(UsageLimit.refusal(for: "new", minutes: 5, entries: usage, now: monday.addingTimeInterval(7 * 86_400 + 60), calendar: calendar) == nil, "A new week starts fresh")
-        print("PASS usage limit: 60 minutes a day, 300 a week, each video counted once")
+        // Beta allowance: 60 minutes in total; a video counts once, and a video already used is always allowed again.
+        let entries = [UsageLimit.Entry(video: "a", date: .now, minutes: 40), UsageLimit.Entry(video: "b", date: .now, minutes: 15)]
+        precondition(UsageLimit.used(entries: entries) == 55)
+        precondition(UsageLimit.refusal(for: "c", minutes: 10, entries: entries)?.contains("beta minutes") == true, "Going past 60 minutes in total must be refused")
+        precondition(UsageLimit.refusal(for: "c", minutes: 5, entries: entries) == nil, "Filling the allowance exactly is allowed")
+        precondition(UsageLimit.refusal(for: "a", minutes: 40, entries: entries) == nil, "A video already used is free to make again")
+        precondition(UsageLimit.recorded("a", minutes: 40, in: entries).count == 2, "The same video is counted once")
+        print("PASS beta allowance: 60 minutes in total, each video counted once")
         // Account: signed out means no sign-in state and no network call for exports; sign-out clears the saved email.
         UserDefaults.standard.set("tester@example.com", forKey: "account.email")
         let signedIn = Account()

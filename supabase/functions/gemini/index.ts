@@ -75,7 +75,7 @@ function fail(status: number, message: string): Response {
   });
 }
 
-const LIMIT_MESSAGE = "You've reached your video limit: 60 minutes a day or 300 a week. You can start new videos again when it resets.";
+const LIMIT_MESSAGE = "You've used your 60 beta minutes. Ask for a promo code to get more, then enter it in Settings › Usage.";
 
 /// The video limit, enforced here. The app sends the video, its length and the local day with every request.
 /// The database checks and records it with the signed-in user's own token, so no request skips the limit.
