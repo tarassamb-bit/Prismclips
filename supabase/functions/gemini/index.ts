@@ -75,10 +75,57 @@ function fail(status: number, message: string): Response {
   });
 }
 
+const LIMIT_MESSAGE = "You've reached your video limit: 60 minutes a day or 300 a week. You can start new videos again when it resets.";
+
+/// The video limit, enforced here. The app sends the video, its length and the local day with every request.
+/// The database checks and records it with the signed-in user's own token, so no request skips the limit.
+/// Returns null when the request may go on, or the response to send back.
+async function checkVideoLimit(request: Request): Promise<Response | null> {
+  const video = request.headers.get("x-prism-video") ?? "";
+  const minutes = Number(request.headers.get("x-prism-minutes"));
+  const day = request.headers.get("x-prism-day") ?? "";
+  if (!/^[0-9a-f]{64}$/.test(video) || !(minutes > 0 && minutes <= 600) || !/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+    return fail(400, "Prism AI needs the video it is working on. Make Shorts from a video in the app.");
+  }
+  const url = Deno.env.get("SUPABASE_URL");
+  const auth = request.headers.get("Authorization") ?? "";
+  const apikey = request.headers.get("apikey") ?? "";
+  if (!url || !auth.startsWith("Bearer ") || !apikey) return fail(401, "Sign in to your Prism account to continue.");
+  const rest = { "Authorization": auth, "apikey": apikey, "Content-Type": "application/json" };
+
+  const check = await fetch(`${url}/rest/v1/rpc/usage_allowed`, {
+    method: "POST",
+    headers: rest,
+    body: JSON.stringify({ p_video: video, p_day: day, p_minutes: minutes }),
+  });
+  if (check.status === 401) return fail(401, "Sign in to your Prism account to continue.");
+  if (!check.ok) return fail(503, "Prism could not check your video limit right now. Try again shortly.");
+  if ((await check.json()) !== true) return limitReached();
+
+  // Record the video once for the day. A repeat is ignored; a refusal here means the limit was just reached.
+  const record = await fetch(`${url}/rest/v1/usage_videos`, {
+    method: "POST",
+    headers: { ...rest, "Prefer": "resolution=ignore-duplicates,return=minimal" },
+    body: JSON.stringify({ video, day, minutes }),
+  });
+  if (record.status === 401) return fail(401, "Sign in to your Prism account to continue.");
+  if (!record.ok && record.status !== 409) return limitReached();
+  return null;
+}
+
+function limitReached(): Response {
+  return new Response(JSON.stringify({ error: { code: "usage_limit", message: LIMIT_MESSAGE } }), {
+    status: 429,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 Deno.serve(async (request) => {
   if (request.method !== "POST") return fail(405, "Use POST.");
   const key = Deno.env.get("OPENROUTER_API_KEY");
   if (!key) return fail(500, "The AI key is not set on the server.");
+  const refused = await checkVideoLimit(request);
+  if (refused) return refused;
 
   let body: GeminiRequest;
   try {

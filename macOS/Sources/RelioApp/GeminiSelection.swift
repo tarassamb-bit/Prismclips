@@ -12,6 +12,13 @@ struct GeminiConfiguration: Sendable {
     var onFallback: (@Sendable (_ from: String, _ to: String) -> Void)? = nil
     /// The signed-in session's token, which lets requests through Prism's server. nil when signed out.
     var accessToken: (@MainActor @Sendable () async -> String?)? = nil
+    /// The video a request is for. The server checks the video limit against it, so every request needs one.
+    var usage: Usage? = nil
+    struct Usage: Sendable {
+        let video: String
+        let minutes: Double
+        let day: String
+    }
     init(session: URLSession? = nil) { self.session = session }
 }
 
@@ -63,6 +70,8 @@ enum GeminiSelection {
         case server(Int, String)
         /// Signed in, but Prism couldn't get a session token, so the request can't reach Prism's server.
         case signInUnavailable
+        /// The server refused because the account's video limit is used up for today or this week.
+        case usageLimit(String)
         var errorDescription: String? {
             switch self {
             case .audioExport: "Could not prepare audio for Prism AI. Your existing Shorts were kept."
@@ -72,6 +81,7 @@ enum GeminiSelection {
             case .invalidTiming: "Prism AI returned speech timestamps that could not be aligned safely."
             case .invalidConfiguration: "Sign in to your Prism account to continue."
             case .server(let status, let message): "Prism’s server refused this request (HTTP \(status)): \(message)"
+            case .usageLimit(let message): message
             case .signInUnavailable: "Prism couldn’t verify your sign-in, so Shorts can’t be made right now. Sign out and sign in again in Settings › Account."
             case .request(let status):
                 switch status {
@@ -470,6 +480,8 @@ enum GeminiSelection {
                                        configuration: GeminiConfiguration, session suppliedSession: URLSession? = nil) async throws -> T {
         // Requests go through Prism's server with the person's session; the server holds the AI key.
         guard let proxyToken = await configuration.accessToken?() else { throw Failure.signInUnavailable }
+        // Every request names its video, so the server can count it against the limit. No video, no request.
+        guard let usage = configuration.usage else { throw Failure.signInUnavailable }
         let body = try JSONSerialization.data(withJSONObject: ["contents": [["role": "user", "parts": parts]],
             "generationConfig": ["temperature": 0.2, "responseMimeType": "application/json", "responseSchema": schema]])
         guard body.count <= 19_000_000 else { throw Failure.requestTooLarge }
@@ -481,15 +493,20 @@ enum GeminiSelection {
         request.setValue("Bearer \(proxyToken)", forHTTPHeaderField: "Authorization")
         request.setValue(Account.publishableKey, forHTTPHeaderField: "apikey")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(usage.video, forHTTPHeaderField: "x-prism-video")
+        request.setValue(String(usage.minutes), forHTTPHeaderField: "x-prism-minutes")
+        request.setValue(usage.day, forHTTPHeaderField: "x-prism-day")
         request.httpBody = body
         let received = try await send(request, session: session, configuration: configuration)
         try Task.checkCancellation()
         guard let (data, response) = received, let http = response as? HTTPURLResponse else { throw Failure.invalidResponse }
         guard http.statusCode == 200 else {
             // The reason is in the body; show it instead of guessing from the status code.
-            let text = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])
-                .flatMap { ($0["error"] as? [String: Any])?["message"] as? String ?? $0["message"] as? String ?? $0["msg"] as? String }
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let error = object?["error"] as? [String: Any]
+            let text = (error?["message"] as? String) ?? (object?["message"] as? String) ?? (object?["msg"] as? String)
                 ?? String(decoding: data.prefix(300), as: UTF8.self)
+            if error?["code"] as? String == "usage_limit" { throw Failure.usageLimit(text) }
             throw Failure.server(http.statusCode, text)
         }
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],

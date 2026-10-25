@@ -1,6 +1,9 @@
 import Foundation
 import AVFoundation
 
+/// A video for requests in these tests; the server counts each request against it.
+let testUsage = GeminiConfiguration.Usage(video: String(repeating: "a", count: 64), minutes: 1, day: "2026-10-26")
+
 final class GeminiMockProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var status = 200
     nonisolated(unsafe) static var finish = "STOP"
@@ -143,6 +146,7 @@ final class NoteBox: @unchecked Sendable {
         struct Check: Decodable { let ok: Bool }
         var configuration = GeminiConfiguration()
         configuration.accessToken = { "test-token" }
+        configuration.usage = testUsage
         do {
             _ = try await GeminiSelection.select(url: URL(fileURLWithPath: "/tmp/relio-mock-missing.mov"), cues: [],
                 interval: (0, 60), targetDuration: 30, count: 1, configuration: configuration,
@@ -160,6 +164,19 @@ final class NoteBox: @unchecked Sendable {
         let recovered: Check = try await GeminiSelection.generate(parts: [], schema: [:], configuration: announcing, session: session)
         precondition(recovered.ok && GeminiMockProtocol.statuses.isEmpty && notes.values.count == 4
                      && notes.values.allSatisfy { $0.hasPrefix("Prism AI is busy") }, "A busy streak must be retried and shown: \(notes.values)")
+        // Every request names its video and needs a signed-in session: nothing runs free.
+        var noVideo = GeminiConfiguration()
+        noVideo.accessToken = { "test-token" }
+        do {
+            let _: Check = try await GeminiSelection.generate(parts: [], schema: [:], configuration: noVideo, session: session)
+            preconditionFailure("A request without a video must not reach the server")
+        } catch GeminiSelection.Failure.signInUnavailable { }
+        var signedOut = GeminiConfiguration()
+        signedOut.usage = testUsage
+        do {
+            let _: Check = try await GeminiSelection.generate(parts: [], schema: [:], configuration: signedOut, session: session)
+            preconditionFailure("A request without a session must not reach the server")
+        } catch GeminiSelection.Failure.signInUnavailable { }
         print("PASS busy servers are retried and the wait is shown")
         let audioURL = FileManager.default.temporaryDirectory.appendingPathComponent("relio-audio-test-\(UUID()).caf")
         defer { try? FileManager.default.removeItem(at: audioURL) }
@@ -312,6 +329,7 @@ final class NoteBox: @unchecked Sendable {
         let cloudConfiguration: GeminiConfiguration = {
             var signedIn = GeminiConfiguration(session: session)
             signedIn.accessToken = { "test-token" }
+            signedIn.usage = testUsage
             return signedIn
         }()
         let savedTranscript = TranscriptBox()

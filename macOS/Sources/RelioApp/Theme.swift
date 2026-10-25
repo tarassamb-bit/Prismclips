@@ -106,6 +106,9 @@ struct AppearanceSwitch: View {
 struct PrismButtonStyle: ButtonStyle {
     enum Kind { case primary, secondary, ghost }
     var kind: Kind = .primary
+    /// Fills the width the button is given, for rows of equal buttons such as Sign in and Create account.
+    var stretches = false
+    init(kind: Kind = .primary, stretches: Bool = false) { self.kind = kind; self.stretches = stretches }
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
@@ -114,6 +117,7 @@ struct PrismButtonStyle: ButtonStyle {
             .font(Prism.text(14, .medium))
             .padding(.horizontal, 16)
             .frame(minHeight: 40)
+            .frame(maxWidth: stretches ? .infinity : nil)
             .foregroundStyle(kind == .primary ? Prism.ink : Prism.text)
             .background(fill(pressed: configuration.isPressed), in: shape)
             .overlay(shape.stroke(kind == .secondary ? Prism.border : .clear, lineWidth: 1))

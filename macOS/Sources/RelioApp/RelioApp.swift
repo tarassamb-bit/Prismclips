@@ -118,6 +118,7 @@ final class AppModel {
         case .invalidResponse, .invalidTiming: return .temporary
         case .audioExport: return .other
         case .signInUnavailable: return .settings
+        case .usageLimit: return .limit
         }
     }
     private var generationTask: Task<Void, Never>?
@@ -197,10 +198,13 @@ final class AppModel {
         restoreSavedProjects()
         screen = .home
     }
-    /// The AI configuration for a signed-in person: requests go through Prism's server. nil when signed out.
-    func geminiConfiguration() -> GeminiConfiguration? {
+    /// The AI configuration for a signed-in person, for one video: requests go through Prism's server, which counts the
+    /// video against the account's limit. nil when signed out.
+    func geminiConfiguration(for video: MediaItem) -> GeminiConfiguration? {
         guard account.isSignedIn else { return nil }
         var configuration = GeminiConfiguration()
+        configuration.usage = .init(video: UsageLimit.serverKey(video), minutes: UsageLimit.minutes(of: video),
+                                    day: Account.dayString(.now))
         let account = self.account
         configuration.accessToken = { await account.currentAccessToken() }
         configuration.onRetry = { note in
@@ -616,7 +620,7 @@ final class AppModel {
         isPreviewLoading = true
         // Framing runs in the background: the editor stays usable and only this preview waits. Not while another job
         // runs; the Short then previews with its saved framing and is tracked next time, or at export.
-        if !isBusy, segment.cropTrackingVersion != SubjectFramer.version && segment.splitScreen != true, let configuration = geminiConfiguration() {
+        if !isBusy, segment.cropTrackingVersion != SubjectFramer.version && segment.splitScreen != true, let configuration = geminiConfiguration(for: video) {
             subjectTrackingRevision = revision
             message = "Prism AI is framing the main subject…"
             Task {
@@ -673,7 +677,7 @@ final class AppModel {
         if sourceRegion == .custom, let error = customRangeError { message = error; return }
         let customStart = sourceRegion == .custom ? minuteSeconds(customStartMinutes) : nil
         let customEnd = sourceRegion == .custom ? minuteSeconds(customEndMinutes) : nil
-        guard let configuration = geminiConfiguration() else {
+        guard let configuration = geminiConfiguration(for: video) else {
             message = "Sign in to your Prism account to make Shorts."
             generationError = .init(message: "Sign in to your Prism account to make Shorts.", kind: .settings)
             return
@@ -896,13 +900,14 @@ final class AppModel {
                     let destination = Self.reserveExportDestination(name: name, folder: folder, reserved: &reserved)
                     return (number, segment, destination)
                 }
-                let configuration = geminiConfiguration()
+                // One configuration per video, so each request is counted against the right video's limit.
+                let configurations = Dictionary(uniqueKeysWithValues: media.compactMap { video in geminiConfiguration(for: video).map { (video.id, $0) } })
                 generationStage = total == 1 ? "Exporting 1 Short" : "Exporting \(segments.count) Shorts"
                 // Two Shorts render at once: faster, without starving the Mac's video encoder.
                 _ = try await ShortMaker.concurrentMap(jobs, limit: 2) { number, originalSegment, destination in
                     var segment = originalSegment
                     guard let video = media.first(where: { $0.id == segment.mediaID }) else { throw ShortMaker.Failure.noVideo }
-                    if segment.cropTrackingVersion != SubjectFramer.version && segment.splitScreen != true, let configuration {
+                    if segment.cropTrackingVersion != SubjectFramer.version && segment.splitScreen != true, let configuration = configurations[video.id] {
                         segment.cropKeyframes = await ShortMaker.analyzeSubjectPath(
                             URL(fileURLWithPath: video.path), start: segment.start, duration: segment.duration, zoom: segment.cropZoom ?? 1.08, configuration: configuration,
                             speech: segment.captions ?? []
@@ -1035,7 +1040,7 @@ final class AppModel {
             }
             return
         }
-        guard let configuration = geminiConfiguration() else { message = "Sign in to your Prism account first."; return }
+        guard let configuration = geminiConfiguration(for: video) else { message = "Sign in to your Prism account first."; return }
         isBusy = true
         message = "Prism AI is finding both speakers…"
         Task {
@@ -1070,7 +1075,7 @@ final class AppModel {
             return
         }
         let segmentID = segment.id
-        guard let configuration = geminiConfiguration() else { message = "Sign in to your Prism account first."; return }
+        guard let configuration = geminiConfiguration(for: video) else { message = "Sign in to your Prism account first."; return }
         isBusy = true
         message = "Prism AI is transcribing this Short…"
         Task {
@@ -1181,18 +1186,17 @@ final class AppModel {
     /// Transcribes every Short in the project that has speech but no exact word timing, several at a time, in the
     /// background. The editor stays usable; each Short updates as soon as its timing arrives.
     func timeWordsForAllShorts() {
-        guard let project, let projectURL, let configuration = geminiConfiguration() else { return }
+        guard let project, let projectURL else { return }
         let pending = project.segments.filter { segment in
             segment.speechWords?.isEmpty != false && !timingShortIDs.contains(segment.id)
                 && project.media.first(where: { $0.id == segment.mediaID })?.hasAudio == true
         }
         guard !pending.isEmpty else { return }
         // The project's saved sentence transcript covers most Shorts, so only their words need a new transcription.
-        let jobs = pending.compactMap { segment in
-            project.media.first(where: { $0.id == segment.mediaID }).map {
-                (segment, URL(fileURLWithPath: $0.path),
-                 project.transcripts?[$0.id.uuidString]?.cues(covering: (segment.start, segment.start + segment.duration)))
-            }
+        let jobs = pending.compactMap { segment -> (EditSegment, URL, [TimedCaption]?, GeminiConfiguration)? in
+            guard let video = project.media.first(where: { $0.id == segment.mediaID }), let configuration = geminiConfiguration(for: video) else { return nil }
+            return (segment, URL(fileURLWithPath: video.path),
+                    project.transcripts?[video.id.uuidString]?.cues(covering: (segment.start, segment.start + segment.duration)), configuration)
         }
         timingShortIDs.formUnion(jobs.map(\.0.id))
         Task {
@@ -1200,7 +1204,7 @@ final class AppModel {
                 var next = 0
                 func startNext() {
                     guard next < jobs.count else { return }
-                    let (segment, url, saved) = jobs[next]; next += 1
+                    let (segment, url, saved, configuration) = jobs[next]; next += 1
                     group.addTask {
                         let cloud = try? await GeminiSelection.regenerateCaptions(url: url, interval: (segment.start, segment.start + segment.duration),
                                                                                   configuration: configuration, saved: saved)
@@ -1562,7 +1566,7 @@ private struct SettingsCategoryTile: View {
                 Spacer(minLength: 0)
             }
             .padding(14)
-            .frame(width: 190, height: 136, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 136, maxHeight: 136, alignment: .topLeading)
             .background(isSelected ? Prism.accent.opacity(0.15) : Prism.surface1, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(isSelected ? Prism.accent : Prism.surface2, lineWidth: isSelected ? 2 : 1))
             .contentShape(RoundedRectangle(cornerRadius: 16))
@@ -2017,18 +2021,21 @@ struct ContentView: View {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(Prism.accent)
                     Text("Signed in as \(email)").font(Prism.text(13, .medium))
                     Spacer()
-                    Button("Sign out", role: .destructive) { model.account.signOut() }
                 }
                 .padding(12)
                 .background(Prism.surface1, in: RoundedRectangle(cornerRadius: 12))
-                Link("See your stats in the browser", destination: Account.statsPage)
+                Button("Sign out", role: .destructive) { model.account.signOut() }
+                    .buttonStyle(PrismButtonStyle(kind: .secondary, stretches: true))
+                Button("See your stats in the browser") { NSWorkspace.shared.open(Account.statsPage) }
+                    .buttonStyle(PrismButtonStyle(kind: .secondary, stretches: true))
             } else {
-                TextField("Email", text: $accountEmail).textFieldStyle(.roundedBorder).textContentType(.username)
-                SecureField("Password (at least 6 characters)", text: $accountPassword).textFieldStyle(.roundedBorder).textContentType(.password)
-                HStack {
+                TextField("Email", text: $accountEmail).textFieldStyle(.roundedBorder).textContentType(.username).controlSize(.large)
+                SecureField("Password (at least 6 characters)", text: $accountPassword).textFieldStyle(.roundedBorder).textContentType(.password).controlSize(.large)
+                HStack(spacing: 10) {
                     Button("Sign in") { Task { await model.account.signIn(email: accountEmail, password: accountPassword); if model.account.isSignedIn { accountPassword = "" } } }
-                        .buttonStyle(.prismPrimary)
+                        .buttonStyle(PrismButtonStyle(kind: .primary, stretches: true))
                     Button("Create account") { Task { await model.account.signUp(email: accountEmail, password: accountPassword); accountPassword = "" } }
+                        .buttonStyle(PrismButtonStyle(kind: .secondary, stretches: true))
                 }
                 .disabled(model.account.isWorking || accountEmail.isEmpty || accountPassword.isEmpty)
             }
@@ -2101,9 +2108,9 @@ struct ContentView: View {
                         }
                     }
                 }
-                .frame(maxWidth: 1000, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: 1000, maxHeight: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .padding(32)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
