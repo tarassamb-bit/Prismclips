@@ -156,3 +156,86 @@ $$;
 
 -- Create a promo code for someone you invite. Example: insert into promo_codes (code, minutes) values ('FRIEND60', 60);
 -- To stop a code: update promo_codes set active = false where code = 'FRIEND60';
+
+-- Spend cap: the real protection. The server adds what each AI request actually cost (OpenRouter reports it) and refuses
+-- once an account reaches its cap. Minutes reported by the app can't change this.
+-- The cap is the account's allowance (60 minutes plus promo minutes) times usd_per_minute. Set usd_per_minute to the cost
+-- you measure for one video (see the Activity page on OpenRouter): update beta_settings set value = 0.05 where key = 'usd_per_minute';
+-- Run this section once, after the beta allowance section. It is safe to run again.
+create table if not exists public.beta_settings (
+  key   text primary key,
+  value double precision not null check (value >= 0)
+);
+insert into public.beta_settings (key, value) values ('usd_per_minute', 0.05) on conflict (key) do nothing;
+alter table public.beta_settings enable row level security;  -- no policies: only the database functions below read it
+
+create table if not exists public.usage_spend (
+  user_id   uuid primary key references auth.users (id) on delete cascade,
+  spent_usd double precision not null default 0
+);
+alter table public.usage_spend enable row level security;
+
+drop policy if exists "Read own spend" on public.usage_spend;
+create policy "Read own spend" on public.usage_spend
+  for select to authenticated using (user_id = auth.uid());
+
+-- Promo minutes are kept as bonus minutes; the allowance is 60 plus them.
+alter table public.usage_allowance add column if not exists bonus_minutes double precision not null default 0;
+alter table public.usage_allowance alter column minutes set default 0;
+
+create or replace function public.my_usage()
+returns table (used double precision, allowance double precision)
+language sql stable security invoker set search_path = public as $$
+  select
+    coalesce((select sum(m) from (select max(minutes) as m from public.usage_videos
+      where user_id = auth.uid() group by video) t), 0),
+    60 + coalesce((select bonus_minutes from public.usage_allowance where user_id = auth.uid()), 0);
+$$;
+
+create or replace function public.usage_allowed(p_video text, p_day date, p_minutes double precision)
+returns boolean language sql stable security invoker set search_path = public as $$
+  with mine as (
+    select video, max(minutes) as minutes from public.usage_videos where user_id = auth.uid() group by video
+  )
+  select exists (select 1 from mine where video = p_video)
+    or coalesce((select sum(minutes) from mine), 0) + p_minutes
+       <= 60 + coalesce((select bonus_minutes from public.usage_allowance where user_id = auth.uid()), 0);
+$$;
+
+-- True while the account's spend is under its cap. Security definer so it can read beta_settings.
+create or replace function public.spend_allowed()
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce((select spent_usd from public.usage_spend where user_id = auth.uid()), 0)
+    < (60 + coalesce((select bonus_minutes from public.usage_allowance where user_id = auth.uid()), 0))
+      * (select value from public.beta_settings where key = 'usd_per_minute');
+$$;
+
+-- Adds what one AI request cost. Only the server calls it, and only with a real, bounded amount.
+create or replace function public.add_spend(p_usd double precision)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is null or p_usd is null or p_usd <= 0 or p_usd > 5 then return; end if;
+  insert into public.usage_spend (user_id, spent_usd) values (auth.uid(), p_usd)
+    on conflict (user_id) do update set spent_usd = public.usage_spend.spent_usd + excluded.spent_usd;
+end;
+$$;
+
+create or replace function public.redeem_promo(p_code text)
+returns double precision language plpgsql security definer set search_path = public as $$
+declare
+  v_code text := upper(trim(p_code));
+  v_minutes double precision;
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then raise exception 'Sign in to redeem a promo code.' using errcode = '42501'; end if;
+  select minutes into v_minutes from public.promo_codes where code = v_code and active;
+  if v_minutes is null then raise exception 'That promo code is not valid.' using errcode = '22023'; end if;
+  if exists (select 1 from public.promo_redemptions where code = v_code and user_id = v_uid) then
+    raise exception 'You have already used this promo code.' using errcode = '22023';
+  end if;
+  insert into public.promo_redemptions (code, user_id) values (v_code, v_uid);
+  insert into public.usage_allowance (user_id, bonus_minutes) values (v_uid, v_minutes)
+    on conflict (user_id) do update set bonus_minutes = public.usage_allowance.bonus_minutes + excluded.bonus_minutes;
+  return 60 + (select bonus_minutes from public.usage_allowance where user_id = v_uid);
+end;
+$$;
