@@ -105,6 +105,17 @@ import CSQLite
         precondition(!model.isBusy && model.generationError?.kind == .settings, "A missing key must open the Settings popup, not \"No Shorts found\"")
         model.generationError = nil
         print("PASS imported duration initializes the custom range and invalid minutes block generation")
+        // The run checks the video limit before any AI call: with today's 60 minutes used up, a new video is refused.
+        let savedUsage = UserDefaults.standard.data(forKey: UsageLimit.storageKey)
+        UserDefaults.standard.set(try JSONEncoder().encode([UsageLimit.Entry(video: "earlier", date: .now, minutes: 60)]), forKey: UsageLimit.storageKey)
+        let emailBeforeLimit = model.account.email
+        model.account.email = "tester@example.com"
+        model.makeConfiguredShorts()
+        precondition(!model.isBusy && model.generationError?.kind == .limit, "A video past today's 60 minutes must be refused before analysis")
+        model.generationError = nil
+        model.account.email = emailBeforeLimit
+        UserDefaults.standard.set(savedUsage, forKey: UsageLimit.storageKey)
+        print("PASS a run past today's 60 minutes is refused before any AI call")
         let generated = EditSegment(mediaID: media.id, start: 0, duration: 1, fitToFrame: true, suggestedTitle: "First story", selectionReason: "A specific hook and payoff.", captionNotice: "Sentence timing notice", captionStyle: .viral)
         _ = try model.appendGeneratedShorts([generated])
         let distinct = EditSegment(mediaID: media.id, start: 2, duration: 1)
