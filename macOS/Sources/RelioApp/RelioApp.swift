@@ -1580,7 +1580,6 @@ struct ContentView: View {
     @State private var choosingCaptions = false
     @State private var choosingType = false
     @State private var showAllProjects = false
-    @State private var showUnfinishedProjects = false
     @State private var openFolderID: UUID?
     @State private var folderNamePrompt: FolderNamePrompt?
     @State private var folderNameText = ""
@@ -2167,7 +2166,6 @@ struct ContentView: View {
                 let shown = openFolder.map { folder in model.recentProjectPaths.filter { folder.projectPaths.contains($0) } }
                     ?? model.recentProjectPaths.filter { !foldered.contains($0) }
                 let finished = shown.filter { (projectShortCounts[$0] ?? 1) > 0 }
-                let unfinished = shown.filter { projectShortCounts[$0] == 0 }
                 HStack(alignment: .firstTextBaseline) {
                     if let openFolder {
                         Button { openFolderID = nil } label: { Label("Projects", systemImage: "chevron.left") }
@@ -2187,16 +2185,6 @@ struct ContentView: View {
                         }
                         .buttonStyle(.prismGhost)
                         .help("Make a folder and drag projects into it")
-                    }
-                    if !unfinished.isEmpty {
-                        Button { showUnfinishedProjects.toggle() } label: {
-                            HStack(spacing: 6) {
-                                Text(showUnfinishedProjects ? "Hide unfinished" : "Show \(unfinished.count) unfinished")
-                                Image(systemName: showUnfinishedProjects ? "chevron.up" : "chevron.down").font(Prism.text(11, .medium))
-                            }
-                        }
-                            .buttonStyle(.prismGhost)
-                            .help("Projects where a video was uploaded but no Shorts were made")
                     }
                 }
                 if openFolder == nil && !model.projectFolders.isEmpty {
@@ -2228,13 +2216,6 @@ struct ContentView: View {
                             }
                         }
                             .buttonStyle(.prismSecondary)
-                    }
-                    if showUnfinishedProjects && !unfinished.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Unfinished").font(Prism.display(18))
-                            Text("A video was uploaded, but no Shorts were made yet.").font(Prism.text(12)).foregroundStyle(Prism.textSecondary)
-                        }.padding(.top, 8)
-                        projectGrid(unfinished)
                     }
                 }
             }.padding(24).frame(maxWidth: 1800, alignment: .leading).frame(maxWidth: .infinity)
