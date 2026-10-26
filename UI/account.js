@@ -268,7 +268,7 @@
       const { data, error } = action === 'up'
         ? await db.auth.signUp({
           ...credentials,
-          options: { emailRedirectTo: window.location.origin + window.location.pathname },
+          options: { emailRedirectTo: new URL('/login', window.location.origin).href },
         })
         : await db.auth.signInWithPassword(credentials);
       if (error) throw error;

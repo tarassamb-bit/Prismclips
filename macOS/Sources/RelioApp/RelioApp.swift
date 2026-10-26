@@ -147,6 +147,7 @@ final class AppModel {
     let machine = MachineProfile.detect()
     /// The optional Prism account: sign-in and one stats row per finished export. Nothing else leaves the Mac.
     let account = Account()
+    let tutorial = FirstRunTutorial()
     var creatorPreferences = ""
     var sourcePath = ""
     var shortCount = 3
@@ -267,7 +268,7 @@ final class AppModel {
     var hasAIAccess: Bool { account.isSignedIn }
     /// Set by the sign-in gate, so Settings opens on its Account page.
     var opensAccountSettings = false
-    var canUseMenus: Bool { !isBusy && hasAIAccess }
+    var canUseMenus: Bool { !isBusy && hasAIAccess && !tutorial.isActive }
     var canExport: Bool { canUseMenus && screen == .editor && project?.media.isEmpty == false && exportChoice == nil }
 
     func showSettings() {
@@ -773,6 +774,7 @@ final class AppModel {
                 if let warning { message += " " + warning }
                 message = withModelNote(message)
                 selectPreview(fresh.first?.id)
+                tutorial.didCreateVideo()
                 Notifier.notifyIfInBackground(title: fresh.count == 1 ? "1 Short ready" : "\(fresh.count) Shorts ready", body: project?.displayTitle ?? "Prism")
             } catch {
                 if error is GenerationFailure.Refusal { message = error.localizedDescription }
@@ -1619,6 +1621,24 @@ struct ContentView: View {
     @State private var accountEmail = ""
     @State private var accountPassword = ""
     @Environment(AppUpdater.self) var updater
+    private var tutorialFlow: FirstRunTutorial.Flow {
+        switch model.screen {
+        case .home: .home
+        case .importSource:
+            model.shortsSource == nil ? .upload : choosingType ? .contentType : choosingCaptions ? .captions : .settings
+        case .editor: .editor
+        default: .other
+        }
+    }
+    private var tutorialVisible: Bool {
+        model.hasAIAccess && model.tutorial.isActive && !model.isBusy && !model.isPlayerExpanded
+            && model.generationError == nil && model.exportChoice == nil && model.exportSummary == nil
+    }
+    private func connectTutorial() {
+        model.tutorial.connect(email: model.account.email)
+        if model.tutorial.step == .start { model.screen = .home }
+        model.tutorial.follow(tutorialFlow)
+    }
     var body: some View {
         HStack(spacing: 0) {
             if model.screen != .editor { sidebar.frame(width: model.isSidebarCollapsed ? 76 : 252) }
@@ -1632,6 +1652,20 @@ struct ContentView: View {
             }
         }
         .background(Prism.surface0)
+        .overlayPreferenceValue(TutorialAnchors.self) { anchors in
+            if tutorialVisible, let step = model.tutorial.step {
+                GeometryReader { proxy in
+                    let target = step.target.flatMap { anchors[$0] }.map { proxy[$0] }
+                    let viewport = anchors[.sourceViewport].map { proxy[$0] }
+                    TutorialSpotlight(spotlight: target.map { rect in viewport.map { rect.intersection($0) } ?? rect })
+                }
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if tutorialVisible {
+                TutorialCoach(tutorial: model.tutorial) { model.screen = .importSource }
+            }
+        }
         .overlay {
             if model.isPlayerExpanded, model.screen == .editor, let player = model.player {
                 expandedPlayer(player)
@@ -1652,6 +1686,9 @@ struct ContentView: View {
         // The title bar names the open project in the editor, like other Mac document apps.
         .navigationTitle(model.screen == .editor ? (model.project?.displayTitle ?? "Prism") : "Prism")
         .animation(.easeInOut(duration: 0.2), value: model.isSidebarCollapsed)
+        .onAppear { connectTutorial() }
+        .onChange(of: model.account.email) { _, _ in connectTutorial() }
+        .onChange(of: tutorialFlow) { _, flow in model.tutorial.follow(flow) }
     }
     /// Prism can't do anything without Prism AI, so while no key is saved this card covers the whole app and blocks it.
     /// Until someone signs in, Prism's AI can't run. Signing in replaces the old key-entry step.
@@ -2051,6 +2088,11 @@ struct ContentView: View {
                     .buttonStyle(PrismButtonStyle(kind: .secondary, stretches: true))
                 Button("See your stats in the browser") { NSWorkspace.shared.open(Account.statsPage) }
                     .buttonStyle(PrismButtonStyle(kind: .secondary, stretches: true))
+                Button("Replay first-video tutorial") {
+                    model.tutorial.restart(email: email)
+                    model.screen = .home
+                }
+                .buttonStyle(PrismButtonStyle(kind: .secondary, stretches: true))
             } else {
                 TextField("Email", text: $accountEmail).textFieldStyle(.roundedBorder).textContentType(.username).controlSize(.large)
                 SecureField("Password (at least 6 characters)", text: $accountPassword).textFieldStyle(.roundedBorder).textContentType(.password).controlSize(.large)
@@ -2188,6 +2230,7 @@ struct ContentView: View {
                     .background(Prism.action, in: RoundedRectangle(cornerRadius: 16))
                     .pointerFeedback()
                     .help("Start creating · ⌘N")
+                    .tutorialTarget(.start)
                 }
 
                 // Uploads that never got Shorts are kept but tucked away; until counts load, every project shows.
@@ -2442,29 +2485,35 @@ struct ContentView: View {
                         .font(Prism.text(16)).foregroundStyle(Prism.textSecondary)
                 }
                 if let video = model.shortsSource, choosingType {
-                    typeChoice
-                    HStack {
-                        Button { choosingType = false } label: { Label("Back to captions", systemImage: "chevron.left") }
-                            .controlSize(.large).pointerFeedback().keyboardShortcut(.cancelAction)
-                        Spacer()
-                        Button("Analyze and create Shorts") { model.continueImport() }
-                            .buttonStyle(.prismPrimary).pointerFeedback().keyboardShortcut(.defaultAction)
-                            .disabled(model.isBusy || model.customRangeError != nil)
+                    VStack(spacing: 20) {
+                        typeChoice
+                        HStack {
+                            Button { choosingType = false } label: { Label("Back to captions", systemImage: "chevron.left") }
+                                .controlSize(.large).pointerFeedback().keyboardShortcut(.cancelAction)
+                            Spacer()
+                            Button("Analyze and create Shorts") { model.continueImport() }
+                                .buttonStyle(.prismPrimary).pointerFeedback().keyboardShortcut(.defaultAction)
+                                .disabled(model.isBusy || model.customRangeError != nil)
+                        }
+                        .accessibilityElement(children: .contain)
+                        .accessibilityLabel("Content type for \(video.name)")
                     }
-                    .accessibilityElement(children: .contain)
-                    .accessibilityLabel("Content type for \(video.name)")
+                    .tutorialTarget(.contentType)
                 } else if let video = model.shortsSource, choosingCaptions {
-                    captionChoice
-                    HStack {
-                        Button { choosingCaptions = false } label: { Label("Back to settings", systemImage: "chevron.left") }
-                            .controlSize(.large).pointerFeedback().keyboardShortcut(.cancelAction)
-                        Spacer()
-                        Button { choosingType = true } label: { Label("Next: Choose content type", systemImage: "chevron.right") }
-                            .buttonStyle(.prismPrimary).pointerFeedback().keyboardShortcut(.defaultAction)
-                            .disabled(model.isBusy || model.customRangeError != nil)
+                    VStack(spacing: 20) {
+                        captionChoice
+                        HStack {
+                            Button { choosingCaptions = false } label: { Label("Back to settings", systemImage: "chevron.left") }
+                                .controlSize(.large).pointerFeedback().keyboardShortcut(.cancelAction)
+                            Spacer()
+                            Button { choosingType = true } label: { Label("Next: Choose content type", systemImage: "chevron.right") }
+                                .buttonStyle(.prismPrimary).pointerFeedback().keyboardShortcut(.defaultAction)
+                                .disabled(model.isBusy || model.customRangeError != nil)
+                        }
+                        .accessibilityElement(children: .contain)
+                        .accessibilityLabel("Captions for \(video.name)")
                     }
-                    .accessibilityElement(children: .contain)
-                    .accessibilityLabel("Captions for \(video.name)")
+                    .tutorialTarget(.captions)
                 } else if let video = model.shortsSource {
                     VStack(alignment: .leading, spacing: 10) {
                         Label(video.name, systemImage: "checkmark.circle.fill").foregroundStyle(Prism.accent)
@@ -2474,12 +2523,16 @@ struct ContentView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading).padding(18)
                     .background(Prism.surface1, in: RoundedRectangle(cornerRadius: 16))
-                    shortsConfiguration
-                    Button { choosingCaptions = true } label: { Label("Next: Choose captions", systemImage: "chevron.right") }
-                        .buttonStyle(.prismPrimary).pointerFeedback().keyboardShortcut(.defaultAction)
-                        .disabled(model.isBusy || model.customRangeError != nil)
+                    VStack(spacing: 20) {
+                        shortsConfiguration
+                        Button { choosingCaptions = true } label: { Label("Next: Choose captions", systemImage: "chevron.right") }
+                            .buttonStyle(.prismPrimary).pointerFeedback().keyboardShortcut(.defaultAction)
+                            .disabled(model.isBusy || model.customRangeError != nil)
+                    }
+                    .tutorialTarget(.settings)
                 } else {
                     videoUploadControls
+                        .tutorialTarget(.upload)
                 }
                 Button { model.screen = .home } label: { Label("Back to Home", systemImage: "chevron.left") }
                     .buttonStyle(.prismLink).pointerFeedback().foregroundStyle(Prism.textSecondary).frame(maxWidth: .infinity, alignment: .leading)
@@ -2487,6 +2540,7 @@ struct ContentView: View {
             .disabled(model.isBusy)
             .padding(30).frame(maxWidth: 920, alignment: .top).frame(maxWidth: .infinity)
         }
+        .tutorialTarget(.sourceViewport)
         .onAppear {
             choosingCaptions = false
             choosingType = false

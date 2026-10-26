@@ -25,14 +25,20 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function page(initial, query) {
+function page(initial, query, { origin = 'https://example.test', pathname = '/dashboard_user-1', authPage = 'dashboard' } = {}) {
   const ids = ['account', 'auth', 'signedIn', 'status', 'rows', 'who', 'export-count', 'shorts', 'minutes'];
   const nodes = Object.fromEntries(ids.map((id) => [id, new Element()]));
   nodes.auth.elements = [];
-  nodes.auth.elements.namedItem = () => ({ value: '' });
+  const fields = { email: { value: 'creator@example.com' }, password: { value: 'test-password' } };
+  nodes.auth.elements.namedItem = (name) => fields[name];
+  nodes.auth.reportValidity = () => true;
+  const signUps = [];
   let authChanged;
   const db = {
-    auth: { getSession: () => initial, onAuthStateChange: (fn) => { authChanged = fn; } },
+    auth: {
+      getSession: () => initial, onAuthStateChange: (fn) => { authChanged = fn; },
+      signUp: async (request) => { signUps.push(request); return { data: { session: null }, error: null }; },
+    },
     from() {
       const chain = {
         select() { return this; }, order() { return this; }, limit() { return this; }, or() { return this; },
@@ -42,18 +48,18 @@ function page(initial, query) {
     },
   };
   const location = {
-    origin: 'https://example.test', pathname: '/dashboard_user-1', search: '', replacements: [],
+    origin, pathname, search: '', replacements: [],
     replace(url) { this.replacements.push(url); },
   };
   const document = {
-    body: { dataset: { authPage: 'dashboard' } }, getElementById: (id) => nodes[id] ?? null,
+    body: { dataset: { authPage } }, getElementById: (id) => nodes[id] ?? null,
     querySelector: () => null, querySelectorAll: () => [], createElement: () => new Element(),
   };
   const window = { prismDb: db, location, setTimeout };
   vm.runInNewContext(fs.readFileSync(`${__dirname}/account.js`, 'utf8'), {
     window, document, location, history: { replaceState() {} }, URL, URLSearchParams, Intl, console,
   });
-  return { nodes, location, emit: (session) => authChanged('CHANGE', session) };
+  return { nodes, location, fields, signUps, emit: (session) => authChanged('CHANGE', session) };
 }
 
 (async () => {
@@ -80,5 +86,18 @@ function page(initial, query) {
   await flush();
   assert.equal(signedOut.nodes['export-count'].textContent, '—', 'old stats stay cleared while sign-out navigation is pending');
   assert.equal(signedOut.nodes.who.textContent, '');
-  console.log('account-check: stale restore failures and pending stats after sign-out passed');
+
+  for (const origin of ['https://prismclips.vercel.app', 'http://localhost:4173']) {
+    const signup = page(Promise.resolve({ data: { session: null }, error: null }), async () => ({ data: [], error: null }), {
+      origin, pathname: '/signup', authPage: 'login',
+    });
+    await flush();
+    await signup.nodes.auth.events.submit({ preventDefault() {}, submitter: { value: 'up' } });
+    assert.equal(signup.signUps.length, 1);
+    assert.equal(signup.signUps[0].options.emailRedirectTo, `${origin}/login`);
+    assert.match(signup.nodes.status.textContent, /Check your inbox/);
+    assert.equal(signup.fields.password.value, '');
+    assert.deepEqual(signup.location.replacements, [], 'confirmation is required before redirecting to the dashboard');
+  }
+  console.log('account-check: auth races and signup confirmation redirects passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

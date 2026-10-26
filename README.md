@@ -20,6 +20,8 @@ Drop in a podcast, lecture, vlog or stream. Prism finds the moments that work as
 
 > **Status:** early Phase 1 prototype. The core long-video-to-Short pipeline works end to end; see [Limits](#limits) before relying on it.
 
+> **macOS registration fix:** the previous Mac beta (0.1.2) had a registration issue where email confirmation links led to localhost. Use [Prism 0.1.3 for macOS](https://github.com/tarassamb-bit/Prismclips/releases/tag/mac-v0.1.3), which includes the fix and a guided first-video tutorial. Request a fresh confirmation email if your old link still points to localhost.
+
 ## The editor
 
 <p align="center"><img src="macOS/assets/readme/editor.png" width="100%" alt="The Prism editor: Shorts list, vertical preview with highlighted captions, clip inspector and timeline."></p>
@@ -176,6 +178,7 @@ Each test script compiles a small standalone runner with `swiftc`. No live API c
 | `zsh macOS/scripts/gemini-selection-test.sh` | Ranking, late moments, backups, window clamping, timing recovery, quota handling, Gemini framing. Needs `macOS/test-output/pictures.mov` from the smoke test. |
 | `zsh macOS/scripts/framing-test.sh` | Camera planner stability, fast subjects, scene cuts and rendered cut timing. |
 | `zsh macOS/scripts/editor-model-test.sh` | Editor actions, undo, folders, rename, save and reopen, export. |
+| `zsh macOS/scripts/tutorial-test.sh` | First-login guide progression, retry, per-account completion, dismissal, replay and optional editor tour. Uses isolated preferences. |
 | `zsh macOS/scripts/ui-smoke-test.sh` | Drives the installed `~/Applications/Prism.app` through its screens with System Events (needs Accessibility permission for your terminal). |
 
 **End-to-end fixture.** After the smoke test:
@@ -185,6 +188,8 @@ Each test script compiles a small standalone runner with `swiftc`. No live API c
 3. Check the exports with `zsh macOS/scripts/verify-speech-workflow.sh PROJECT_DIRECTORY`.
 
 Mocks prove the logic, not clip quality. Judge real footage yourself.
+
+The Mac app starts a guided first-video tutorial after signing in. It highlights the real controls from **Start creating** through a successful generation, then offers an optional editor tour. **Finish later** leaves it unfinished; **Settings → Account → Replay first-video tutorial** starts it again. For a separate UI preview with fake credentials and simulated generation, run `zsh macOS/scripts/tutorial-preview.sh`; its Preview menu loads a sample and simulates a successful result.
 
 ## Packaging and signing
 
@@ -224,3 +229,5 @@ Internal identifiers still say *Relio*, so existing projects, settings and the s
 <p align="center"><img src="macOS/assets/readme/icon.png" width="64" alt="Prism icon"></p>
 
 Prism is MIT-licensed; see [LICENSE](LICENSE). Clip selection adapts [OpenShorts](macOS/THIRD-PARTY-NOTICES.md) (MIT). Fonts are under the SIL Open Font License.
+
+Project contributor: [NeoChief (@neochief)](https://github.com/neochief).

@@ -7,7 +7,7 @@ final class Account {
     /// The project's public (publishable) key: safe to ship, because Row Level Security limits every user to their own rows.
     static let projectURL = URL(string: "https://isdplhahgggundbohmlr.supabase.co")!
     nonisolated static let publishableKey = "sb_publishable_ATTcp2-mrca0swMStHHdYQ_Le851b8l"
-    static let statsPage = URL(string: "https://tarassamb-bit.github.io/prism-website/#account")!
+    static let statsPage = URL(string: "https://prismclips.vercel.app/login")!
     private static let keychainService = "Relio.Account"
     /// Only the email is kept here, so launching Prism never reads the Keychain; the token is read when an export needs it.
     private static let emailKey = "account.email"
@@ -32,7 +32,9 @@ final class Account {
     }
 
     func signUp(email: String, password: String) async {
-        await authenticate(path: "auth/v1/signup", email: email, password: password)
+        var url = URLComponents(string: "auth/v1/signup")!
+        url.queryItems = [URLQueryItem(name: "redirect_to", value: Self.statsPage.absoluteString)]
+        await authenticate(path: url.string!, email: email, password: password)
     }
 
     func signOut() {

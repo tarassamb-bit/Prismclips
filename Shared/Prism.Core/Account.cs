@@ -15,7 +15,7 @@ public sealed class Account : INotifyPropertyChanged
     /// The project's public (publishable) key: safe to ship, because Row Level Security limits every user to their own rows.
     public static readonly Uri ProjectUrl = new("https://isdplhahgggundbohmlr.supabase.co/");
     const string PublishableKey = "sb_publishable_ATTcp2-mrca0swMStHHdYQ_Le851b8l";
-    public const string StatsPage = "https://tarassamb-bit.github.io/prism-website/#account";
+    public const string StatsPage = "https://prismclips.vercel.app/login";
     static readonly HttpClient SharedClient = new() { Timeout = TimeSpan.FromSeconds(20) };
 
     readonly IKeyStore store;
@@ -40,7 +40,7 @@ public sealed class Account : INotifyPropertyChanged
     }
 
     public Task SignIn(string email, string password) => Authenticate("auth/v1/token?grant_type=password", email, password);
-    public Task SignUp(string email, string password) => Authenticate("auth/v1/signup", email, password);
+    public Task SignUp(string email, string password) => Authenticate("auth/v1/signup?redirect_to=" + Uri.EscapeDataString(StatsPage), email, password);
 
     public void SignOut()
     {

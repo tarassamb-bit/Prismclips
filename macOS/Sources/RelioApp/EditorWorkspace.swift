@@ -53,6 +53,7 @@ extension ContentView {
             }.buttonStyle(.plain).disabled(model.project?.media.isEmpty != false || model.isBusy)
                 .help("Choose which Shorts, the main video and the quality to export")
                 .accessibilityLabel("Export")
+                .tutorialTarget(.export)
         }.padding(.horizontal, 20).frame(height: 54)
             .background(EditorStyle.panel)
             .overlay(alignment: .bottom) { EditorStyle.line.frame(height: 1) }
@@ -275,19 +276,23 @@ extension ContentView {
             HStack(spacing: 1) {
                 EditorMediaBin(model: model)
                     .frame(width: leftSidebarWidth)
+                    .tutorialTarget(.shorts)
                 EditorSidebarDivider {
                     leftSidebarWidth = min(440, max(200, leftSidebarWidth + $0))
                 }
                 EditorPlayer(model: model).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .tutorialTarget(.preview)
                 EditorSidebarDivider {
                     rightSidebarWidth = min(460, max(220, rightSidebarWidth - $0))
                 }
                 EditorCaptionsSidebar(model: model).frame(width: rightSidebarWidth)
+                    .tutorialTarget(.editing)
             }.frame(maxHeight: .infinity)
             EditorSidebarDivider(axis: .vertical) {
                 timelineHeight = min(620, max(150, timelineHeight - $0))
             }
             EditorTimeline(model: model).frame(height: timelineHeight)
+                .tutorialTarget(.timeline)
             HStack(spacing: 8) {
                 if model.isBusy || model.isPreviewLoading { ProgressView().controlSize(.mini) }
                 Text(model.message).font(Prism.text(11)).lineLimit(1).textSelection(.enabled)
@@ -316,7 +321,7 @@ private struct EditorShortcuts: View {
     }
 
     @MainActor private func handle(_ event: NSEvent) -> Bool {
-        guard model.screen == .editor, model.generationProgress == nil, model.generationError == nil, model.exportSummary == nil, model.exportChoice == nil,
+        guard model.screen == .editor, !model.tutorial.isActive, model.generationProgress == nil, model.generationError == nil, model.exportSummary == nil, model.exportChoice == nil,
               !(event.window?.firstResponder is NSText) else { return false }
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         switch (event.keyCode, modifiers) {
