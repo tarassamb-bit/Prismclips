@@ -42,8 +42,7 @@ until [[ -n $cipher ]]; do
     print "The run ended ($state) before the screen was ready. See: gh run view $run --repo $repo --log-failed"
     exit 1
   fi
-  job=$(gh api repos/$repo/actions/runs/$run/jobs -q '.jobs[0].id')
-  cipher=$(gh api repos/$repo/check-runs/$job/annotations -q '.[] | select(.title == "preview") | .message' 2>/dev/null || true)
+  cipher=$(gh api repos/$repo/commits/$(git rev-parse HEAD)/statuses -q ".[] | select(.context == \"windows-preview/$run\") | .description" 2>/dev/null || true)
 done
 
 url=$(print -rn -- $cipher | PREVIEW_PASSWORD=$password openssl enc -d -aes-256-cbc -pbkdf2 -md sha256 -a -A -pass env:PREVIEW_PASSWORD)

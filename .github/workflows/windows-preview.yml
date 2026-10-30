@@ -1,6 +1,6 @@
 # Runs the real Windows app on a GitHub Windows machine and shows its screen in your browser (TightVNC + noVNC over a Cloudflare tunnel).
 # Start it from the Mac with:  zsh Windows/preview.sh   (pushes the current commit to the windows-preview branch)
-# Logs are public: the tunnel link is only shown encrypted with the PREVIEW_PASSWORD secret, which also guards the screen.
+# Logs are public: the tunnel link is only posted (as a commit status) encrypted with the PREVIEW_PASSWORD secret, which also guards the screen.
 name: Windows preview
 
 on:
@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write # carries the encrypted link; annotations only appear once the job ends
 
 concurrency:
   group: windows-preview
@@ -51,9 +52,12 @@ jobs:
           throw "The Cloudflare tunnel did not start."
       - name: Publish the encrypted link
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           url=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel.log | head -1)
-          echo "::notice title=preview::$(printf %s "$url" | openssl enc -aes-256-cbc -pbkdf2 -md sha256 -a -A -pass env:PREVIEW_PASSWORD)"
+          cipher=$(printf %s "$url" | openssl enc -aes-256-cbc -pbkdf2 -md sha256 -a -A -pass env:PREVIEW_PASSWORD)
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=success -f "context=windows-preview/$GITHUB_RUN_ID" -f "description=$cipher" > /dev/null
       - name: Start Prism
         shell: pwsh
         run: Start-Process dist/windows/Prism.exe -WorkingDirectory dist/windows
