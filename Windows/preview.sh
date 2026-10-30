@@ -46,6 +46,8 @@ until [[ -n $cipher ]]; do
 done
 
 url=$(print -rn -- $cipher | PREVIEW_PASSWORD=$password openssl enc -d -aes-256-cbc -pbkdf2 -md sha256 -a -A -pass env:PREVIEW_PASSWORD)
+# A fresh tunnel can take a minute to reach; opening it early shows Cloudflare error 1033.
+for i in {1..30}; do [[ $(curl -s -o /dev/null -w '%{http_code}' "$url/vnc.html" || true) == 200 ]] && break; sleep 4; done
 # The password goes in the # part, which the browser never sends over the network.
 open "$url/vnc.html#autoconnect=true&resize=scale&password=$password"
 print "Windows is open in your browser ($url/vnc.html, password $password). Press Ctrl+C here to shut it down."

@@ -47,7 +47,7 @@ jobs:
           Expand-Archive novnc.zip -DestinationPath .
           Start-Process python -ArgumentList "-m", "websockify", "--web", "noVNC-1.5.0", "6080", "localhost:5900" -WindowStyle Hidden -RedirectStandardError websockify.log
           Invoke-WebRequest https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe -OutFile cloudflared.exe
-          Start-Process ./cloudflared.exe -ArgumentList "tunnel", "--no-autoupdate", "--url", "http://localhost:6080" -WindowStyle Hidden -RedirectStandardError tunnel.log
+          Start-Process ./cloudflared.exe -ArgumentList "tunnel", "--no-autoupdate", "--metrics", "127.0.0.1:20241", "--url", "http://127.0.0.1:6080" -WindowStyle Hidden -RedirectStandardError tunnel.log
           foreach ($i in 1..60) { if (Select-String -Path tunnel.log -Pattern 'trycloudflare\.com' -Quiet) { exit 0 }; Start-Sleep 2 }
           throw "The Cloudflare tunnel did not start."
       - name: Publish the encrypted link
@@ -56,11 +56,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           url=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel.log | head -1)
-          # The link is printed before the tunnel connects; only send it once noVNC answers through it.
-          for i in $(seq 45); do [ "$(curl -s -o /dev/null -w '%{http_code}' "$url/vnc.html")" = 200 ] && break; sleep 4; done
-          if [ "$(curl -s -o /dev/null -w '%{http_code}' "$url/vnc.html")" != 200 ]; then
+          # The link is printed before the tunnel connects; only send it once the tunnel and noVNC are both up.
+          # Checked locally: a brand-new trycloudflare name often fails to resolve on the runner for minutes.
+          for i in $(seq 45); do
+            ready=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:20241/ready || true)
+            web=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:6080/vnc.html || true)
+            [ "$ready$web" = 200200 ] && break; sleep 4
+          done
+          if [ "$ready$web" != 200200 ]; then
             sed 's/[a-z0-9-]*\.trycloudflare\.com/<tunnel>/g' tunnel.log; cat websockify.log
-            echo "::error::The tunnel never answered."; exit 1
+            echo "::error::Tunnel ready: $ready, noVNC: $web."; exit 1
           fi
           cipher=$(printf %s "$url" | openssl enc -aes-256-cbc -pbkdf2 -md sha256 -a -A -pass env:PREVIEW_PASSWORD)
           gh api "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=success -f "context=windows-preview/$GITHUB_RUN_ID" -f "description=$cipher" > /dev/null
