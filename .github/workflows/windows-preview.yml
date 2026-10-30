@@ -56,6 +56,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           url=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel.log | head -1)
+          # The link is printed before the tunnel connects; only send it once noVNC answers through it.
+          for i in $(seq 45); do [ "$(curl -s -o /dev/null -w '%{http_code}' "$url/vnc.html")" = 200 ] && break; sleep 4; done
+          if [ "$(curl -s -o /dev/null -w '%{http_code}' "$url/vnc.html")" != 200 ]; then
+            sed 's/[a-z0-9-]*\.trycloudflare\.com/<tunnel>/g' tunnel.log; cat websockify.log
+            echo "::error::The tunnel never answered."; exit 1
+          fi
           cipher=$(printf %s "$url" | openssl enc -aes-256-cbc -pbkdf2 -md sha256 -a -A -pass env:PREVIEW_PASSWORD)
           gh api "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=success -f "context=windows-preview/$GITHUB_RUN_ID" -f "description=$cipher" > /dev/null
       - name: Start Prism
@@ -63,4 +69,14 @@ jobs:
         run: Start-Process dist/windows/Prism.exe -WorkingDirectory dist/windows
       - name: Keep the machine on (cancel the run to stop)
         shell: pwsh
-        run: while ($true) { Start-Sleep 60 }
+        run: |
+          while ($true) {
+            foreach ($name in 'tvnserver', 'python', 'cloudflared') {
+              if (-not (Get-Process $name -ErrorAction SilentlyContinue)) {
+                (Get-Content tunnel.log) -replace '[a-z0-9-]+\.trycloudflare\.com', '<tunnel>'
+                Get-Content websockify.log
+                throw "$name stopped."
+              }
+            }
+            Start-Sleep 60
+          }
