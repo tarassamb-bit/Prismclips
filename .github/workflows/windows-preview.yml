@@ -34,54 +34,45 @@ jobs:
           Expand-Archive ffmpeg.zip -DestinationPath ffmpeg
           $root = Get-ChildItem ffmpeg -Directory | Select-Object -First 1
           Copy-Item "$($root.FullName)\bin\ffmpeg.exe", "$($root.FullName)\bin\ffprobe.exe" dist/windows/
-      - name: Start the screen server and tunnel
+      - name: Install the screen server
         shell: pwsh
         run: |
           if (-not $env:PREVIEW_PASSWORD) { throw "The PREVIEW_PASSWORD repository secret is missing; zsh Windows/preview.sh sets it." }
           # Prism opens at 1440x920; the runner's default 1024x768 desktop would clip it.
           try { Set-DisplayResolution -Width 1920 -Height 1080 -Force } catch { Write-Warning "Screen keeps its default size: $_" }
-          # Loopback must be allowed: websockify reaches the VNC server on localhost.
+          # Runs as a Windows service, so it outlives this step. Loopback must be allowed: websockify reaches it on localhost.
           choco install tightvnc -y --no-progress --ia "ADDLOCAL=Server SET_USEVNCAUTHENTICATION=1 VALUE_OF_USEVNCAUTHENTICATION=1 SET_PASSWORD=1 VALUE_OF_PASSWORD=$env:PREVIEW_PASSWORD SET_ALLOWLOOPBACK=1 VALUE_OF_ALLOWLOOPBACK=1 SET_ACCEPTHTTPCONNECTIONS=1 VALUE_OF_ACCEPTHTTPCONNECTIONS=0"
           python -m pip install --quiet websockify
           Invoke-WebRequest https://github.com/novnc/noVNC/archive/refs/tags/v1.5.0.zip -OutFile novnc.zip
           Expand-Archive novnc.zip -DestinationPath .
-          Start-Process python -ArgumentList "-m", "websockify", "--web", "noVNC-1.5.0", "6080", "localhost:5900" -WindowStyle Hidden -RedirectStandardError websockify.log
           Invoke-WebRequest https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe -OutFile cloudflared.exe
-          Start-Process ./cloudflared.exe -ArgumentList "tunnel", "--no-autoupdate", "--metrics", "127.0.0.1:20241", "--url", "http://127.0.0.1:6080" -WindowStyle Hidden -RedirectStandardError tunnel.log
-          foreach ($i in 1..60) { if (Select-String -Path tunnel.log -Pattern 'trycloudflare\.com' -Quiet) { exit 0 }; Start-Sleep 2 }
-          throw "The Cloudflare tunnel did not start."
-      - name: Publish the encrypted link
-        shell: bash
+      # One step on purpose: the runner kills every process a step started when that step ends.
+      - name: Run the preview (cancel the run to stop)
+        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          url=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel.log | head -1)
-          # The link is printed before the tunnel connects; only send it once the tunnel and noVNC are both up.
+          function Show-Logs { (Get-Content tunnel.log) -replace '[a-z0-9-]+\.trycloudflare\.com', '<tunnel>'; Get-Content websockify.log }
+          Start-Process python -ArgumentList "-m", "websockify", "--web", "noVNC-1.5.0", "6080", "localhost:5900" -WindowStyle Hidden -RedirectStandardError websockify.log
+          Start-Process ./cloudflared.exe -ArgumentList "tunnel", "--no-autoupdate", "--metrics", "127.0.0.1:20241", "--url", "http://127.0.0.1:6080" -WindowStyle Hidden -RedirectStandardError tunnel.log
+          Start-Process dist/windows/Prism.exe -WorkingDirectory dist/windows
           # Checked locally: a brand-new trycloudflare name often fails to resolve on the runner for minutes.
-          for i in $(seq 45); do
-            ready=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:20241/ready || true)
-            web=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:6080/vnc.html || true)
-            [ "$ready$web" = 200200 ] && break; sleep 4
-          done
-          if [ "$ready$web" != 200200 ]; then
-            sed 's/[a-z0-9-]*\.trycloudflare\.com/<tunnel>/g' tunnel.log; cat websockify.log
-            echo "::error::Tunnel ready: $ready, noVNC: $web."; exit 1
-          fi
-          cipher=$(printf %s "$url" | openssl enc -aes-256-cbc -pbkdf2 -md sha256 -a -A -pass env:PREVIEW_PASSWORD)
-          gh api "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=success -f "context=windows-preview/$GITHUB_RUN_ID" -f "description=$cipher" > /dev/null
-      - name: Start Prism
-        shell: pwsh
-        run: Start-Process dist/windows/Prism.exe -WorkingDirectory dist/windows
-      - name: Keep the machine on (cancel the run to stop)
-        shell: pwsh
-        run: |
+          foreach ($i in 1..45) {
+            $ready = curl.exe -s -o NUL -w '%{http_code}' http://127.0.0.1:20241/ready
+            $web = curl.exe -s -o NUL -w '%{http_code}' http://127.0.0.1:6080/vnc.html
+            if ("$ready$web" -eq '200200') { break }
+            Start-Sleep 4
+          }
+          if ("$ready$web" -ne '200200') { Show-Logs; throw "Tunnel ready: $ready, noVNC: $web." }
+          $url = (Select-String -Path tunnel.log -Pattern 'https://[a-z0-9-]+\.trycloudflare\.com').Matches[0].Value
+          [IO.File]::WriteAllText("$PWD/url.txt", $url)
+          $cipher = & "$env:ProgramFiles\Git\usr\bin\openssl.exe" enc -aes-256-cbc -pbkdf2 -md sha256 -a -A -pass env:PREVIEW_PASSWORD -in url.txt
+          Remove-Item url.txt
+          gh api "repos/$env:GITHUB_REPOSITORY/statuses/$env:GITHUB_SHA" -f state=success -f "context=windows-preview/$env:GITHUB_RUN_ID" -f "description=$cipher" | Out-Null
+          if ($LASTEXITCODE) { throw "Could not post the link." }
           while ($true) {
             foreach ($name in 'tvnserver', 'python', 'cloudflared') {
-              if (-not (Get-Process $name -ErrorAction SilentlyContinue)) {
-                (Get-Content tunnel.log) -replace '[a-z0-9-]+\.trycloudflare\.com', '<tunnel>'
-                Get-Content websockify.log
-                throw "$name stopped."
-              }
+              if (-not (Get-Process $name -ErrorAction SilentlyContinue)) { Show-Logs; throw "$name stopped." }
             }
             Start-Sleep 60
           }
