@@ -15,6 +15,7 @@ public sealed partial class PrismWindow
             : !session.Account.IsSignedIn ? "signin"
             : session.GenerationProgress is not null ? "progress"
             : session.IsBusy ? "working"
+            : session.PendingPaidRun is { } paid ? "paid:" + paid.GetHashCode()
             : session.GenerationError is { } failure ? "error:" + failure.GetHashCode()
             : session.ExportSummary is { } summary ? "done:" + summary
             : session.ExportChoice is not null ? "export" : "";
@@ -28,6 +29,7 @@ public sealed partial class PrismWindow
         var card = desired switch
         {
             "signin" => SignInGate(), "progress" => ProgressCard(), "working" => WorkingCard(), "export" => ExportCard(),
+            _ when desired.StartsWith("paid:", StringComparison.Ordinal) => PaidRunCard(session.PendingPaidRun!),
             _ when desired.StartsWith("error:", StringComparison.Ordinal) => ErrorCard(session.GenerationError!),
             _ when desired.StartsWith("done:", StringComparison.Ordinal) => ExportDoneCard(session.ExportSummary!), _ => localCard!,
         };
@@ -117,6 +119,18 @@ public sealed partial class PrismWindow
         body.Children.Add(new ProgressBar { IsIndeterminate = true, Height = 6, Margin = new Thickness(0, 14, 0, 14) });
         var message = Text(""); body.Children.Add(message);
         updateModal = () => message.Text = session.Message;
+        return card;
+    }
+
+    /// A re-analysis charges part of the video's minutes, so it waits for a yes.
+    Border PaidRunCard(AppSession.PaidRun run)
+    {
+        var minutes = Math.Max(1, (int)Math.Ceiling(run.Minutes));
+        var card = ModalCard("Use your minutes?", "\uEC4A"); var body = (StackPanel)card.Child;
+        body.Children.Add(Text($"This re-analysis will use {minutes} {(minutes == 1 ? "minute" : "minutes")} of your plan."));
+        body.Children.Add(Text("Re-analyzing a video uses part of its length: half on Trial, a third on Creator and Studio.", 12, muted: true));
+        body.Children.Add(Footer(Button("Cancel", () => session.PendingPaidRun = null), Button("Re-analyze", () => session.ConfirmPaidRun(), true)));
+        AutomationProperties.SetName(card, "Confirm a charged re-analysis");
         return card;
     }
 

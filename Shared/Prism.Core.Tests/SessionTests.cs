@@ -284,13 +284,60 @@ public class SessionTests
     {
         using var fixture = new Fixture();
         using var server = new FakeGemini();
-        using var session = new AppSession(fixture.Platform, new AppSettings()) { AIHandler = server };
+        using var session = new AppSession(fixture.Platform, new AppSettings(), server);
         var media = fixture.Open();
         Assert.Null(session.GeminiConfiguration(media));
         session.Open(fixture.Path);
         await session.MakeShorts(session.Project!.Media[0], 1, 30, SourceRegion.EntireVideo);
         Assert.Equal(GenerationFailureKind.Settings, session.GenerationError?.Kind);
         Assert.Empty(server.Bodies);
+    }
+
+    /// Answers the account's sign-in refresh and usage calls; any Prism AI request fails the test.
+    sealed class FakeAccount(int runs, double charge, double used) : HttpMessageHandler
+    {
+        public readonly List<string> Paths = [];
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            Paths.Add(path);
+            var reply = path switch
+            {
+                "/auth/v1/token" => """{"refresh_token":"new","access_token":"access","expires_in":3600}""",
+                "/rest/v1/rpc/my_reanalysis" => $$"""[{"runs":{{runs}},"charge":{{charge}}}]""",
+                "/rest/v1/rpc/my_usage" => $$"""[{"used":{{used}},"allowance":60}]""",
+                _ => throw new InvalidOperationException("Unexpected request " + path),
+            };
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(reply) });
+        }
+    }
+
+    [Theory]
+    [InlineData(10, false)]
+    [InlineData(59, true)]
+    public async Task ReanalysisAsksBeforeChargingAndStopsWhenMinutesRunOut(double used, bool limited)
+    {
+        using var fixture = new Fixture();
+        fixture.Platform.AccountStore.Save("""{"Email":"me@example.com","RefreshToken":"old"}""");
+        using var server = new FakeAccount(runs: 1, charge: 3, used: used);
+        using var session = new AppSession(fixture.Platform, new AppSettings(), server);
+        fixture.Open();
+        session.Open(fixture.Path);
+        await session.MakeShorts(session.Project!.Media[0], 1, 30, SourceRegion.EntireVideo);
+        Assert.False(session.IsBusy);
+        if (limited)
+        {
+            Assert.Null(session.PendingPaidRun);
+            Assert.Equal(GenerationFailureKind.Limit, session.GenerationError?.Kind);
+            Assert.Contains("needs 3 min, but you have 1 min left", session.GenerationError!.Message);
+        }
+        else
+        {
+            Assert.Equal(3, session.PendingPaidRun?.Minutes);
+            Assert.Null(session.GenerationError);
+            session.PendingPaidRun = null;
+        }
+        Assert.DoesNotContain(server.Paths, p => p.Contains("functions"));
     }
 
     [Fact]

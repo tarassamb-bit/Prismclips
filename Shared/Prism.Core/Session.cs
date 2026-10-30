@@ -30,12 +30,14 @@ public sealed partial class AppSession : INotifyPropertyChanged, IDisposable
     /// <summary>The Prism account: Prism AI needs it, and it counts exports on the website.</summary>
     public Account Account { get; }
 
-    public AppSession(IPlatform platform, AppSettings? settings = null)
+    /// <param name="network">Tests answer the account and Prism AI with a fake server; the app uses the real network.</param>
+    public AppSession(IPlatform platform, AppSettings? settings = null, HttpMessageHandler? network = null)
     {
+        AIHandler = network;
         this.platform = platform;
         context = SynchronizationContext.Current;
         Settings = settings ?? AppSettings.Load();
-        Account = new Account(platform.AccountStore);
+        Account = new Account(platform.AccountStore, network is null ? null : new HttpClient(network, disposeHandler: false));
         Account.PropertyChanged += (_, _) => Post(() => Changed(nameof(Account)));
         Directory.CreateDirectory(AppPaths.Projects);
         RestoreSavedProjects();
@@ -262,8 +264,7 @@ public sealed partial class AppSession : INotifyPropertyChanged, IDisposable
         };
     }
 
-    /// <summary>Tests answer Prism AI requests with a fake server; the app uses the real network.</summary>
-    public HttpMessageHandler? AIHandler { get; init; }
+    readonly HttpMessageHandler? AIHandler;
 
     /// <summary>What a failed run needs: another range, a Settings change, or simply another try later.</summary>
     public static GenerationFailureKind FailureKind(Exception error)

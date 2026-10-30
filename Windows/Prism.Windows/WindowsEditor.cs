@@ -565,7 +565,7 @@ public sealed class WindowsEditor : IDisposable
     void OnKeyDown(object sender, KeyEventArgs args)
     {
         if (disposed || session.Screen != Screen.Editor || !root.IsEnabled || !session.Account.IsSignedIn || session.IsBusy
-            || session.ExportChoice is not null || session.ExportSummary is not null || session.GenerationError is not null || Typing()) return;
+            || session.ExportChoice is not null || session.ExportSummary is not null || session.GenerationError is not null || session.PendingPaidRun is not null || Typing()) return;
         try
         {
             var shift = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);

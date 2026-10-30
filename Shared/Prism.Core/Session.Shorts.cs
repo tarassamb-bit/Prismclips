@@ -185,25 +185,71 @@ public sealed partial class AppSession
         return video is null ? Task.CompletedTask : MakeShorts(video, shortCount, shortDuration, shortSourceRegion);
     }
 
+    /// <summary>A re-analysis, which charges part of the video's minutes, waiting for the person to confirm it.</summary>
+    public sealed record PaidRun(Guid VideoId, double Minutes, int Count, double Duration, SourceRegion Region);
+
+    PaidRun? pendingPaidRun;
+    /// <summary>Shown as the "Use your minutes?" popup; set to null to cancel.</summary>
+    public PaidRun? PendingPaidRun { get => pendingPaidRun; set => Set(ref pendingPaidRun, value); }
+
+    /// <summary>Asks the server whether this is a re-analysis and what it costs, then starts the run or asks to confirm the charge.</summary>
     public async Task MakeShorts(MediaItem video, int count, double duration, SourceRegion sourceRegion)
+    {
+        if (IsBusy || project is null) return;
+        // Problems Prism can see at once are reported at once, without a "Preparing" step first.
+        if (sourceRegion == SourceRegion.Custom && CustomRangeError is { } rangeError) { Message = rangeError; return; }
+        if (!Account.IsSignedIn) { await RunShorts(video, count, duration, sourceRegion); return; }
+        var projectId = project.Id;
+        IsBusy = true;
+        GenerationError = null;
+        Message = "Preparing video…";
+        (int Runs, double Charge)? reanalysis;
+        (double Used, double Allowance)? usage = null;
+        try
+        {
+            // A video imported before hashing existed, never analyzed, is hashed now; one already analyzed keeps its old key.
+            if (video.ContentHash is null && project.Transcripts?.ContainsKey(PrismJson.Key(video.Id)) != true && project.Segments.All(s => s.MediaId != video.Id)
+                && await HashOrNull(video.Path) is { } hash && project?.Id == projectId)
+            {
+                video.ContentHash = hash;
+                try { Save(); } catch (Exception) { video.ContentHash = null; }
+            }
+            // Without the count Prism can't warn before a re-analysis, so it doesn't start one blind.
+            reanalysis = await Account.Reanalysis(UsageLimit.ServerKey(video));
+            if (reanalysis is { Runs: > 0 }) usage = await Account.UsageStatus();
+        }
+        finally { IsBusy = false; }
+        if (project?.Id != projectId || project.Media.All(m => m.Id != video.Id)) return;
+        var unavailable = new GenerationFailure("Prism couldn't check your usage right now. Try again in a moment.", GenerationFailureKind.Temporary);
+        if (reanalysis is not { } check) { Message = unavailable.Message; GenerationError = unavailable; return; }
+        if (check.Runs == 0) { await RunShorts(video, count, duration, sourceRegion); return; }
+        if (usage is not { } account) { Message = unavailable.Message; GenerationError = unavailable; return; }
+        var left = Math.Max(0, account.Allowance - account.Used);
+        // The server refuses it too; saying so here spares a confirmation that can't succeed.
+        if (check.Charge > left)
+        {
+            Message = $"This re-analysis needs {(int)check.Charge} min, but you have {(int)Math.Floor(left)} min left. Ask for a promo code to get more, then enter it in Settings › Usage.";
+            GenerationError = new GenerationFailure(Message, GenerationFailureKind.Limit);
+            return;
+        }
+        Message = "";
+        PendingPaidRun = new PaidRun(video.Id, check.Charge, count, duration, sourceRegion);
+    }
+
+    /// <summary>Starts the re-analysis the person confirmed.</summary>
+    public Task ConfirmPaidRun()
+    {
+        if (PendingPaidRun is not { } run) return Task.CompletedTask;
+        PendingPaidRun = null;
+        return project?.Media.FirstOrDefault(m => m.Id == run.VideoId) is { } video ? RunShorts(video, run.Count, run.Duration, run.Region) : Task.CompletedTask;
+    }
+
+    async Task RunShorts(MediaItem video, int count, double duration, SourceRegion sourceRegion)
     {
         if (IsBusy || project is null) return;
         if (sourceRegion == SourceRegion.Custom && CustomRangeError is { } rangeError) { Message = rangeError; return; }
         var customStart = sourceRegion == SourceRegion.Custom ? MinuteSeconds(customStartMinutes) : null;
         var customEnd = sourceRegion == SourceRegion.Custom ? MinuteSeconds(customEndMinutes) : null;
-        // A video imported before hashing existed, never analyzed, is hashed now; one already analyzed keeps its old key.
-        if (video.ContentHash is null && project.Transcripts?.ContainsKey(PrismJson.Key(video.Id)) != true && project.Segments.All(s => s.MediaId != video.Id))
-        {
-            IsBusy = true;
-            Message = "Preparing video…";
-            var hash = await HashOrNull(video.Path);
-            IsBusy = false;
-            if (hash is not null)
-            {
-                video.ContentHash = hash;
-                try { Save(); } catch (Exception) { video.ContentHash = null; }
-            }
-        }
         if (GeminiConfiguration(video) is not { } configuration)
         {
             Message = "Sign in to your Prism account to make Shorts.";

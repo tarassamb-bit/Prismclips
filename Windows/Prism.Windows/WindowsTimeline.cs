@@ -74,7 +74,7 @@ public sealed class WindowsTimeline : IDisposable
     MediaItem? Media => session.Project?.Media.FirstOrDefault(m => m.Id == (session.ActiveSegment?.MediaId ?? session.Selection));
     double Length => Math.Max(0.1, session.ActiveSegment?.Duration ?? Media?.Duration ?? 1);
     bool Blocked => session.IsBusy || !session.Account.IsSignedIn || session.ExportChoice is not null
-        || session.ExportSummary is not null || session.GenerationError is not null;
+        || session.ExportSummary is not null || session.GenerationError is not null || session.PendingPaidRun is not null;
     bool Light => session.Settings.Appearance == "light";
 
     public WindowsTimeline(AppSession session)
