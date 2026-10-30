@@ -8,7 +8,6 @@ namespace Prism.Linux;
 /// <summary>Linux desktop integration; command arguments never pass through a shell.</summary>
 public sealed class LinuxPlatform : IPlatform
 {
-    public IKeyStore KeyStore { get; } = new LinuxKeyStore();
     public IKeyStore AccountStore { get; } = new LinuxKeyStore("account", "Prism account sign-in");
 
     public string DownloadsFolder
@@ -128,7 +127,7 @@ public sealed class LinuxPlatform : IPlatform
 }
 
 /// <summary>Secret Service first; a private 0600 file when a desktop keyring is unavailable.</summary>
-public sealed class LinuxKeyStore(string name = "gemini", string label = "Prism Gemini API key") : IKeyStore
+public sealed class LinuxKeyStore(string name, string label) : IKeyStore
 {
     string KeyPath => Path.Combine(AppPaths.Config, name + ".key");
     string[] Attributes => ["application", "prism", "provider", name];

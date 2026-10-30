@@ -167,13 +167,13 @@ public static class GeminiSelection
         }
         var batches = TranscriptSelection.Batches(Enumerable.Range(0, windows.Count).ToList(), 6);
         // Batches are scored a few at a time; every batch must succeed, so one failure still fails the pass.
-        progress(0, $"Gemini · scoring story windows · 0 of {batches.Count}");
+        progress(0, $"Prism AI · scoring story windows · 0 of {batches.Count}");
         var scoredCount = 0;
         var scoredBatches = await Concurrency.Map(batches, (ids, token) => ScoreBatch(ids, windows, guidance, excluding, configuration, token), cancellation, concurrency,
             (_, _) =>
             {
                 var done = Interlocked.Increment(ref scoredCount);
-                progress(0.45 * done / batches.Count, $"Gemini · scoring story windows · {done} of {batches.Count}");
+                progress(0.45 * done / batches.Count, $"Prism AI · scoring story windows · {done} of {batches.Count}");
             });
         var ranked = RankedWindowIds(scoredBatches.SelectMany(b => b).ToList(), Enumerable.Range(0, windows.Count).ToList());
         return await Refine(ranked, windows, path, cues, interval, targetDuration, count, configuration, excluding, guidance, progress, concurrency, cancellation);
@@ -231,7 +231,7 @@ public static class GeminiSelection
         // Long recordings need a deeper shortlist, or good moments ranked just below the cap are never refined.
         var target = Math.Min(windows.Count, Math.Max(count + 2, Math.Min(16, (int)((interval.End - interval.Start) / 90) + 2)));
         var detailBatches = TranscriptSelection.Batches(ranked.Take(target).ToList(), 3);
-        progress(0.45, $"Gemini · refining hooks and endings · 0 of {detailBatches.Count}");
+        progress(0.45, $"Prism AI · refining hooks and endings · 0 of {detailBatches.Count}");
         var finished = 0;
         // One failed batch costs only its own candidates, not the whole run.
         var outcomes = await Concurrency.Map(detailBatches, async (ids, token) =>
@@ -250,7 +250,7 @@ public static class GeminiSelection
         }, cancellation, concurrency, (_, _) =>
         {
             var done = Interlocked.Increment(ref finished);
-            progress(0.45 + 0.45 * done / detailBatches.Count, $"Gemini · refining hooks and endings · {done} of {detailBatches.Count}");
+            progress(0.45 + 0.45 * done / detailBatches.Count, $"Prism AI · refining hooks and endings · {done} of {detailBatches.Count}");
         });
         var allClips = outcomes.SelectMany(o => o.Clips).ToList();
         var failures = outcomes.Where(o => o.Error is not null).Select(o => o.Error!).ToList();
@@ -259,7 +259,7 @@ public static class GeminiSelection
         // A wider pool of time-distinct finalists, then one editor pass compares them side by side.
         var pool = StrongestOrBest(allClips, interval, targetDuration, Math.Min(20, count * 2 + 2), excluding);
         if (pool.Count <= count) return pool;
-        progress(0.95, "Gemini · final edit: picking the best distinct stories");
+        progress(0.95, "Prism AI · final edit: picking the best distinct stories");
         var chosen = await FinalCut(pool, cues, count, guidance, configuration, cancellation) ?? pool.Take(count).ToList();
         return chosen.Concat(pool.Where(clip => !chosen.Any(c => c.Start == clip.Start && c.End == clip.End))).ToList();
     }

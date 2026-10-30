@@ -41,10 +41,6 @@ public sealed partial class AppSession
             Message = note;
             if (GenerationProgress is not null && GenerationStage != "Cancelling…") GenerationStage = note;
         });
-        configuration.OnFallback = (from, to) => Post(() =>
-        {
-            if (current()) ModelFallbackNote = $"{from} was overloaded, so Prism switched to {to}.";
-        });
     }
 
     public void SelectPreview(Guid? shortId) => _ = SelectPreviewAsync(shortId);
@@ -91,13 +87,12 @@ public sealed partial class AppSession
         segment = PrismJson.Clone(segment);
         IsPreviewLoading = true;
         var configuration = !IsBusy && segment.CropTrackingVersion != SubjectFramer.Version && segment.SplitScreen != true
-            ? GeminiConfiguration() : null;
+            ? GeminiConfiguration(video) : null;
         if (configuration is not null)
         {
             IsBusy = true;
             subjectTrackingRevision = revision;
-            ModelFallbackNote = null;
-            Message = "Gemini is framing the main subject…";
+            Message = "Prism AI is framing the main subject…";
         }
         bool Current() => !token.IsCancellationRequested && revision == previewRevision && project?.Id == projectId;
         if (configuration is not null) ScopeGeminiCallbacks(configuration, Current);
@@ -124,9 +119,9 @@ public sealed partial class AppSession
                     IsBusy = false;
                     ProjectChanged();
                     Changed(nameof(ActiveSegment));
-                    Message = WithModelNote(path.Count == 0
-                        ? "Gemini could not frame this Short, so the crop stays centered. Use Re-track to try again."
-                        : "Subject tracking ready.");
+                    Message = path.Count == 0
+                        ? "Prism AI could not frame this Short, so the crop stays centered. Use Re-track to try again."
+                        : "Subject tracking ready.";
                     return PrismJson.Clone(tracked);
                 }).ConfigureAwait(false);
                 if (updated is null) return;
@@ -196,13 +191,27 @@ public sealed partial class AppSession
         if (sourceRegion == SourceRegion.Custom && CustomRangeError is { } rangeError) { Message = rangeError; return; }
         var customStart = sourceRegion == SourceRegion.Custom ? MinuteSeconds(customStartMinutes) : null;
         var customEnd = sourceRegion == SourceRegion.Custom ? MinuteSeconds(customEndMinutes) : null;
-        if (GeminiConfiguration() is not { } configuration)
+        // A video imported before hashing existed, never analyzed, is hashed now; one already analyzed keeps its old key.
+        if (video.ContentHash is null && project.Transcripts?.ContainsKey(PrismJson.Key(video.Id)) != true && project.Segments.All(s => s.MediaId != video.Id))
         {
-            Message = "Add and save your Gemini key in Settings first.";
-            GenerationError = new GenerationFailure("No Gemini API key is saved. Add your Google AI Studio key in Settings.", GenerationFailureKind.Settings);
+            IsBusy = true;
+            Message = "Preparing video…";
+            var hash = await HashOrNull(video.Path);
+            IsBusy = false;
+            if (hash is not null)
+            {
+                video.ContentHash = hash;
+                try { Save(); } catch (Exception) { video.ContentHash = null; }
+            }
+        }
+        if (GeminiConfiguration(video) is not { } configuration)
+        {
+            Message = "Sign in to your Prism account to make Shorts.";
+            GenerationError = new GenerationFailure(Message, GenerationFailureKind.Settings);
             return;
         }
-        ModelFallbackNote = null;
+        // Every request of this run carries the same id, so the server counts it as one analysis.
+        configuration.Usage = configuration.Usage with { Run = Guid.NewGuid().ToString() };
         IsBusy = true;
         GenerationProgress = 0;
         GenerationError = null;
@@ -225,6 +234,10 @@ public sealed partial class AppSession
         ScopeGeminiCallbacks(configuration, () => Current() && !token.IsCancellationRequested);
         try
         {
+            // The account's server allowance includes promo minutes; the gateway checks it again on every request.
+            if (await Account.UsageAllowed(configuration.Usage.Video, configuration.Usage.Minutes, DateTime.Now) == false)
+                throw new GeminiException(GeminiFailure.UsageLimit, 429, "You've used your beta allowance. Ask for a promo code to get more, then enter it in Settings › Usage.");
+            token.ThrowIfCancellationRequested();
             var results = await Task.Run(() => ShortMaker.Analyze(video.Path, duration, count, sourceRegion, configuration,
                 customStart, customEnd, usedRanges, videoType, savedTranscript,
                 onTranscript: transcript => Post(() =>
@@ -255,7 +268,7 @@ public sealed partial class AppSession
                 var number = index + 1;
                 await UI(() =>
                 {
-                    if (Current() && !token.IsCancellationRequested) GenerationStage = $"Gemini · finding both speakers · Short {number} of {candidates.Count}";
+                    if (Current() && !token.IsCancellationRequested) GenerationStage = $"Prism AI · finding both speakers · Short {number} of {candidates.Count}";
                 }).ConfigureAwait(false);
                 var candidate = candidates[index];
                 candidate.SplitCenters = await ShortMaker.FindSplitCenters(video.Path, candidate.Start, candidate.Duration, configuration, token).ConfigureAwait(false);
@@ -268,13 +281,13 @@ public sealed partial class AppSession
                 var fresh = AppendGeneratedShorts(candidates);
                 if (fresh.Count == 0)
                 {
-                    Message = WithModelNote("No new distinct moments were found in this range. Your existing clips were kept. Try another region or length.");
+                    Message = "No new distinct moments were found in this range. Your existing clips were kept. Try another region or length.";
                     GenerationError = new GenerationFailure(Message, GenerationFailureKind.NoMoments);
                     return;
                 }
-                var resultMessage = $"Gemini selected {fresh.Count} complete clip ranges and layouts. Review framing and captions before export.";
+                var resultMessage = $"Prism AI selected {fresh.Count} complete clip ranges and layouts. Review framing and captions before export.";
                 if (results.FirstOrDefault(r => r.AnalysisWarning is not null)?.AnalysisWarning is { } warning) resultMessage += " " + warning;
-                Message = WithModelNote(resultMessage);
+                Message = resultMessage;
                 Say(false, Message);
                 SelectPreview(fresh[0].Id);
             }).ConfigureAwait(false);
@@ -286,7 +299,6 @@ public sealed partial class AppSession
                 if (!Current()) return;
                 Message = token.IsCancellationRequested ? "Generation cancelled. Your existing clips were kept." : $"Analysis failed: {error.Message}";
                 if (!token.IsCancellationRequested) GenerationError = new GenerationFailure(error.Message, FailureKind(error));
-                ModelFallbackNote = null;
             }).ConfigureAwait(false);
         }
         finally
@@ -377,7 +389,6 @@ public sealed partial class AppSession
         }
         ExportChoice = null;
         ExportSummary = null;
-        ModelFallbackNote = null;
         var projectId = project.Id;
         var projectName = project.DisplayTitle;
         var folder = choice.Folder;
@@ -398,9 +409,7 @@ public sealed partial class AppSession
         var cancellation = new CancellationTokenSource();
         generationCancellation = cancellation;
         var token = cancellation.Token;
-        var configuration = GeminiConfiguration();
         bool Current() => ReferenceEquals(generationCancellation, cancellation) && project?.Id == projectId;
-        if (configuration is not null) ScopeGeminiCallbacks(configuration, () => Current() && !token.IsCancellationRequested);
         try
         {
             for (var step = 0; step < segments.Count; step++)
@@ -415,9 +424,12 @@ public sealed partial class AppSession
                     GenerationStage = $"Exporting Short {number} · {currentStep + 1} of {total}";
                 }).ConfigureAwait(false);
                 var video = media.FirstOrDefault(m => m.Id == segment.MediaId) ?? throw new ShortMakerException(ShortMakerFailure.NoVideo);
+                // Framing at export counts against the Short's own video, like every other request.
+                var configuration = await UI(() => GeminiConfiguration(video)).ConfigureAwait(false);
+                if (configuration is not null) ScopeGeminiCallbacks(configuration, () => Current() && !token.IsCancellationRequested);
                 if (segment.CropTrackingVersion != SubjectFramer.Version && segment.SplitScreen != true && configuration is not null)
                 {
-                    await UI(() => { if (Current() && !token.IsCancellationRequested) Message = $"Gemini is framing Short {number}…"; }).ConfigureAwait(false);
+                    await UI(() => { if (Current() && !token.IsCancellationRequested) Message = $"Prism AI is framing Short {number}…"; }).ConfigureAwait(false);
                     segment.CropKeyframes = await SubjectFramer.Analyze(video.Path, segment.Start, segment.Duration,
                         segment.CropZoom ?? 1.08, configuration, segment.Captions, cancellation: token).ConfigureAwait(false);
                     token.ThrowIfCancellationRequested();
@@ -493,7 +505,7 @@ public sealed partial class AppSession
                 var parts = new List<string>();
                 if (segments.Count > 0) parts.Add(segments.Count == 1 ? "1 Short" : $"{segments.Count} Shorts");
                 if (sources.Count > 0) parts.Add("the main video");
-                Message = WithModelNote($"Exported {string.Join(" and ", parts)} to {DisplayPath(folder)}.");
+                Message = $"Exported {string.Join(" and ", parts)} to {DisplayPath(folder)}.";
                 ExportSummary = Message;
                 // The website keeps the Mac app's quality names: full, compact, small.
                 _ = Account.RecordExport(segments.Count, segments.Sum(item => item.Segment.Duration), choice.Quality.ToString().ToLowerInvariant());
@@ -511,7 +523,6 @@ public sealed partial class AppSession
                     : $"Export stopped after {completed} of {total} files. Completed files are in {DisplayPath(folder)}. {error.Message}";
                 if (token.IsCancellationRequested) ExportSummary = Message;
                 else GenerationError = new GenerationFailure(Message, FailureKind(error), IsExport: true);
-                ModelFallbackNote = null;
             }).ConfigureAwait(false);
         }
         finally

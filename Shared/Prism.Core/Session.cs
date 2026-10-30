@@ -9,7 +9,7 @@ public enum Screen { Home, Create, ImportSource, Editor, Settings }
 
 public sealed record ChatMessage(bool IsUser, string Text);
 
-public enum GenerationFailureKind { NoMoments, Settings, Temporary, Other }
+public enum GenerationFailureKind { NoMoments, Settings, Limit, Temporary, Other }
 
 /// <summary>Why the last Shorts run produced nothing. The popup's title, advice and buttons follow <see cref="Kind"/>,
 /// so a busy server is never blamed on the video or its range.</summary>
@@ -27,7 +27,7 @@ public sealed partial class AppSession : INotifyPropertyChanged, IDisposable
     readonly SynchronizationContext? context;
     readonly IPlatform platform;
     public AppSettings Settings { get; }
-    /// <summary>The optional Prism account that counts exports on the website.</summary>
+    /// <summary>The Prism account: Prism AI needs it, and it counts exports on the website.</summary>
     public Account Account { get; }
 
     public AppSession(IPlatform platform, AppSettings? settings = null)
@@ -35,9 +35,6 @@ public sealed partial class AppSession : INotifyPropertyChanged, IDisposable
         this.platform = platform;
         context = SynchronizationContext.Current;
         Settings = settings ?? AppSettings.Load();
-        isGeminiKeySaved = Settings.GeminiKeySaved;
-        geminiKeyStatus = isGeminiKeySaved ? "Your API key is saved securely. For security, the saved value stays hidden." : "";
-        geminiModel = Settings.GeminiModel;
         Account = new Account(platform.AccountStore);
         Account.PropertyChanged += (_, _) => Post(() => Changed(nameof(Account)));
         Directory.CreateDirectory(AppPaths.Projects);
@@ -128,9 +125,6 @@ public sealed partial class AppSession : INotifyPropertyChanged, IDisposable
     public ExportQuality LastExportQuality { get; private set; } = ExportQuality.Full;
     public int LastExportShortCount { get; private set; }
 
-    /// <summary>Set when an overloaded model handed requests to another model during the current task.</summary>
-    public string? ModelFallbackNote { get; private set; }
-
     Guid? selection;
     /// <summary>The source video the editor shows.</summary>
     public Guid? Selection { get => selection; set => Set(ref selection, value); }
@@ -167,45 +161,6 @@ public sealed partial class AppSession : INotifyPropertyChanged, IDisposable
     string sourcePath = "";
     public string SourcePath { get => sourcePath; set => Set(ref sourcePath, value); }
 
-    // Gemini key and model
-
-    string geminiModel;
-    public string GeminiModel
-    {
-        get => geminiModel;
-        set { if (Set(ref geminiModel, value)) { Settings.GeminiModel = value; Settings.Save(); } }
-    }
-
-    string geminiKey = "";
-    /// <summary>The key typed into the key card or Settings; cleared after saving.</summary>
-    public string GeminiKey { get => geminiKey; set => Set(ref geminiKey, value); }
-
-    string revealedGeminiKey = "";
-    public string RevealedGeminiKey { get => revealedGeminiKey; private set => Set(ref revealedGeminiKey, value); }
-    string cachedGeminiKey = "";
-    /// <summary>Tests set this so the session never reads the person's real key or calls Gemini.</summary>
-    public bool DidLoadGeminiKey { get; set; }
-
-    bool isGeminiKeySaved;
-    /// <summary>False shows the key card over the whole app: Prism can't work without Gemini.</summary>
-    public bool IsGeminiKeySaved { get => isGeminiKeySaved; set => Set(ref isGeminiKeySaved, value); }
-
-    bool isEditingGeminiKey;
-    public bool IsEditingGeminiKey { get => isEditingGeminiKey; private set => Set(ref isEditingGeminiKey, value); }
-
-    bool isShowingGeminiKey;
-    public bool IsShowingGeminiKey { get => isShowingGeminiKey; private set => Set(ref isShowingGeminiKey, value); }
-
-    string geminiKeyStatus;
-    public string GeminiKeyStatus { get => geminiKeyStatus; private set => Set(ref geminiKeyStatus, value); }
-
-    bool geminiKeyRejected;
-    /// <summary>Google refused the last key that was checked; the key card shows the reason as a warning.</summary>
-    public bool GeminiKeyRejected { get => geminiKeyRejected; private set => Set(ref geminiKeyRejected, value); }
-
-    bool isTestingGemini;
-    public bool IsTestingGemini { get => isTestingGemini; private set => Set(ref isTestingGemini, value); }
-
     // Create flow settings
 
     int shortCount = 3;
@@ -234,7 +189,7 @@ public sealed partial class AppSession : INotifyPropertyChanged, IDisposable
     public bool CanUndo => editHistory.Count > 0;
     readonly List<List<EditSegment>> redoHistory = [];
     public bool CanRedo => redoHistory.Count > 0;
-    const string EditingAIName = "Gemini";
+    const string EditingAIName = "Prism AI";
 
     List<string> recentProjectPaths = [];
     public IReadOnlyList<string> RecentProjectPaths => recentProjectPaths;
@@ -279,25 +234,6 @@ public sealed partial class AppSession : INotifyPropertyChanged, IDisposable
         CustomEndMinutes = (Math.Floor(video.Duration / 60 * 1_000_000) / 1_000_000).ToString("0.######", CultureInfo.InvariantCulture);
     }
 
-    // MARK: Gemini
-
-    public string GeminiApiKey()
-    {
-        if (DidLoadGeminiKey) return cachedGeminiKey;
-        try { cachedGeminiKey = platform.KeyStore.Read(); } catch (Exception) { cachedGeminiKey = ""; }
-        DidLoadGeminiKey = true;
-        return cachedGeminiKey;
-    }
-
-    /// <summary>Reconcile the welcome card with the actual platform key store at app startup.</summary>
-    public void RefreshGeminiKeyState()
-    {
-        IsGeminiKeySaved = GeminiApiKey().Length > 0;
-        Settings.GeminiKeySaved = IsGeminiKeySaved;
-        Settings.Save();
-        if (!IsGeminiKeySaved) GeminiKeyStatus = "";
-    }
-
     public void Dispose()
     {
         generationCancellation?.Cancel();
@@ -308,134 +244,26 @@ public sealed partial class AppSession : INotifyPropertyChanged, IDisposable
         project = null;
     }
 
-    /// <summary>Null when no key is saved. Every task shows its retries while they happen, and a switch to another model is
-    /// added to the task's final message (<see cref="WithModelNote"/>).</summary>
-    public GeminiConfiguration? GeminiConfiguration()
+    // MARK: Prism AI
+
+    /// <summary>The AI configuration for a signed-in person, for one video: requests go through Prism's server, which counts the
+    /// video against the account's limit. Null when signed out. Every task shows its retries while they happen.</summary>
+    public GeminiConfiguration? GeminiConfiguration(MediaItem video)
     {
-        var key = GeminiApiKey();
-        if (key.Length == 0) return null;
-        return new GeminiConfiguration(key, geminiModel)
+        if (!Account.IsSignedIn) return null;
+        return new GeminiConfiguration(Account.CurrentAccessToken, new GeminiUsage(UsageLimit.ServerKey(video), UsageLimit.Minutes(video), Account.DayString(DateTime.Now)))
         {
+            Handler = AIHandler,
             OnRetry = note => Post(() =>
             {
                 Message = note;
                 if (GenerationProgress is not null && GenerationStage != "Cancelling…") GenerationStage = note;
             }),
-            OnFallback = (from, to) => Post(() => ModelFallbackNote = $"{from} was overloaded, so Prism switched to {to}."),
         };
     }
 
-    /// <summary>The text plus the model switch made during the task that just finished, reported once.</summary>
-    public string WithModelNote(string text)
-    {
-        if (ModelFallbackNote is not { } note) return text;
-        ModelFallbackNote = null;
-        return text + " " + note;
-    }
-
-    public void SaveGeminiKey() => SaveGeminiKey(geminiKey.Trim());
-
-    void SaveGeminiKey(string key)
-    {
-        try { platform.KeyStore.Save(key); }
-        catch (Exception error) { GeminiKeyStatus = $"Could not save the Gemini key: {error.Message}"; return; }
-        cachedGeminiKey = key;
-        DidLoadGeminiKey = true;
-        IsGeminiKeySaved = key.Length > 0;
-        Settings.GeminiKeySaved = key.Length > 0;
-        Settings.Save();
-        GeminiKeyStatus = key.Length > 0 ? "Saved securely." : "Saved key removed.";
-        GeminiKey = "";
-        IsEditingGeminiKey = false;
-        IsShowingGeminiKey = false;
-        RevealedGeminiKey = "";
-    }
-
-    public void EditGeminiKey()
-    {
-        GeminiKey = "";
-        IsShowingGeminiKey = false;
-        RevealedGeminiKey = "";
-        IsEditingGeminiKey = true;
-    }
-
-    public void CancelGeminiKeyEdit()
-    {
-        GeminiKey = "";
-        IsEditingGeminiKey = false;
-    }
-
-    public void RemoveGeminiKey()
-    {
-        GeminiKey = "";
-        SaveGeminiKey();
-    }
-
-    public void ToggleGeminiKeyVisibility()
-    {
-        if (IsShowingGeminiKey)
-        {
-            RevealedGeminiKey = "";
-            IsShowingGeminiKey = false;
-            return;
-        }
-        var saved = GeminiApiKey();
-        if (saved.Length == 0)
-        {
-            GeminiKeyStatus = "Could not read the saved key. You can replace it here.";
-            return;
-        }
-        RevealedGeminiKey = saved;
-        IsShowingGeminiKey = true;
-    }
-
-    static readonly JsonNode OkSchema = JsonNode.Parse("""{"type":"OBJECT","properties":{"ok":{"type":"BOOLEAN"}},"required":["ok"]}""")!;
-
-    /// <summary>Checks the typed key with one tiny Gemini request, then saves it. A key Google refuses is never saved. When Google is
-    /// busy or the computer is offline the key is saved anyway, so an outage can't lock anyone out of the app.</summary>
-    public async Task VerifyAndSaveGeminiKey(HttpMessageHandler? handler = null)
-    {
-        var key = geminiKey.Trim();
-        if (key.Length == 0 || IsTestingGemini) return;
-        IsTestingGemini = true;
-        GeminiKeyRejected = false;
-        GeminiKeyStatus = "Checking your key with Google…";
-        string? unconfirmed = null;
-        try
-        {
-            await Gemini.Generate<System.Text.Json.JsonElement>([Gemini.Text("Return ok true.")], OkSchema, new GeminiConfiguration(key, geminiModel) { Handler = handler });
-        }
-        catch (GeminiException error) when (error.Failure == GeminiFailure.Request && error.Status is 400 or 401 or 403)
-        {
-            GeminiKeyRejected = true;
-            GeminiKeyStatus = $"Google didn’t accept this key (HTTP {error.Status}). Copy the whole key from Google AI Studio and paste it again.";
-            IsTestingGemini = false;
-            return;
-        }
-        catch (Exception error)
-        {
-            unconfirmed = $"Saved. Google couldn’t confirm the key right now ({error.Message}); Prism will use it when Google answers.";
-        }
-        IsTestingGemini = false;
-        SaveGeminiKey(key);
-        if (unconfirmed is not null && IsGeminiKeySaved && GeminiKey.Length == 0) GeminiKeyStatus = unconfirmed;
-    }
-
-    public async Task TestGeminiKey()
-    {
-        if (IsTestingGemini) return;
-        if (GeminiConfiguration() is not { } configuration) { GeminiKeyStatus = "Save a Google AI Studio key first."; return; }
-        ModelFallbackNote = null;
-        IsTestingGemini = true;
-        GeminiKeyStatus = "Testing Gemini access…";
-        try
-        {
-            await Gemini.Generate<System.Text.Json.JsonElement>([Gemini.Text("Return ok true.")], OkSchema, configuration);
-            GeminiKeyStatus = WithModelNote("Connected. Gemini is ready for cloud editing.");
-        }
-        catch (Exception error) { GeminiKeyStatus = error.Message; }
-        finally { IsTestingGemini = false; }
-    }
+    /// <summary>Tests answer Prism AI requests with a fake server; the app uses the real network.</summary>
+    public HttpMessageHandler? AIHandler { get; init; }
 
     /// <summary>What a failed run needs: another range, a Settings change, or simply another try later.</summary>
     public static GenerationFailureKind FailureKind(Exception error)
@@ -446,7 +274,8 @@ public sealed partial class AppSession : INotifyPropertyChanged, IDisposable
             return gemini.Failure switch
             {
                 GeminiFailure.NoStrongClips or GeminiFailure.NoDistinctClips or GeminiFailure.RequestTooLarge => GenerationFailureKind.NoMoments,
-                GeminiFailure.InvalidConfiguration => GenerationFailureKind.Settings,
+                GeminiFailure.SignIn => GenerationFailureKind.Settings,
+                GeminiFailure.UsageLimit => GenerationFailureKind.Limit,
                 GeminiFailure.Request => gemini.Status is 400 or 401 or 403 or 404 ? GenerationFailureKind.Settings : GenerationFailureKind.Temporary,
                 GeminiFailure.InvalidResponse or GeminiFailure.InvalidTiming => GenerationFailureKind.Temporary,
                 _ => GenerationFailureKind.Other,

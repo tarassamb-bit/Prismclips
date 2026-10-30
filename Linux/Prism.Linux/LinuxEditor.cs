@@ -30,7 +30,7 @@ public sealed class LinuxEditor : IDisposable
     readonly Gtk.Label sourceName = Label("Source video", "muted");
     Gtk.Button play;
     readonly Gtk.Button undo, exports, export;
-    readonly Gtk.Label engine = Label("☁ Gemini cloud", "muted");
+    readonly Gtk.Label engine = Label("☁ Prism AI cloud", "muted");
     Gtk.Button expand;
     Gtk.Button noticeAction;
     Gtk.Widget leftPanel;
@@ -149,7 +149,7 @@ public sealed class LinuxEditor : IDisposable
         if (!ReferenceEquals(session.Player, player)) session.Player = player;
         title.SetText(session.Project?.DisplayTitle ?? "Editor");
         saved.SetText(session.LastSavedAt is { } time ? "✓ Saved " + time.ToString("t", CultureInfo.CurrentCulture) : "");
-        engine.SetText(session.IsBusy && session.GenerationStage.Length > 0 ? session.GenerationStage : "☁ Gemini cloud");
+        engine.SetText(session.IsBusy && session.GenerationStage.Length > 0 ? session.GenerationStage : "☁ Prism AI cloud");
         exports.SetSensitive(!session.IsBusy); export.SetSensitive(session.Project?.Media.Count > 0 && !session.IsBusy);
         status.SetText(session.Message);
         undo.SetSensitive(session.CanUndo && !session.IsBusy);
@@ -492,7 +492,7 @@ public sealed class LinuxEditor : IDisposable
             captions.Append(button);
         }
         if (current.UsesWordTiming() && clip.SpeechWords is not { Count: > 0 })
-            captions.Append(Label(session.IsBusy ? "Gemini is timing the words so captions follow the speech…" : $"{current.Title()} follows each spoken word, which needs word timing this Short doesn't have. Transcribe it to add timing; until then captions show as whole phrases.", "warning", "t11"));
+            captions.Append(Label(session.IsBusy ? "Prism AI is timing the words so captions follow the speech…" : $"{current.Title()} follows each spoken word, which needs word timing this Short doesn't have. Transcribe it to add timing; until then captions show as whole phrases.", "warning", "t11"));
         captions.Append(Caption("Position", false));
         var positions = Enum.GetValues<CaptionPosition>();
         captions.Append(Segmented(positions.Select(p => p.Title()).ToArray(), Array.IndexOf(positions, clip.CaptionPosition ?? CaptionPosition.Bottom), index => session.SetSelectedCaptionLayout(position: positions[index])));
@@ -505,7 +505,7 @@ public sealed class LinuxEditor : IDisposable
         captions.Append(Rule());
         var transcribe = Button("Transcribe", () => _ = session.RegenerateSelectedSubtitles(), "link accent");
         transcribe.SetSensitive(!session.IsBusy && hasAudio);
-        transcribe.SetTooltipText(hasAudio ? "Transcribe with Gemini in the cloud. Google API usage may incur charges." : "This source video has no audio track.");
+        transcribe.SetTooltipText(hasAudio ? "Transcribe with Prism AI in the cloud." : "This source video has no audio track.");
         var textTitle = Label("Caption text", "t14", "medium"); textTitle.SetHexpand(true);
         captions.Append(Heading(textTitle, transcribe));
         var cues = clip.Captions ?? [];
@@ -549,7 +549,7 @@ public sealed class LinuxEditor : IDisposable
         Clear(chatHistory);
         chatNeedsScroll = true;
         chatHistory.SetSpacing(10);
-        chatHistory.Append(Label("Gemini · Cloud", "accent", "t11"));
+        chatHistory.Append(Label("Prism AI · Cloud", "accent", "t11"));
         foreach (var item in session.ChatMessages)
         {
             var bubble = Box(Gtk.Orientation.Vertical, 0); bubble.AddCssClass("bubble"); if (item.IsUser) bubble.AddCssClass("user");
@@ -559,7 +559,7 @@ public sealed class LinuxEditor : IDisposable
 
     bool OnKeyPressed(Gtk.EventControllerKey sender, Gtk.EventControllerKey.KeyPressedSignalArgs args)
     {
-        if (disposed || session.Screen != Screen.Editor || !root.IsSensitive() || !session.IsGeminiKeySaved || session.IsBusy
+        if (disposed || session.Screen != Screen.Editor || !root.IsSensitive() || !session.Account.IsSignedIn || session.IsBusy
             || session.ExportChoice is not null || session.ExportSummary is not null || session.GenerationError is not null || Typing()) return false;
         var control = (args.State & Gdk.ModifierType.ControlMask) != 0;
         var shift = (args.State & Gdk.ModifierType.ShiftMask) != 0;

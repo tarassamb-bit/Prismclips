@@ -16,11 +16,10 @@ public sealed partial class PrismWindow
         page.Append(subtitle);
         var tiles = Row(14);
         tiles.MarginTop = 16; tiles.MarginBottom = 20;
-        tiles.Append(CategoryTile(0, "weather-overcast-symbolic", "AI & Cloud", "Provider, key, and model"));
-        tiles.Append(CategoryTile(2, "avatar-default-symbolic", "Account", session.Account.Email ?? "Sign in to track your stats"));
+        tiles.Append(CategoryTile(0, "avatar-default-symbolic", "Account", session.Account.Email ?? "Sign in to track your stats"));
         tiles.Append(CategoryTile(1, "computer-symbolic", "System resources", "RAM and storage updates"));
         page.Append(tiles);
-        page.Append(settingsCategory switch { 0 => AiSettings(), 2 => AccountSettings(), _ => ResourceSettings() });
+        page.Append(settingsCategory switch { 0 => AccountSettings(), _ => ResourceSettings() });
         return Scroll(page);
     }
 
@@ -61,101 +60,7 @@ public sealed partial class PrismWindow
         return row;
     }
 
-    Gtk.Widget AiSettings()
-    {
-        var section = Column(10);
-        section.Append(SectionTitle("weather-overcast-symbolic", "AI & Cloud"));
-        section.Append(Text("Gemini handles clip selection, transcription, subtitles, framing and editor chat.", "muted"));
-        var rule = Divider(); rule.MarginTop = rule.MarginBottom = 6; section.Append(rule);
-        section.Append(Label("Google AI Studio API key", "t14", "medium"));
-        var stateIcon = Icon("dialog-password-symbolic", 14);
-        var stateText = Label("", "medium");
-        stateText.Hexpand = true;
-        var hidden = Label("Hidden for security", "muted");
-        var state = Row(10);
-        state.AddCssClass("surface-r12");
-        state.Append(stateIcon); state.Append(stateText); state.Append(hidden);
-        section.Append(state);
-        var keyRow = Row(10);
-        keyRow.AddCssClass("inset");
-        keyRow.SetSizeRequest(-1, 46);
-        section.Append(keyRow);
-        var test = Button("Test connection", async () => await session.TestGeminiKey());
-        var remove = Button("Remove saved key", () => Confirm("Remove saved key?", "Prism needs your Gemini API key before it can work.", "Remove key", session.RemoveGeminiKey), "danger");
-        var actions = Row(8);
-        actions.MarginTop = 4;
-        actions.Append(test); actions.Append(remove);
-        section.Append(actions);
-        var feedback = Text(session.GeminiKeyStatus, "muted");
-        section.Append(feedback);
-        section.Append(Button("Get a key from Google AI Studio", () => LinuxPlatform.OpenExternal("https://aistudio.google.com/apikey"), "link accent"));
-        var rule2 = Divider(); rule2.MarginTop = rule2.MarginBottom = 6; section.Append(rule2);
-        var models = Gemini.Models;
-        var model = Combo(models.Select(item => item.Title), Math.Max(0, Array.FindIndex(models, item => item.Id == session.GeminiModel)), index =>
-        { if (index >= 0) session.GeminiModel = models[index].Id; });
-        model.Valign = Gtk.Align.Center;
-        var modelWords = Column(4);
-        modelWords.Hexpand = true;
-        modelWords.Append(Label("Gemini model", "t14", "medium"));
-        modelWords.Append(Label("The default is recommended. Change it if you prefer.", "muted"));
-        var modelRow = Row(18);
-        modelRow.Append(modelWords); modelRow.Append(model);
-        section.Append(modelRow);
-        section.Append(Text("Cloud AI sends audio, transcripts and sampled frames to Google. Chat sends your request, recent conversation and edit summary. Google API charges may apply. Video rendering and subject tracking run on your computer. The key stays in your desktop keyring, or a private configuration file when the keyring is unavailable.", "muted"));
-
-        string structure = "";
-        Gtk.Entry? typed = null;
-        Gtk.Button? save = null;
-        updateScreen = () =>
-        {
-            var saved = session.IsGeminiKeySaved;
-            stateIcon.SetFromIconName(saved ? "security-high-symbolic" : "dialog-password-symbolic");
-            if (saved) stateIcon.AddCssClass("accent"); else stateIcon.RemoveCssClass("accent");
-            stateText.SetText(saved ? "API key saved securely" : "No API key saved");
-            hidden.Visible = remove.Visible = saved;
-            feedback.SetText(session.GeminiKeyStatus);
-            test.Label = session.IsTestingGemini ? "Testing…" : "Test connection";
-            var desired = $"{saved}:{session.IsEditingGeminiKey}:{session.IsShowingGeminiKey}";
-            if (structure != desired)
-            {
-                structure = desired;
-                typed = null; save = null;
-                Clear(keyRow);
-                var lead = Icon(saved && !session.IsEditingGeminiKey ? "system-lock-screen-symbolic" : "dialog-password-symbolic", 14);
-                lead.AddCssClass("muted");
-                keyRow.Append(lead);
-                if (!saved || session.IsEditingGeminiKey)
-                {
-                    typed = Entry(session.GeminiKey, saved ? "Enter a new API key" : "Paste your API key", value => session.GeminiKey = value);
-                    typed.Visibility = false;
-                    typed.AddCssClass("plain");
-                    typed.OnActivate += async (_, _) => { if (!session.IsTestingGemini && !string.IsNullOrWhiteSpace(session.GeminiKey)) await session.VerifyAndSaveGeminiKey(); };
-                    keyRow.Append(typed);
-                    if (saved) keyRow.Append(Button("Cancel", session.CancelGeminiKeyEdit, "link"));
-                    save = Button(saved ? "Save" : "Save key", async () => await session.VerifyAndSaveGeminiKey(), "primary compact");
-                    keyRow.Append(save);
-                }
-                else
-                {
-                    var value = Label(session.IsShowingGeminiKey ? session.RevealedGeminiKey : new string('•', 24), "mono");
-                    value.Selectable = session.IsShowingGeminiKey;
-                    value.Ellipsize = Pango.EllipsizeMode.Middle;
-                    value.Hexpand = true;
-                    keyRow.Append(value);
-                    keyRow.Append(IconButton(session.IsShowingGeminiKey ? "view-conceal-symbolic" : "view-reveal-symbolic", session.IsShowingGeminiKey ? "Hide API key" : "Show API key", session.ToggleGeminiKeyVisibility));
-                    keyRow.Append(IconButton("document-edit-symbolic", "Edit API key", session.EditGeminiKey));
-                }
-            }
-            if (typed is not null) typed.Sensitive = !session.IsTestingGemini;
-            if (save is not null) save.Sensitive = !session.IsTestingGemini && !string.IsNullOrWhiteSpace(session.GeminiKey);
-            test.Sensitive = !session.IsTestingGemini;
-            remove.Sensitive = !session.IsTestingGemini && !session.IsEditingGeminiKey;
-            section.Sensitive = !session.IsBusy;
-        };
-        return section;
-    }
-
-    /// The optional Prism account, as on the Mac: sign in, and each export adds to your stats on the website.
+    /// The Prism account, as on the Mac: sign in, and each export adds to your stats on the website.
     Gtk.Widget AccountSettings()
     {
         var section = Column(10);

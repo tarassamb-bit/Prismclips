@@ -7,14 +7,14 @@ using System.Text.Json.Nodes;
 
 namespace Prism.Core;
 
-/// The optional Prism account (Supabase email + password), a port of the macOS app's Account. When signed in, each finished
-/// export adds one row of stats (date, Shorts, seconds, quality) that the website shows. No video, transcript or file name
-/// ever leaves the computer.
+/// The Prism account (Supabase email + password), a port of the macOS app's Account. Prism AI needs it: requests go through
+/// Prism's server with this session. Each finished export also adds one row of stats (date, Shorts, seconds, quality) that the
+/// website shows; no file name ever leaves the computer.
 public sealed class Account : INotifyPropertyChanged
 {
     /// The project's public (publishable) key: safe to ship, because Row Level Security limits every user to their own rows.
     public static readonly Uri ProjectUrl = new("https://isdplhahgggundbohmlr.supabase.co/");
-    const string PublishableKey = "sb_publishable_ATTcp2-mrca0swMStHHdYQ_Le851b8l";
+    public const string PublishableKey = "sb_publishable_ATTcp2-mrca0swMStHHdYQ_Le851b8l";
     public const string StatsPage = "https://prismclips.vercel.app/login";
     static readonly HttpClient SharedClient = new() { Timeout = TimeSpan.FromSeconds(20) };
 
@@ -22,6 +22,8 @@ public sealed class Account : INotifyPropertyChanged
     readonly HttpClient client;
     readonly SemaphoreSlim gate = new(1, 1);
     long sessionRevision, authenticationRequest;
+    /// The access token until shortly before it expires, so every AI request doesn't spend a refresh.
+    (string Value, DateTime Expires)? cachedToken;
     string? email;
     string status = "";
     bool isWorking;
@@ -50,8 +52,25 @@ public sealed class Account : INotifyPropertyChanged
         try { store.Save(""); }
         catch (Exception error) { Status = "Could not sign out: " + error.Message; return; }
         sessionRevision++;
+        cachedToken = null;
         Email = null;
-        Status = "Signed out. Exports are no longer counted.";
+        Status = "Signed out. Sign in again to use Prism AI.";
+    }
+
+    /// <summary>The signed-in session's access token, refreshed as needed; null when signed out or unreachable.</summary>
+    public async Task<string?> CurrentAccessToken()
+    {
+        if (!IsSignedIn) return null;
+        var revision = sessionRevision;
+        // One at a time: each refresh rotates the saved token, so two overlapping refreshes would spend the same one.
+        await gate.WaitAsync();
+        try
+        {
+            if (revision != sessionRevision) return null;
+            if (cachedToken is { } cached && cached.Expires > DateTime.UtcNow.AddSeconds(60)) return cached.Value;
+            return await AccessToken(revision);
+        }
+        finally { gate.Release(); }
     }
 
     /// Adds one export to the account's stats. Failures never affect the export; they only show in Settings.
@@ -59,17 +78,61 @@ public sealed class Account : INotifyPropertyChanged
     {
         if (!IsSignedIn || shortCount <= 0) return;
         var revision = sessionRevision;
-        // One at a time: each refresh rotates the saved token, so two overlapping refreshes would spend the same one.
-        await gate.WaitAsync();
-        try
+        if (await CurrentAccessToken() is not { } token)
         {
-            if (revision != sessionRevision || await AccessToken(revision) is not { } token) return;
-            var body = new JsonObject { ["short_count"] = shortCount, ["seconds"] = seconds, ["quality"] = quality };
-            var (ok, _, message, _) = await Send("rest/v1/exports", body, token, minimal: true);
-            if (!ok && revision == sessionRevision) Status = $"Could not add this export to your stats: {message}";
+            if (revision == sessionRevision && IsSignedIn) Status = "Could not reach your Prism account, so this export was not counted.";
+            return;
         }
-        finally { gate.Release(); }
+        var body = new JsonObject { ["short_count"] = shortCount, ["seconds"] = seconds, ["quality"] = quality };
+        var (ok, _, message, _) = await Send("rest/v1/exports", body, token, minimal: true);
+        if (!ok && revision == sessionRevision) Status = $"Could not add this export to your stats: {message}";
     }
+
+    // MARK: Usage
+
+    /// <summary>How many analysis runs of <paramref name="video"/> (its server key) this account has made, and the minutes the next
+    /// re-analysis would charge (0 before the first run); null when it can't be checked.</summary>
+    public async Task<(int Runs, double Charge)?> Reanalysis(string video)
+    {
+        if (await Rpc("my_reanalysis", new JsonObject { ["p_video"] = video }) is not JsonArray { Count: > 0 } rows || rows[0] is not JsonObject row) return null;
+        return Number(row["runs"]) is { } runs && Number(row["charge"]) is { } charge ? ((int)runs, charge) : null;
+    }
+
+    /// <summary>Whether this account may start Shorts from <paramref name="video"/>, <paramref name="minutes"/> long, today. Null means the
+    /// preflight is unavailable; the AI gateway still checks the account's allowance before processing a request.</summary>
+    public async Task<bool?> UsageAllowed(string video, double minutes, DateTime day)
+    {
+        var reply = await Rpc("usage_allowed", new JsonObject { ["p_video"] = video, ["p_day"] = DayString(day), ["p_minutes"] = minutes });
+        return reply is JsonValue value && value.TryGetValue<bool>(out var allowed) ? allowed : null;
+    }
+
+    /// <summary>Minutes this account has used and its allowance (60 plus redeemed promo codes); null when unavailable.</summary>
+    public async Task<(double Used, double Allowance)?> UsageStatus()
+    {
+        if (await Rpc("my_usage", new JsonObject()) is not JsonArray { Count: > 0 } rows || rows[0] is not JsonObject row) return null;
+        return Number(row["used"]) is { } used && Number(row["allowance"]) is { } allowance ? (used, allowance) : null;
+    }
+
+    /// <summary>Adds a promo code's minutes to this account. Returns what to show the person.</summary>
+    public async Task<string> RedeemPromo(string code)
+    {
+        if (await CurrentAccessToken() is not { } token) return "Sign in to redeem a promo code.";
+        var (ok, _, message, _) = await Send("rest/v1/rpc/redeem_promo", new JsonObject { ["p_code"] = code.Trim() }, token);
+        return ok ? "Promo code added. Your allowance is updated." : message;
+    }
+
+    /// <summary>The local calendar day as the database stores it, yyyy-MM-dd.</summary>
+    public static string DayString(DateTime day) => day.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// A database function's reply, or null when signed out or it failed.
+    async Task<JsonNode?> Rpc(string name, JsonObject body)
+    {
+        if (await CurrentAccessToken() is not { } token) return null;
+        var (ok, reply, _, _) = await Send("rest/v1/rpc/" + name, body, token);
+        return ok ? reply : null;
+    }
+
+    static double? Number(JsonNode? node) => node is JsonValue value && value.TryGetValue<double>(out var number) && double.IsFinite(number) ? number : null;
 
     sealed record Session(string Email, string RefreshToken);
 
@@ -94,7 +157,7 @@ public sealed class Account : INotifyPropertyChanged
             if (!Store(reply, address)) return;
             // Exports queued while the old account was still visible belong to that account.
             sessionRevision++;
-            Status = "Signed in. Each export now adds to your stats.";
+            Status = "Signed in. Prism AI is ready, and each export adds to your stats.";
         }
         finally { gate.Release(); if (request == authenticationRequest) IsWorking = false; }
     }
@@ -108,16 +171,16 @@ public sealed class Account : INotifyPropertyChanged
         if (!ok)
         {
             // Only a rejected sign-in ends it; being offline or a server hiccup keeps the account for the next export.
-            if (code is 400 or 401 or 403) { Status = $"Your sign-in expired ({message}). Sign in again to keep counting exports."; Forget(); }
-            else Status = $"Could not reach your Prism account, so this export was not counted: {message}";
+            if (code is 400 or 401 or 403) { Status = $"Your sign-in expired ({message}). Sign in again to keep using Prism."; Forget(); }
             return null;
         }
-        return Store(reply, saved.Email) ? Field(reply, "access_token") : null;
+        return Store(reply, saved.Email) ? cachedToken?.Value : null;
     }
 
     void Forget()
     {
         try { store.Save(""); } catch (Exception) { }
+        cachedToken = null;
         Email = null;
     }
 
@@ -129,6 +192,8 @@ public sealed class Account : INotifyPropertyChanged
         { Status = "The account service returned an incomplete sign-in. Please try again."; return false; }
         try { store.Save(JsonSerializer.Serialize(new Session(address, refresh))); }
         catch (Exception error) { Status = "Could not save your sign-in: " + error.Message; return false; }
+        var lifetime = reply is JsonObject node && Number(node["expires_in"]) is { } seconds ? seconds : 3600;
+        cachedToken = (Field(reply, "access_token")!, DateTime.UtcNow.AddSeconds(lifetime));
         Email = address;
         return true;
     }

@@ -206,7 +206,7 @@ public class GeminiTests
         Assert.Null(Gemini.RetryDelay(response, JsonSerializer.Serialize(new { error = new { details = new[] { new { retryDelay = delay + "s" } } } })));
     }
     [Fact]
-    public async Task BusyServersAreRetriedThenOtherModelsTried()
+    public async Task BusyServersAreRetried()
     {
         var gemini = new FakeGemini();
         var notes = new List<string>();
@@ -216,20 +216,24 @@ public class GeminiTests
         var recovered = await Gemini.Generate<JsonElement>([Gemini.Text("check")], new System.Text.Json.Nodes.JsonObject(), configuration);
         Assert.True(recovered.GetProperty("ok").GetBoolean());
         Assert.Equal(4, notes.Count);
-        Assert.All(notes, n => Assert.StartsWith("Gemini is busy", n));
+        Assert.All(notes, n => Assert.StartsWith("Prism AI is busy", n));
+    }
 
-        var switches = new List<string>();
-        configuration.OnFallback = (from, to) => switches.Add($"{from}>{to}");
-        gemini.Models.Clear();
-        for (var i = 0; i < Gemini.RetryWaits.Length + 1; i++) gemini.Statuses.Enqueue(503);
-        gemini.Statuses.Enqueue(200);
-        await Gemini.Generate<JsonElement>([Gemini.Text("check")], new System.Text.Json.Nodes.JsonObject(), configuration);
-        Assert.Equal(["gemini-3.1-flash-lite>gemini-3.5-flash-lite"], switches);
-        Assert.Equal("gemini-3.5-flash-lite", gemini.Models[^1]);
-        gemini.Models.Clear();
-        await Gemini.Generate<JsonElement>([Gemini.Text("check")], new System.Text.Json.Nodes.JsonObject(), configuration);
-        Assert.Equal(["gemini-3.5-flash-lite"], gemini.Models);
-        Gemini.RememberWorking("gemini-3.1-flash-lite", "gemini-3.1-flash-lite");
+    [Fact]
+    public async Task UsageLimitsAndSignInAreReportedAsSuch()
+    {
+        var limited = new FakeGemini { DefaultStatus = 429, ErrorBody = """{"error":{"code":"usage_limit","message":"You've reached your beta usage limit."}}""" };
+        limited.Usage = limited.Usage with { Run = Guid.NewGuid().ToString() };
+        var limit = await Assert.ThrowsAsync<GeminiException>(() => Gemini.Generate<JsonElement>([Gemini.Text("x")], new System.Text.Json.Nodes.JsonObject(), limited.Configuration()));
+        Assert.Equal(GeminiFailure.UsageLimit, limit.Failure);
+        Assert.Equal("You've reached your beta usage limit.", limit.Message);
+        Assert.Single(limited.Bodies);
+
+        var server = new FakeGemini();
+        var signedOut = new GeminiConfiguration(() => Task.FromResult<string?>(null), server.Usage) { Handler = server };
+        var signIn = await Assert.ThrowsAsync<GeminiException>(() => Gemini.Generate<JsonElement>([Gemini.Text("x")], new System.Text.Json.Nodes.JsonObject(), signedOut));
+        Assert.Equal(GeminiFailure.SignIn, signIn.Failure);
+        Assert.Empty(server.Bodies);
     }
 
     [Fact]

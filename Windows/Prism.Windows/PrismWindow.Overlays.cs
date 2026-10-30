@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -11,9 +12,9 @@ public sealed partial class PrismWindow
     void RefreshModal()
     {
         var desired = localCard is not null ? "local:" + localRevision
-            : !session.IsGeminiKeySaved ? "key"
+            : !session.Account.IsSignedIn ? "signin"
             : session.GenerationProgress is not null ? "progress"
-            : session.IsBusy ? "working" : session.IsTestingGemini ? "testing"
+            : session.IsBusy ? "working"
             : session.GenerationError is { } failure ? "error:" + failure.GetHashCode()
             : session.ExportSummary is { } summary ? "done:" + summary
             : session.ExportChoice is not null ? "export" : "";
@@ -26,14 +27,14 @@ public sealed partial class PrismWindow
         if (!blocked) return;
         var card = desired switch
         {
-            "key" => KeyGate(), "progress" => ProgressCard(), "working" => WorkingCard(false), "testing" => WorkingCard(true), "export" => ExportCard(),
+            "signin" => SignInGate(), "progress" => ProgressCard(), "working" => WorkingCard(), "export" => ExportCard(),
             _ when desired.StartsWith("error:", StringComparison.Ordinal) => ErrorCard(session.GenerationError!),
             _ when desired.StartsWith("done:", StringComparison.Ordinal) => ExportDoneCard(session.ExportSummary!), _ => localCard!,
         };
         KeyboardNavigation.SetTabNavigation(card, KeyboardNavigationMode.Cycle);
-        var scroll = Scroll(card); scroll.Width = desired == "key" ? 520 : 490; scroll.MaxHeight = Math.Max(300, ActualHeight - 90);
+        var scroll = Scroll(card); scroll.Width = desired == "signin" ? 460 : 490; scroll.MaxHeight = Math.Max(300, ActualHeight - 90);
         scroll.HorizontalAlignment = HorizontalAlignment.Center; scroll.VerticalAlignment = VerticalAlignment.Center;
-        var dim = new Border { Background = new SolidColorBrush(Color.FromArgb(desired == "key" ? (byte)184 : (byte)140, 0, 0, 0)), Child = scroll };
+        var dim = new Border { Background = new SolidColorBrush(Color.FromArgb(desired == "signin" ? (byte)184 : (byte)140, 0, 0, 0)), Child = scroll };
         card.RenderTransformOrigin = new Point(0.5, 0.5); card.RenderTransform = new ScaleTransform(0.97, 0.97);
         dim.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(140)));
         var grow = new System.Windows.Media.Animation.DoubleAnimation(0.97, 1, TimeSpan.FromMilliseconds(160)) { EasingFunction = new System.Windows.Media.Animation.CubicEase() };
@@ -59,35 +60,33 @@ public sealed partial class PrismWindow
         var footer = SplitRow(left, actions); footer.Margin = new Thickness(0, 14, 0, 0); return footer;
     }
 
-    Border KeyGate()
+    /// Until someone signs in, Prism's AI can't run, so this card covers the app. It signs in or creates the account in place.
+    Border SignInGate()
     {
-        var card = ModalCard("Welcome to Prism"); var body = (StackPanel)card.Child;
-        body.Children.RemoveAt(0); var welcome = Text("Welcome to Prism", 22, display: true);
-        var mark = Mark(26); mark.Margin = new Thickness(0, 0, 10, 0); body.Children.Insert(0, Row(mark, welcome));
-        body.Children.Add(Text("Prism uses Google Gemini to find, cut, caption and frame your Shorts, so it needs your own Gemini API key before it can work. Google bills your AI Studio account for what Prism uses; the free tier works too.", muted: true));
-        body.Children.Add(Text("1. Create a key"));
-        body.Children.Add(Button("Open Google AI Studio › API keys", () => WindowsPlatform.OpenExternal("https://aistudio.google.com/apikey")));
-        body.Children.Add(Text("2. Paste it here"));
-        var key = new PasswordBox { Password = session.GeminiKey, Padding = new Thickness(10), Margin = new Thickness(0, 4, 0, 4), ToolTip = "Paste your API key" };
-        key.PasswordChanged += (_, _) => session.GeminiKey = key.Password;
-        key.KeyDown += async (_, args) =>
-        {
-            if (args.Key != Key.Enter || session.IsTestingGemini || string.IsNullOrWhiteSpace(session.GeminiKey)) return;
-            args.Handled = true;
-            try { await session.VerifyAndSaveGeminiKey(); } catch (Exception error) { ShowNotice("Could not check key", error.Message); }
-        };
-        body.Children.Add(key);
-        var feedback = Text(session.GeminiKeyStatus, muted: true); body.Children.Add(feedback);
-        body.Children.Add(Text("The key is protected with Windows Data Protection for your Windows account. Audio, transcripts and sampled frames from your videos are sent to Google.", 11, muted: true));
-        var save = Button("Save and continue", () => session.VerifyAndSaveGeminiKey(), true); save.HorizontalAlignment = HorizontalAlignment.Right; body.Children.Add(save);
+        var card = ModalCard("Sign in to Prism"); var body = (StackPanel)card.Child;
+        body.Children.RemoveAt(0); var title = Text("Sign in to Prism", 22, display: true);
+        var mark = Mark(26); mark.Margin = new Thickness(0, 0, 10, 0); body.Children.Insert(0, Row(mark, title));
+        body.Children.Add(Text("Sign in or create a free account to start. Prism's AI runs on our server, so you don't need an API key.", muted: true));
+        var account = session.Account;
+        var address = Entry("", "Email"); address.Margin = new Thickness(0, 4, 0, 4);
+        var password = new PasswordBox { Padding = new Thickness(10), Margin = new Thickness(0, 4, 0, 4) };
+        AutomationProperties.SetName(password, "Password (at least 6 characters)");
+        var hint = Text("Password (at least 6 characters)", 12, muted: true); hint.Margin = new Thickness(0, 4, 0, 0);
+        var status = Text("", 12, muted: true);
+        async Task SignIn() { await account.SignIn(address.Text, password.Password); if (account.IsSignedIn) password.Clear(); }
+        var signIn = Button("Sign in", SignIn, true);
+        var create = Button("Create account", async () => { await account.SignUp(address.Text, password.Password); password.Clear(); });
+        password.KeyDown += async (_, args) => { if (args.Key == Key.Enter && signIn.IsEnabled) { args.Handled = true; await SignIn(); } };
+        body.Children.Add(address); body.Children.Add(hint); body.Children.Add(password); body.Children.Add(status);
+        body.Children.Add(Footer(create, signIn));
         updateModal = () =>
         {
-            feedback.Text = session.GeminiKeyStatus;
-            feedback.SetResourceReference(TextBlock.ForegroundProperty, session.GeminiKeyRejected ? "Amber" : "Muted");
-            key.IsEnabled = !session.IsTestingGemini;
-            save.IsEnabled = !session.IsTestingGemini && !string.IsNullOrWhiteSpace(session.GeminiKey);
+            status.Text = account.Status; status.Visibility = account.Status.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            signIn.Content = account.IsWorking ? "Signing in…" : "Sign in";
+            signIn.IsEnabled = create.IsEnabled = !account.IsWorking && address.Text.Trim().Length > 0 && password.Password.Length > 0;
         };
-        Dispatcher.BeginInvoke(new Action(() => { if (!disposed && modalKind == "key") key.Focus(); }));
+        address.TextChanged += (_, _) => updateModal?.Invoke(); password.PasswordChanged += (_, _) => updateModal?.Invoke();
+        Dispatcher.BeginInvoke(new Action(() => { if (!disposed && modalKind == "signin") address.Focus(); }));
         return card;
     }
 
@@ -100,7 +99,7 @@ public sealed partial class PrismWindow
         var detail = Text("", 11, muted: true, mono: true);
         var cancel = Button("Cancel", session.CancelGeneration); cancel.HorizontalAlignment = HorizontalAlignment.Right;
         body.Children.Add(SplitRow(stage, percent)); body.Children.Add(progress);
-        body.Children.Add(Text(session.IsExporting ? "Your files are being prepared for export." : "Gemini finds complete moments, aligns speech and follows the subject.", 12, muted: true));
+        body.Children.Add(Text(session.IsExporting ? "Your files are being prepared for export." : "Prism AI finds complete moments, aligns speech and follows the subject.", 12, muted: true));
         cancel.Margin = new Thickness(0); body.Children.Add(SplitRow(detail, cancel));
         updateModal = () =>
         {
@@ -112,31 +111,35 @@ public sealed partial class PrismWindow
         return card;
     }
 
-    Border WorkingCard(bool testing)
+    Border WorkingCard()
     {
-        var card = ModalCard(testing ? "Checking Gemini…" : "Working…"); var body = (StackPanel)card.Child;
+        var card = ModalCard("Working…"); var body = (StackPanel)card.Child;
         body.Children.Add(new ProgressBar { IsIndeterminate = true, Height = 6, Margin = new Thickness(0, 14, 0, 14) });
         var message = Text(""); body.Children.Add(message);
-        updateModal = () => message.Text = testing ? session.GeminiKeyStatus : session.Message;
+        updateModal = () => message.Text = session.Message;
         return card;
     }
 
     Border ErrorCard(GenerationFailure failure)
     {
-        var title = failure.IsExport ? "Export failed" : failure.Kind switch
+        var (title, advice) = failure.IsExport ? ("Export failed", null) : failure.Kind switch
         {
-            GenerationFailureKind.NoMoments => "No Shorts found", GenerationFailureKind.Settings => "Check your Gemini settings",
-            GenerationFailureKind.Temporary => "Gemini is unavailable right now", _ => "Couldn’t make Shorts",
+            GenerationFailureKind.NoMoments => ("No Shorts found", "Change the clip length or which part of the video Prism looks in, then try again."),
+            GenerationFailureKind.Settings => ("Check your Prism AI settings", null),
+            GenerationFailureKind.Temporary => ("Prism AI is unavailable right now",
+                "This is a temporary problem with the AI service, not with your video or its range. Prism already retried for about a minute and tried the other Prism AI models too. Wait a little, then try again."),
+            GenerationFailureKind.Limit => ("Usage limit reached", "Shorts you already made stay available, and you can keep editing and exporting them."),
+            _ => ("Couldn’t make Shorts", (string?)null),
         };
         var card = ModalCard(title, "\uE7BA", "Amber"); var body = (StackPanel)card.Child;
         body.Children.Add(Text(failure.Message));
-        if (!failure.IsExport && failure.Kind == GenerationFailureKind.NoMoments) body.Children.Add(Text("Change the clip length or which part of the video Prism looks in, then try again.", 12, muted: true));
-        if (!failure.IsExport && failure.Kind == GenerationFailureKind.Temporary) body.Children.Add(Text("This is a temporary problem on Google’s side, not with your video or its range. Prism already retried for about a minute and tried the other Gemini models too. Wait a little, then try again.", 12, muted: true));
+        if (advice is not null) body.Children.Add(Text(advice, 12, muted: true));
         var buttons = new List<Button>();
         if (failure.IsExport) buttons.Add(Button("Export options", () => { session.GenerationError = null; session.ChooseExport(); }, true));
+        else if (failure.Kind == GenerationFailureKind.Limit)
+            buttons.Add(Button("See usage", () => { session.GenerationError = null; settingsCategory = 1; Navigate(Screen.Settings); }, true));
         else
         {
-            if (failure.Kind == GenerationFailureKind.Temporary) buttons.Add(Button("Change model", () => { session.GenerationError = null; Navigate(Screen.Settings); }));
             buttons.Add(Button("Try again", async () => { session.GenerationError = null; await session.MakeConfiguredShorts(); }, failure.Kind is GenerationFailureKind.Temporary or GenerationFailureKind.Other));
             if (failure.Kind is GenerationFailureKind.Settings or GenerationFailureKind.NoMoments)
                 buttons.Add(Button(failure.Kind == GenerationFailureKind.Settings ? "Open Settings" : "Change clip length or range", () =>

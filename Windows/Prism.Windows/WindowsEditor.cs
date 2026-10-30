@@ -22,7 +22,7 @@ public sealed class WindowsEditor : IDisposable
     readonly StackPanel media = Column(), captions = Column(), inspector = Column(), chatHistory = Column();
     readonly TextBlock detail = Text("", 11, true);
     readonly MediaElement video = new() { LoadedBehavior = MediaState.Manual, UnloadedBehavior = MediaState.Manual, ScrubbingEnabled = true, Stretch = Stretch.Uniform };
-    readonly TextBlock title = Text("Editor", 12), saved = Text("", 11, true), engine = Text("Gemini cloud", 12, true), status = Text("", 12, true), playerTime = Text("00:00 / 00:00", 11, true), sourceName = Text("Source video", 12, true);
+    readonly TextBlock title = Text("Editor", 12), saved = Text("", 11, true), engine = Text("Prism AI cloud", 12, true), status = Text("", 12, true), playerTime = Text("00:00 / 00:00", 11, true), sourceName = Text("Source video", 12, true);
     readonly TextBlock playerNotice = Text("Your video goes here", 13, false), ratio = Text("Original", 11, true), noticeIcon = Glyph("\uE714", 36);
     readonly StackPanel notice = new();
     readonly Border leftPanel, rightPanel;
@@ -323,8 +323,8 @@ public sealed class WindowsEditor : IDisposable
         if (clip.Score is { } score)
         {
             var rating = new TextBlock { Text = score.ToString(CultureInfo.InvariantCulture), Foreground = Brushes.White, FontSize = 10, FontWeight = FontWeights.Medium };
-            var badge = new Border { Child = rating, Background = new SolidColorBrush(Color.FromArgb(153, 0, 0, 0)), CornerRadius = new CornerRadius(10), Padding = new Thickness(6, 3, 6, 3), Margin = new Thickness(5), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, ToolTip = $"Gemini score: {score} of 100" };
-            System.Windows.Automation.AutomationProperties.SetName(badge, $"Gemini score {score} of 100");
+            var badge = new Border { Child = rating, Background = new SolidColorBrush(Color.FromArgb(153, 0, 0, 0)), CornerRadius = new CornerRadius(10), Padding = new Thickness(6, 3, 6, 3), Margin = new Thickness(5), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, ToolTip = $"Prism AI score: {score} of 100" };
+            System.Windows.Automation.AutomationProperties.SetName(badge, $"Prism AI score {score} of 100");
             System.Windows.Controls.Panel.SetZIndex(badge, 1); poster.Children.Add(badge);
         }
         poster.Children.Add(new Border { Background = new LinearGradientBrush(Colors.Transparent, Color.FromArgb(178, 0, 0, 0), 90) { StartPoint = new Point(0, 0.5), EndPoint = new Point(0, 1) } });
@@ -508,7 +508,7 @@ public sealed class WindowsEditor : IDisposable
         }
         if (current.UsesWordTiming() && clip.SpeechWords is not { Count: > 0 })
         {
-            var warning = Text(session.IsBusy ? "Gemini is timing the words so captions follow the speech…" : $"{current.Title()} follows each spoken word, which needs word timing this Short doesn't have. Transcribe it to add timing; until then captions show as whole phrases.", 11);
+            var warning = Text(session.IsBusy ? "Prism AI is timing the words so captions follow the speech…" : $"{current.Title()} follows each spoken word, which needs word timing this Short doesn't have. Transcribe it to add timing; until then captions show as whole phrases.", 11);
             warning.SetResourceReference(TextBlock.ForegroundProperty, "Amber"); styles.Children.Add(warning);
         }
         styles.Children.Add(Caption("Position", false));
@@ -523,7 +523,7 @@ public sealed class WindowsEditor : IDisposable
         styles.Children.Add(Rule());
         var transcribe = Link("Transcribe", "", () => _ = Safe(session.RegenerateSelectedSubtitles));
         transcribe.IsEnabled = !session.IsBusy && hasAudio;
-        transcribe.ToolTip = hasAudio ? "Transcribe with Gemini in the cloud. Google API usage may incur charges." : "This source video has no audio track.";
+        transcribe.ToolTip = hasAudio ? "Transcribe with Prism AI in the cloud." : "This source video has no audio track.";
         var lines = Column();
         captions.Children.Add(FoldingSection(Heading(SectionLabel("Caption text"), transcribe), lines, !session.Settings.CaptionTextCollapsed, value => session.Settings.CaptionTextCollapsed = !value));
         var cues = clip.Captions ?? [];
@@ -546,7 +546,7 @@ public sealed class WindowsEditor : IDisposable
     void BuildChatHistory()
     {
         chatHistory.Children.Clear(); chatHistory.Margin = new Thickness(14);
-        var source = Text("Gemini · Cloud", 11); source.SetResourceReference(TextBlock.ForegroundProperty, "Accent"); chatHistory.Children.Add(source);
+        var source = Text("Prism AI · Cloud", 11); source.SetResourceReference(TextBlock.ForegroundProperty, "Accent"); chatHistory.Children.Add(source);
         foreach (var message in session.ChatMessages)
         {
             var bubble = new Border { CornerRadius = new CornerRadius(8), Padding = new Thickness(10), Margin = new Thickness(0, 6, 0, 6), Child = Text(message.Text, 12) };
@@ -564,7 +564,7 @@ public sealed class WindowsEditor : IDisposable
     }
     void OnKeyDown(object sender, KeyEventArgs args)
     {
-        if (disposed || session.Screen != Screen.Editor || !root.IsEnabled || !session.IsGeminiKeySaved || session.IsBusy
+        if (disposed || session.Screen != Screen.Editor || !root.IsEnabled || !session.Account.IsSignedIn || session.IsBusy
             || session.ExportChoice is not null || session.ExportSummary is not null || session.GenerationError is not null || Typing()) return;
         try
         {

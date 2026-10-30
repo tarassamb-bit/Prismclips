@@ -22,8 +22,6 @@ public class SessionTests
 
     sealed class FakePlatform(string root) : IPlatform
     {
-        public readonly MemoryKeys Keys = new();
-        public IKeyStore KeyStore => Keys;
         public IKeyStore AccountStore { get; } = new MemoryKeys();
         public string DownloadsFolder => Path.Combine(root, "Downloads");
         public readonly List<string> Trashed = [];
@@ -43,27 +41,6 @@ public class SessionTests
         public void Seek(double seconds) => CurrentTime = seconds;
         public void TogglePlayback() => Playing = !Playing;
         public void Clear() { Cleared = true; Playing = false; }
-    }
-
-    sealed class OfflineGemini : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => throw new HttpRequestException("The test is offline.");
-    }
-
-    sealed class DelayedGemini : HttpMessageHandler
-    {
-        public readonly TaskCompletionSource Started = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public readonly TaskCompletionSource Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            Started.SetResult();
-            await Release.Task.WaitAsync(cancellationToken);
-            return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
-            {
-                Content = new StringContent("""{"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"{\"ok\":true}"}]}}]}"""),
-            };
-        }
     }
 
     [Fact]
@@ -96,22 +73,6 @@ public class SessionTests
         Assert.True(session.CanRedo);
         fixture.Open();
         Assert.False(session.CanRedo);
-    }
-
-    [Fact]
-    public async Task VerificationSavesTheKeyThatWasActuallyChecked()
-    {
-        using var fixture = new Fixture();
-        using var gemini = new DelayedGemini();
-        fixture.Session.GeminiKey = "test-key";
-        var verification = fixture.Session.VerifyAndSaveGeminiKey(gemini);
-        await gemini.Started.Task;
-        fixture.Session.GeminiKey = "an-unchecked-replacement";
-        gemini.Release.SetResult();
-        await verification;
-        Assert.Equal("test-key", fixture.Platform.Keys.Value);
-        Assert.Equal("test-key", fixture.Session.GeminiApiKey());
-        Assert.False(fixture.Session.IsTestingGemini);
     }
 
     [Fact]
@@ -164,19 +125,6 @@ public class SessionTests
         Assert.NotNull((await ProjectInfo.Summary(fixture.Path)).Poster);
         fixture.Session.Open(fixture.Path);
         Assert.Equal(managed, fixture.Session.Project!.Media[0].Path);
-    }
-
-    [Fact]
-    public async Task OfflineVerificationDoesNotHideAKeyStoreSaveFailure()
-    {
-        using var fixture = new Fixture();
-        fixture.Platform.Keys.RejectSave = true;
-        fixture.Session.GeminiKey = "test-key";
-        using var offline = new OfflineGemini();
-        await fixture.Session.VerifyAndSaveGeminiKey(offline);
-        Assert.False(fixture.Session.IsGeminiKeySaved);
-        Assert.StartsWith("Could not save the Gemini key:", fixture.Session.GeminiKeyStatus);
-        Assert.Equal("test-key", fixture.Session.GeminiKey);
     }
 
     [Fact]
@@ -268,7 +216,6 @@ public class SessionTests
             Assert.Empty(Assert.Single(settings.ProjectFolders).ProjectPaths);
             Assert.Equal((60d, 248d, 282d, 278d), (settings.ResourceRefreshSeconds, settings.LeftSidebarWidth, settings.RightSidebarWidth, settings.TimelineHeight));
             Assert.Equal(ExportQuality.Full, settings.ExportQuality);
-            Assert.False(string.IsNullOrWhiteSpace(settings.GeminiModel));
         }
         finally { if (previous is null) File.Delete(path); else File.WriteAllText(path, previous); }
     }
@@ -284,7 +231,7 @@ public class SessionTests
         {
             Directory.CreateDirectory(Root);
             Platform = new FakePlatform(Root);
-            Session = new AppSession(Platform, new AppSettings()) { DidLoadGeminiKey = true };
+            Session = new AppSession(Platform, new AppSettings());
         }
 
         public MediaItem Open(string? source = null, params EditSegment[] segments)
@@ -332,67 +279,33 @@ public class SessionTests
         Assert.Null(session.PreviewError);
     }
 
-    [Theory]
-    [InlineData(200, false)]
-    [InlineData(400, true)]
-    [InlineData(401, true)]
-    [InlineData(403, true)]
-    [InlineData(404, false)]
-    [InlineData(429, false)]
-    [InlineData(503, false)]
-    public async Task WelcomeCardRejectsOnlyARefusedKey(int status, bool rejected)
+    [Fact]
+    public async Task SignedOutRunsAskToSignInWithoutCallingPrismAI()
     {
         using var fixture = new Fixture();
-        var session = fixture.Session;
-        session.GeminiKey = "  test-key  ";
-        using var gemini = new FakeGemini { DefaultStatus = status };
-        await session.VerifyAndSaveGeminiKey(gemini);
-        Assert.False(session.IsTestingGemini);
-        Assert.Equal(rejected, session.GeminiKeyRejected);
-        Assert.Equal(!rejected, session.IsGeminiKeySaved);
-        Assert.Equal(!rejected, session.Settings.GeminiKeySaved);
-        Assert.Equal(rejected ? "" : "test-key", fixture.Platform.Keys.Value);
-        Assert.Equal(rejected ? "  test-key  " : "", session.GeminiKey);
-        Assert.Equal(0, fixture.Platform.Keys.Reads);
-        if (rejected) Assert.Contains($"HTTP {status}", session.GeminiKeyStatus);
-        else if (status != 200) Assert.Contains("couldn’t confirm", session.GeminiKeyStatus);
-        Assert.NotEmpty(gemini.Bodies);
+        using var server = new FakeGemini();
+        using var session = new AppSession(fixture.Platform, new AppSettings()) { AIHandler = server };
+        var media = fixture.Open();
+        Assert.Null(session.GeminiConfiguration(media));
+        session.Open(fixture.Path);
+        await session.MakeShorts(session.Project!.Media[0], 1, 30, SourceRegion.EntireVideo);
+        Assert.Equal(GenerationFailureKind.Settings, session.GenerationError?.Kind);
+        Assert.Empty(server.Bodies);
     }
 
     [Fact]
-    public async Task WelcomeCardCanSaveAKeyWhileOfflineAndRemoveItAgain()
+    public async Task UsageKeysMatchTheMacApp()
     {
-        using var fixture = new Fixture();
-        var session = fixture.Session;
-        session.GeminiKey = "test-key";
-        using var offline = new OfflineGemini();
-        await session.VerifyAndSaveGeminiKey(offline);
-        Assert.True(session.IsGeminiKeySaved);
-        Assert.False(session.GeminiKeyRejected);
-        Assert.Contains("couldn’t confirm", session.GeminiKeyStatus);
-        session.ToggleGeminiKeyVisibility();
-        Assert.Equal("test-key", session.RevealedGeminiKey);
-        session.RemoveGeminiKey();
-        Assert.False(session.IsGeminiKeySaved);
-        Assert.Empty(fixture.Platform.Keys.Value);
-        Assert.Empty(session.RevealedGeminiKey);
-        Assert.Equal(0, fixture.Platform.Keys.Reads);
-    }
-
-    [Theory]
-    [InlineData(true, "", false)]
-    [InlineData(false, "test-key", true)]
-    public void StartupKeyCardReflectsTheKeyStoreAndReadsItOnlyOnce(bool savedFlag, string actualKey, bool saved)
-    {
-        using var fixture = new Fixture();
-        fixture.Platform.Keys.Value = actualKey;
-        using var session = new AppSession(fixture.Platform, new AppSettings { GeminiKeySaved = savedFlag });
-        session.RefreshGeminiKeyState();
-        Assert.Equal(saved, session.IsGeminiKeySaved);
-        Assert.Equal(saved, session.Settings.GeminiKeySaved);
-        Assert.Equal(actualKey, session.GeminiApiKey());
-        session.RefreshGeminiKeyState();
-        Assert.Equal(1, fixture.Platform.Keys.Reads);
+        var media = new MediaItem { Path = "/Users/me/Movies/clip.mp4", Duration = 59.5 };
+        Assert.Equal("clip.mp4|60", UsageLimit.VideoKey(media));
+        Assert.Equal("b22bf831f99fc46fe2584a21fff4c6b55c2ae0e72d2ace8f8788f57855acf841", UsageLimit.ServerKey(media));
+        Assert.Equal(59.5 / 60, UsageLimit.Minutes(media));
+        var file = System.IO.Path.Combine(TestSetup.Root, $"hash-{Guid.NewGuid()}.bin");
+        File.WriteAllText(file, "prism");
+        media.ContentHash = await UsageLimit.ContentHash(file);
+        Assert.Equal("bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b", media.ContentHash);
+        Assert.Equal(media.ContentHash, UsageLimit.ServerKey(media));
+        Assert.Equal("2026-10-30", Account.DayString(new DateTime(2026, 10, 30, 23, 59, 0)));
     }
 
     public static IEnumerable<object[]> Failures()
@@ -402,7 +315,8 @@ public class SessionTests
         yield return [new HttpRequestException("offline"), GenerationFailureKind.Temporary];
         yield return [new TaskCanceledException(), GenerationFailureKind.Temporary];
         foreach (var code in new[] { 400, 401, 403, 404 }) yield return [new GeminiException(GeminiFailure.Request, code), GenerationFailureKind.Settings];
-        yield return [new GeminiException(GeminiFailure.InvalidConfiguration), GenerationFailureKind.Settings];
+        yield return [new GeminiException(GeminiFailure.SignIn), GenerationFailureKind.Settings];
+        yield return [new GeminiException(GeminiFailure.UsageLimit, 429), GenerationFailureKind.Limit];
         yield return [new GeminiException(GeminiFailure.Request, 429), GenerationFailureKind.Temporary];
         yield return [new GeminiException(GeminiFailure.InvalidResponse), GenerationFailureKind.Temporary];
         yield return [new GeminiException(GeminiFailure.InvalidTiming), GenerationFailureKind.Temporary];
@@ -446,7 +360,7 @@ public class SessionTests
         await session.MakeConfiguredShorts();
         Assert.False(session.IsBusy);
         Assert.Equal(GenerationFailureKind.Settings, session.GenerationError?.Kind);
-        Assert.Equal(0, fixture.Platform.Keys.Reads);
+        Assert.StartsWith("Sign in to your Prism account", session.GenerationError!.Message);
     }
 
     [Fact]

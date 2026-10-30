@@ -1,13 +1,13 @@
 # Prism for Windows
 
-Native, code-only WPF interface sharing the Gemini engine and app model with Linux in `Shared/Prism.Core`. The library is separate from the macOS app.
+Native, code-only WPF interface sharing the Prism AI engine and app model with Linux in `Shared/Prism.Core`. The library is separate from the macOS app.
 
 ## Requirements
 
 - Windows with .NET 10 SDK to build; a published framework-dependent app needs the .NET 10 **Desktop Runtime**.
 - `ffmpeg.exe` and `ffprobe.exe`: use a build with **libx264**, **libx265** and **libass**. Put both beside `Prism.exe` or on `PATH`.
 - Windows media playback support for H.264/AAC MP4 previews. Windows N editions may need the Media Feature Pack. Preview videos use H.264; playing exported HEVC files may require HEVC playback support.
-- A Google AI Studio API key. Gemini is the only AI provider.
+- A Prism account. Prism AI runs on Prism's server (the Supabase `gemini` function), so no API key is needed.
 
 Prism uses WPF `MediaElement` for playback and ffmpeg for rendering. The application explains missing ffmpeg tools when an import/render requires them.
 
@@ -20,7 +20,7 @@ dotnet build Windows/Prism.Windows
 dotnet run --project Windows/Prism.Windows
 ```
 
-The first window is a blocking **Welcome to Prism** card. Paste a Google AI Studio key and choose **Save and continue**. Google rejects invalid keys; a temporary Google/network outage does not prevent saving a key. Settings can show, replace, remove and test it.
+The first window is a blocking **Sign in to Prism** card, as on the Mac. Sign in or create an account there. Settings › Account signs out; Settings › Usage shows the minutes used and redeems promo codes.
 
 To select explicit ffmpeg paths:
 
@@ -49,15 +49,15 @@ The project uses `EnableWindowsTargeting` and can compile on macOS/Linux. WPF ca
 
 - Projects: `%LOCALAPPDATA%\Prism\Library\Projects`.
 - Settings: `%APPDATA%\Prism\settings.json`.
-- Key: `%APPDATA%\Prism\gemini.key`, encrypted with Windows DPAPI for the current Windows user.
+- Sign-in: `%APPDATA%\Prism\account.key`, encrypted with Windows DPAPI for the current Windows user.
 - Downloads is resolved with the Windows known-folder API, including redirected locations. Exports default to `Downloads\Prism\<project title>`; the export card can choose another folder, tick Shorts and include untouched sources.
 - Project removal uses the Recycle Bin. Export reveal selects files in Explorer, with `explorer.exe /select` as a fallback.
 
-No .NET code reads or writes the macOS Relio library or Keychain.
+No .NET code reads or writes the macOS Relio library or Keychain. A video's content hash names it to the server the same way the Mac app does, so a video counts once across both.
 
 ## Check on a Windows PC
 
-1. Launch with no saved Prism key. Confirm the welcome card blocks navigation, invalid keys are rejected, and the saved key survives restarting Prism. Test show/hide, replace, remove and connection testing in Settings.
+1. Launch signed out. Confirm the sign-in card blocks navigation, a wrong password is rejected, and the sign-in survives restarting Prism. Check Settings › Usage shows minutes and a promo code can be redeemed; sign out from Settings › Account.
 2. Import a video using the dialog, file drop and typed path. Follow the five stages: video, settings, captions, content type, review/export. Check custom-range validation. Generate a batch, then cancel another; earlier Shorts must remain.
 3. Play and seek source/Short previews. Try Fill, Fit, Split, captions/text/layout, trim, mute, undo, a manual clip from the source playhead and focus-point clicks/drags. Check Space, arrows, Shift+arrows, Delete and Ctrl+Z; typing and cards must suppress editor shortcuts. Try editor chat, both themes and pane resizing.
 4. Export one Short, then all Shorts plus the source, with each quality. Check MP4 playback, framing, captions, audio, filenames and Explorer reveal. Try an unusable folder: the reason must stay on the export card. Cancel an export and inspect completed/temporary files.
@@ -71,4 +71,4 @@ With ffmpeg/ffprobe available:
 dotnet test Shared/Prism.Core.Tests
 ```
 
-The shared tests use temporary libraries/config/cache, fake key stores and fake Gemini HTTP replies. They never touch a real library or key. The WPF app was cross-compiled on the development Mac; Windows playback, DPAPI, Explorer, Recycle Bin and visual layout need the PC checks above.
+The shared tests use temporary libraries/config/cache, fake credential stores and fake Prism AI server replies. They never touch a real library or account. The WPF app was cross-compiled on the development Mac; Windows playback, DPAPI, Explorer, Recycle Bin and visual layout need the PC checks above.

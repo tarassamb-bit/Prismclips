@@ -43,7 +43,6 @@ public sealed partial class PrismWindow : IDisposable
         ui = SynchronizationContext.Current;
         LinuxPlatform.RegisterFonts();
         session = new AppSession(new LinuxPlatform());
-        session.RefreshGeminiKeyState();
         window = Gtk.ApplicationWindow.New(application);
         window.Title = "Prism";
         window.SetDefaultSize(1440, 920);

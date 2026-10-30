@@ -63,7 +63,6 @@ public sealed partial class PrismWindow : Window
         Activated += (_, _) => TintCaption(); Deactivated += (_, _) => TintCaption();
         SourceInitialized += (_, _) => { TintTitleBar(); System.Windows.Interop.HwndSource.FromHwnd(new System.Windows.Interop.WindowInteropHelper(this).Handle)?.AddHook(CaptionHook); };
         session = new AppSession(new WindowsPlatform());
-        session.RefreshGeminiKeyState();
         InstallStyles();
         ApplyTheme();
         SetResourceReference(BackgroundProperty, "Surface0");

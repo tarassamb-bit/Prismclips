@@ -2,7 +2,7 @@ using Prism.Core;
 
 namespace Prism.Core.Tests;
 
-/// The optional account's local behaviour; nothing here reaches the network.
+/// The account's local behaviour; nothing here reaches the network.
 public class AccountTests
 {
     sealed class MemoryKeys : IKeyStore
@@ -151,5 +151,25 @@ public class AccountTests
         var account = new Account(new MemoryKeys());
         await account.RecordExport(3, 90, "full");
         Assert.Equal("", account.Status);
+    }
+
+    [Fact]
+    public async Task OneRefreshServesManyRequestsAndUsageIsRead()
+    {
+        var keys = new MemoryKeys { Value = """{"Email":"me@example.com","RefreshToken":"old"}""" };
+        using var handler = new DelayedAccount { Reply = """{"refresh_token":"new","access_token":"access","expires_in":3600}""" };
+        handler.Release.SetResult();
+        using var client = new HttpClient(handler);
+        var account = new Account(keys, client);
+        Assert.Equal("access", await account.CurrentAccessToken());
+        Assert.Equal("access", await account.CurrentAccessToken());
+        Assert.Single(handler.Paths);
+        handler.Reply = """[{"used":12.5,"allowance":60}]""";
+        Assert.Equal((12.5, 60.0), await account.UsageStatus());
+        handler.Reply = "true";
+        Assert.True(await account.UsageAllowed(new string('a', 64), 2, new DateTime(2026, 10, 30)));
+        Assert.Equal(["/rest/v1/rpc/my_usage", "/rest/v1/rpc/usage_allowed"], handler.Paths.Skip(1));
+        account.SignOut();
+        Assert.Null(await account.CurrentAccessToken());
     }
 }

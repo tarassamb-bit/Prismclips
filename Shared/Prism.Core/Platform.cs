@@ -2,20 +2,19 @@ using System.Runtime.InteropServices;
 
 namespace Prism.Core;
 
-/// Where the person's Gemini key is kept: Windows protects it with DPAPI, Linux uses the Secret Service when available.
+/// Where a secret such as the Prism account's sign-in is kept: Windows protects it with DPAPI, Linux uses the Secret Service when available.
 public interface IKeyStore
 {
-    /// <summary>The saved key, or an empty string.</summary>
+    /// <summary>The saved secret, or an empty string.</summary>
     string Read();
-    /// <summary>Saves the key; an empty key removes it.</summary>
+    /// <summary>Saves the secret; an empty one removes it.</summary>
     void Save(string key);
 }
 
 /// What each system does its own way.
 public interface IPlatform
 {
-    IKeyStore KeyStore { get; }
-    /// <summary>Where the optional Prism account's sign-in is kept, protected the same way as the Gemini key.</summary>
+    /// <summary>Where the Prism account's sign-in is kept.</summary>
     IKeyStore AccountStore { get; }
     /// <summary>Moves a project folder to the Recycle Bin or Trash, where it can be restored. Throws when that fails.</summary>
     void MoveToTrash(string path);

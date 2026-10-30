@@ -44,7 +44,7 @@ public sealed class LinuxTimeline : IDisposable
     public Gtk.Widget Widget => container;
     MediaItem? Media => session.Project?.Media.FirstOrDefault(m => m.Id == (session.ActiveSegment?.MediaId ?? session.Selection));
     double Length => Math.Max(0.1, session.ActiveSegment?.Duration ?? Media?.Duration ?? 1);
-    bool Blocked => session.IsBusy || session.ExportChoice is not null || session.ExportSummary is not null || session.GenerationError is not null || !session.IsGeminiKeySaved;
+    bool Blocked => session.IsBusy || session.ExportChoice is not null || session.ExportSummary is not null || session.GenerationError is not null || !session.Account.IsSignedIn;
 
     public LinuxTimeline(AppSession session)
     {
@@ -98,7 +98,7 @@ public sealed class LinuxTimeline : IDisposable
     void Changed(object? sender, PropertyChangedEventArgs args)
     {
         if (args.PropertyName is nameof(AppSession.Project) or nameof(AppSession.Selection) or nameof(AppSession.PreviewShortId)
-            or nameof(AppSession.IsBusy) or nameof(AppSession.CanUndo) or nameof(AppSession.IsGeminiKeySaved)
+            or nameof(AppSession.IsBusy) or nameof(AppSession.CanUndo) or nameof(AppSession.Account)
             or nameof(AppSession.ExportChoice) or nameof(AppSession.ExportSummary) or nameof(AppSession.GenerationError)) Refresh();
     }
 

@@ -18,7 +18,7 @@ public static class ShortMaker
         if (excluding.Any(e => e.Start <= interval.Start && e.End >= interval.End)) throw new GeminiException(GeminiFailure.NoDistinctClips);
         var clipDuration = Math.Min(Math.Max(1, requestedDuration), interval.End - interval.Start);
         var targetCount = Math.Clamp(count, 1, 20);
-        progress(0, "Preparing audio for Gemini");
+        progress(0, "Preparing audio for Prism AI");
         List<TimedCaption> transcript;
         if (!info.HasAudio) transcript = [];
         else if (cachedTranscript?.CuesCovering(interval.Start, interval.End) is { } saved)
@@ -39,7 +39,7 @@ public static class ShortMaker
             var fresh = await GeminiSelection.TranscribeSentences(path, (from, interval.End), gemini, fraction =>
             {
                 var overall = (from - interval.Start + fraction * (interval.End - from)) / (interval.End - interval.Start);
-                progress(0.55 * overall, $"Gemini · transcribing audio · {(int)(overall * 100)}%");
+                progress(0.55 * overall, $"Prism AI · transcribing audio · {(int)(overall * 100)}%");
             }, finished: (cues, end) => onTranscript(new SentenceTranscript(interval.Start, end, [.. keptCues, .. cues])), cancellation: cancellation);
             transcript = [.. keptCues, .. fresh];
             onTranscript(new SentenceTranscript(interval.Start, interval.End, transcript));
@@ -47,12 +47,12 @@ public static class ShortMaker
         progress(0.55, "Selecting distinct moments");
         if (videoType == VideoType.Auto)
         {
-            progress(0.55, "Gemini · recognizing the kind of video");
+            progress(0.55, "Prism AI · recognizing the kind of video");
             // Detection reads the transcript; a silent source keeps the general behavior.
             videoType = transcript.Count == 0 ? VideoType.General : await GeminiSelection.DetectVideoType(transcript, gemini, cancellation);
-            progress(0.55, $"Gemini · {videoType.Title()}");
+            progress(0.55, $"Prism AI · {videoType.Title()}");
         }
-        progress(0.55, "Gemini · choosing complete stories and layouts");
+        progress(0.55, "Prism AI · choosing complete stories and layouts");
         var clips = await GeminiSelection.Select(path, transcript, interval, clipDuration, targetCount, gemini, excluding, videoType.SelectionGuidance(),
             (fraction, stage) => progress(0.55 + 0.15 * fraction, stage), cancellation: cancellation);
         // Screens and gameplay lose their edges in a vertical crop, whatever the picker suggested.
@@ -107,7 +107,7 @@ public static class ShortMaker
             var keyframes = candidate.Fit
                 ? [new CropKeyframe(0, 0.5, null, true), new CropKeyframe(duration, 0.5, null, true)]
                 : await SubjectFramer.Analyze(path, start, duration, 1.08, gemini, captions, cancellation: token);
-            ReportStep("Gemini · framing the subject");
+            ReportStep("Prism AI · framing the subject");
             var warning = shot.ReferenceCues.Count == 0 || shot.Words.Count > 0 ? null : GeminiSelection.SentenceTimingNotice;
             var title = candidate.Title is { } t ? Truncate(t, 100) : captions.FirstOrDefault() is { } first ? Truncate(first.Text, 100) : null;
             return new ShortResult(start, duration, "", captions, keyframes, words, warning, title,

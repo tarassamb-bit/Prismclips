@@ -151,8 +151,6 @@ public static class AppPaths
 /// App settings that macOS keeps in UserDefaults, saved as one JSON file.
 public sealed class AppSettings
 {
-    public string GeminiModel { get; set; } = "gemini-3.1-flash-lite";
-    public bool GeminiKeySaved { get; set; }
     public List<string> RecentProjects { get; set; } = [];
     public string? LastProject { get; set; }
     public List<ProjectFolder> ProjectFolders { get; set; } = [];
@@ -179,7 +177,6 @@ public sealed class AppSettings
             settings.RecentProjects ??= [];
             settings.ProjectFolders = (settings.ProjectFolders ?? []).Where(folder => folder is not null).ToList();
             foreach (var folder in settings.ProjectFolders) { folder.ProjectPaths ??= []; folder.Name ??= "Folder"; }
-            if (string.IsNullOrWhiteSpace(settings.GeminiModel)) settings.GeminiModel = "gemini-3.1-flash-lite";
             if (!Enum.IsDefined(settings.ExportQuality)) settings.ExportQuality = ExportQuality.Full;
             static double Positive(double value, double fallback) => double.IsFinite(value) && value > 0 ? value : fallback;
             settings.ResourceRefreshSeconds = Math.Clamp(Positive(settings.ResourceRefreshSeconds, 60), 1, 3600);

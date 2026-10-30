@@ -9,10 +9,9 @@ public sealed partial class PrismWindow
     void RefreshModal()
     {
         var desired = localCard is not null ? "local:" + localRevision
-            : !session.IsGeminiKeySaved ? "key"
+            : !session.Account.IsSignedIn ? "signin"
             : session.GenerationProgress is not null ? "progress"
             : session.IsBusy ? "working"
-            : session.IsTestingGemini ? "testing"
             : session.GenerationError is { } failure ? "error:" + failure.GetHashCode()
             : session.ExportSummary is { } summary ? "done:" + summary
             : session.ExportChoice is not null ? "export" : "";
@@ -27,19 +26,19 @@ public sealed partial class PrismWindow
         if (!blocked) return;
         var card = desired switch
         {
-            "key" => KeyGate(), "progress" => ProgressCard(), "working" => WorkingCard(), "testing" => WorkingCard(true), "export" => ExportCard(),
+            "signin" => SignInGate(), "progress" => ProgressCard(), "working" => WorkingCard(), "export" => ExportCard(),
             _ when desired.StartsWith("error:", StringComparison.Ordinal) => ErrorCard(session.GenerationError!),
             _ when desired.StartsWith("done:", StringComparison.Ordinal) => ExportDoneCard(session.ExportSummary!),
             _ => localCard!,
         };
         var dim = Column(0);
         dim.AddCssClass("scrim");
-        if (desired == "key") dim.AddCssClass("gate");
+        if (desired == "signin") dim.AddCssClass("gate");
         dim.Hexpand = true;
         dim.Vexpand = true;
         var above = Column(0); above.Vexpand = true;
         var below = Column(0); below.Vexpand = true;
-        card.SetSizeRequest(desired == "key" ? 500 : 460, -1);
+        card.SetSizeRequest(460, -1);
         var viewport = Scroll(card);
         viewport.Vexpand = false;
         viewport.Hexpand = false;
@@ -81,33 +80,33 @@ public sealed partial class PrismWindow
         return row;
     }
 
-    Gtk.Box KeyGate()
+    /// Until someone signs in, Prism's AI can't run, so this card covers the app. It signs in or creates the account in place.
+    Gtk.Box SignInGate()
     {
         var card = Column(14);
         card.AddCssClass("modal");
         card.Append(BrandMark());
-        card.Append(Text("Prism uses Google Gemini to find, cut, caption and frame your Shorts, so it needs your own Gemini API key before it can work. Google bills your AI Studio account for what Prism uses; the free tier works too.", "muted"));
-        card.Append(Text("1. Create a key"));
-        card.Append(Button("Open Google AI Studio › API keys", () => LinuxPlatform.OpenExternal("https://aistudio.google.com/apikey")));
-        card.Append(Text("2. Paste it here"));
-        var key = Entry(session.GeminiKey, "Paste your API key", value => session.GeminiKey = value);
-        key.Visibility = false;
-        key.OnActivate += async (_, _) => { if (!session.IsTestingGemini) await session.VerifyAndSaveGeminiKey(); };
-        card.Append(key);
-        var feedback = Text(session.GeminiKeyStatus, "muted");
-        card.Append(feedback);
-        card.Append(Text("The key stays in your desktop keyring, or a private configuration file when the keyring is unavailable. Audio, transcripts and sampled frames from your videos are sent to Google.", "muted"));
-        var save = Button("Save and continue", async () => await session.VerifyAndSaveGeminiKey(), "primary");
-        save.Halign = Gtk.Align.End;
-        card.Append(save);
+        card.Append(Label("Sign in to Prism", "d20"));
+        card.Append(Text("Sign in or create a free account to start. Prism's AI runs on our server, so you don't need an API key.", "muted"));
+        var account = session.Account;
+        var address = Entry("", "Email");
+        var password = Entry("", "Password (at least 6 characters)");
+        password.Visibility = false;
+        var status = Text("", "muted");
+        async Task SignIn() { await account.SignIn(address.GetText(), password.GetText()); if (account.IsSignedIn) password.SetText(""); }
+        var signIn = Button("Sign in", SignIn, "primary");
+        var create = Button("Create account", async () => { await account.SignUp(address.GetText(), password.GetText()); password.SetText(""); });
+        password.OnActivate += async (_, _) => { if (signIn.Sensitive) await SignIn(); };
+        card.Append(address); card.Append(password); card.Append(status);
+        card.Append(Footer(create, signIn));
         updateModal = () =>
         {
-            feedback.SetText(session.GeminiKeyStatus);
-            if (session.GeminiKeyRejected) feedback.AddCssClass("warning"); else feedback.RemoveCssClass("warning");
-            save.Sensitive = !session.IsTestingGemini && !string.IsNullOrWhiteSpace(session.GeminiKey);
-            key.Sensitive = !session.IsTestingGemini;
+            status.SetText(account.Status); status.Visible = account.Status.Length > 0;
+            signIn.Label = account.IsWorking ? "Signing in…" : "Sign in";
+            signIn.Sensitive = create.Sensitive = !account.IsWorking && address.GetText().Trim().Length > 0 && password.GetText().Length > 0;
         };
-        OnUI(() => { if (!disposed && modalKind == "key") key.GrabFocus(); });
+        address.OnChanged += (_, _) => updateModal?.Invoke(); password.OnChanged += (_, _) => updateModal?.Invoke();
+        OnUI(() => { if (!disposed && modalKind == "signin") address.GrabFocus(); });
         return card;
     }
 
@@ -125,7 +124,7 @@ public sealed partial class PrismWindow
         var detail = Label("", "mono");
         card.Append(top);
         card.Append(progress);
-        card.Append(Text(session.IsExporting ? "Your files are being prepared for export." : "Gemini finds complete moments, aligns speech and follows the subject.", "muted"));
+        card.Append(Text(session.IsExporting ? "Your files are being prepared for export." : "Prism AI finds complete moments, aligns speech and follows the subject.", "muted"));
         var cancel = Button("Cancel", session.CancelGeneration);
         card.Append(Footer(detail, cancel));
         updateModal = () =>
@@ -139,39 +138,38 @@ public sealed partial class PrismWindow
         return card;
     }
 
-    Gtk.Box WorkingCard(bool testing = false)
+    Gtk.Box WorkingCard()
     {
-        var card = ModalCard(testing ? "Checking Gemini…" : "Working…");
+        var card = ModalCard("Working…");
         var spinner = Gtk.Spinner.New();
         spinner.Start();
         spinner.Halign = Gtk.Align.Center;
         card.Append(spinner);
         var message = Text(session.Message);
         card.Append(message);
-        updateModal = () => message.SetText(testing ? session.GeminiKeyStatus : session.Message);
+        updateModal = () => message.SetText(session.Message);
         return card;
     }
 
     Gtk.Box ErrorCard(GenerationFailure failure)
     {
-        var title = failure.IsExport ? "Export failed" : failure.Kind switch
+        var (title, advice) = failure.IsExport ? ("Export failed", null) : failure.Kind switch
         {
-            GenerationFailureKind.NoMoments => "No Shorts found", GenerationFailureKind.Settings => "Check your Gemini settings",
-            GenerationFailureKind.Temporary => "Gemini is unavailable right now", _ => "Couldn’t make Shorts",
+            GenerationFailureKind.NoMoments => ("No Shorts found", "Change the clip length or which part of the video Prism looks in, then try again."),
+            GenerationFailureKind.Settings => ("Check your Prism AI settings", null),
+            GenerationFailureKind.Temporary => ("Prism AI is unavailable right now",
+                "This is a temporary problem with the AI service, not with your video or its range. Prism already retried for about a minute and tried the other Prism AI models too. Wait a little, then try again."),
+            GenerationFailureKind.Limit => ("Usage limit reached", "Shorts you already made stay available, and you can keep editing and exporting them."),
+            _ => ("Couldn’t make Shorts", (string?)null),
         };
         var card = ModalCard(title, "dialog-warning-symbolic", "warning");
         card.Append(Text(failure.Message));
-        if (!failure.IsExport && failure.Kind == GenerationFailureKind.NoMoments)
-            card.Append(Text("Change the clip length or which part of the video Prism looks in, then try again.", "muted"));
-        if (!failure.IsExport && failure.Kind == GenerationFailureKind.Temporary)
-            card.Append(Text("This is a temporary problem on Google’s side, not with your video or its range. Prism already retried for about a minute and tried the other Gemini models too. Wait a little, then try again.", "muted"));
+        if (advice is not null) card.Append(Text(advice, "muted"));
         var buttons = new List<Gtk.Widget>();
         if (failure.IsExport)
             buttons.Add(Button("Export options", () => { session.GenerationError = null; session.ChooseExport(); }, "primary"));
-        else
+        else if (failure.Kind != GenerationFailureKind.Limit)
         {
-            if (failure.Kind == GenerationFailureKind.Temporary)
-                buttons.Add(Button("Change model", () => { session.GenerationError = null; Navigate(Screen.Settings); }));
             buttons.Add(Button("Try again", async () => { session.GenerationError = null; await session.MakeConfiguredShorts(); },
                 failure.Kind is GenerationFailureKind.Temporary or GenerationFailureKind.Other ? "primary" : null));
             if (failure.Kind is GenerationFailureKind.Settings or GenerationFailureKind.NoMoments)

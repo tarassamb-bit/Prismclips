@@ -25,28 +25,31 @@ static class TestSetup
     }
 }
 
-/// A fake Gemini: answers queued payloads with queued statuses and records which model each request went to.
+/// A fake Prism AI server: answers queued payloads with queued statuses and checks every request carries the session and its video.
 sealed class FakeGemini : HttpMessageHandler
 {
     public readonly Queue<int> Statuses = new();
     public readonly Queue<string> Payloads = new();
     public readonly List<string> Bodies = [];
-    public readonly List<string> Models = [];
     public int DefaultStatus = 200;
     public string Finish = "STOP";
     public string? ErrorBody;
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        Assert.Null(request.RequestUri!.Query is { Length: > 0 } ? request.RequestUri.Query : null);
-        Assert.Equal("test-key", request.Headers.GetValues("x-goog-api-key").Single());
+        Assert.Equal(Gemini.GatewayUrl, request.RequestUri);
+        Assert.Equal("Bearer test-token", request.Headers.Authorization?.ToString());
+        Assert.Equal(Account.PublishableKey, request.Headers.GetValues("apikey").Single());
+        Assert.Equal(Usage.Video, request.Headers.GetValues("x-prism-video").Single());
+        Assert.Equal("1.5", request.Headers.GetValues("x-prism-minutes").Single());
+        Assert.Equal(Usage.Day, request.Headers.GetValues("x-prism-day").Single());
+        Assert.Equal(Usage.Run is null, !request.Headers.Contains("x-prism-run"));
         string body = await request.Content!.ReadAsStringAsync(cancellationToken);
         int status;
         string payload;
         lock (this)
         {
             Bodies.Add(body);
-            Models.Add(request.RequestUri.Segments[^1].Split(':')[0]);
             status = Statuses.Count > 0 ? Statuses.Dequeue() : DefaultStatus;
             payload = Payloads.Count > 0 ? Payloads.Dequeue() : """{"ok":true}""";
         }
@@ -61,7 +64,8 @@ sealed class FakeGemini : HttpMessageHandler
         return new HttpResponseMessage((HttpStatusCode)status) { Content = new StringContent(text, Encoding.UTF8, "application/json") };
     }
 
-    public GeminiConfiguration Configuration(string model = "gemini-3.1-flash-lite") => new("test-key", model) { Handler = this };
+    public GeminiUsage Usage = new(new string('a', 64), 1.5, "2026-10-30");
+    public GeminiConfiguration Configuration() => new(() => Task.FromResult<string?>("test-token"), Usage) { Handler = this };
 }
 
 /// Test media made with ffmpeg's built-in sources.

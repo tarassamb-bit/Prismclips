@@ -11,7 +11,6 @@ namespace Prism.Windows;
 /// <summary>The Windows shell and user-scoped credential store. No macOS paths are used.</summary>
 public sealed class WindowsPlatform : IPlatform
 {
-    public IKeyStore KeyStore { get; } = new WindowsKeyStore();
     public IKeyStore AccountStore { get; } = new WindowsKeyStore("account", "Prism.Account");
     static readonly Guid DownloadsId = new("374DE290-123F-4565-9164-39C4925E467B");
 
@@ -87,7 +86,7 @@ public sealed class WindowsPlatform : IPlatform
     [DllImport("shell32.dll")] static extern int SHOpenFolderAndSelectItems(IntPtr folder, uint count, [In] IntPtr[] items, uint flags);
 }
 
-public sealed class WindowsKeyStore(string name = "gemini", string entropy = "Prism.Gemini") : IKeyStore
+public sealed class WindowsKeyStore(string name, string entropy) : IKeyStore
 {
     readonly byte[] Entropy = Encoding.UTF8.GetBytes(entropy);
     string KeyPath => Path.Combine(AppPaths.Config, name + ".key");

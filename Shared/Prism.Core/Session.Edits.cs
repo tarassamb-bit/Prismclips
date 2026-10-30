@@ -93,12 +93,11 @@ public sealed partial class AppSession
             });
             return;
         }
-        if (GeminiConfiguration() is not { } configuration) { Message = "Save your Google AI Studio key in Settings first."; return; }
+        if (GeminiConfiguration(video) is not { } configuration) { Message = "Sign in to your Prism account in Settings first."; return; }
         var target = PrismJson.Clone(active);
         var projectId = project!.Id;
-        ModelFallbackNote = null;
         IsBusy = true;
-        Message = "Gemini is finding both speakers…";
+        Message = "Prism AI is finding both speakers…";
         try
         {
             var centers = await ShortMaker.FindSplitCenters(video.Path, target.Start, target.Duration, configuration);
@@ -111,9 +110,9 @@ public sealed partial class AppSession
                     segment.SplitScreen = true;
                     segment.CaptionPosition = CaptionPosition.Middle;
                     segment.SplitCenters = centers;
-                    return WithModelNote(centers is null
+                    return centers is null
                         ? "Split screen on. Couldn't find two faces, so the left half is on top and the right half on the bottom."
-                        : "Split screen: each speaker is centered in their half, captions in the middle.");
+                        : "Split screen: each speaker is centered in their half, captions in the middle.";
                 });
                 if (reply is null) Message = "The Short was removed before split screen was ready.";
                 else Message = reply;
@@ -141,12 +140,11 @@ public sealed partial class AppSession
     {
         if (IsBusy || ActiveSegment is not { } active || project?.Media.FirstOrDefault(m => m.Id == active.MediaId) is not { } video)
         { Message = "Select a Short before generating subtitles."; return; }
-        if (GeminiConfiguration() is not { } configuration) { Message = "Save your Google AI Studio key in Settings first."; return; }
+        if (GeminiConfiguration(video) is not { } configuration) { Message = "Sign in to your Prism account in Settings first."; return; }
         var target = PrismJson.Clone(active);
         var projectId = project!.Id;
-        ModelFallbackNote = null;
         IsBusy = true;
-        Message = "Gemini is transcribing this Short…";
+        Message = "Prism AI is transcribing this Short…";
         try
         {
             var cloud = await GeminiSelection.RegenerateCaptions(video.Path, (target.Start, target.Start + target.Duration), configuration);
@@ -164,7 +162,7 @@ public sealed partial class AppSession
                     segment.Captions = cues;
                     segment.SpeechWords = words;
                     segment.CaptionNotice = cloud.Notice;
-                    return WithModelNote($"Added {cues.Count} timed subtitle phrases." + (cloud.Notice is null ? "" : " " + cloud.Notice));
+                    return $"Added {cues.Count} timed subtitle phrases." + (cloud.Notice is null ? "" : " " + cloud.Notice);
                 });
                 Message = reply is null ? "The Short was removed before its subtitles were ready."
                     : reply.StartsWith("Could not save the edit:", StringComparison.Ordinal)
@@ -416,7 +414,7 @@ public sealed partial class AppSession
     public void RetrackSelectedSubject()
     {
         if (IsBusy || ActiveSegment is not { } clip) return;
-        var reply = ApplyEdit(clip.Id, false, (segment, _) => { segment.CropTrackingVersion = 0; return "Gemini is tracking the subject…"; });
+        var reply = ApplyEdit(clip.Id, false, (segment, _) => { segment.CropTrackingVersion = 0; return "Prism AI is tracking the subject…"; });
         if (reply is not null) Message = reply.StartsWith("Could not save the edit:", StringComparison.Ordinal)
             ? "Could not refresh subject tracking:" + reply["Could not save the edit:".Length..] : reply;
     }
@@ -474,31 +472,26 @@ public sealed partial class AppSession
         ChatInput = "";
         Say(true, text);
         if (project?.Media.Count is not > 0) { Say(false, "Import a video first, then I can edit it."); return; }
-        if (GeminiConfiguration() is not { } configuration)
-        { Message = "Save your Google AI Studio key in Settings first."; Say(false, Message); return; }
-        var media = project.Media.FirstOrDefault();
         var segment = ActiveSegment ?? project.Segments.FirstOrDefault();
+        var media = project.Media.FirstOrDefault(m => m.Id == segment?.MediaId) ?? project.Media.FirstOrDefault(m => m.Id == selection) ?? project.Media[0];
+        if (GeminiConfiguration(media) is not { } configuration)
+        { Message = "Sign in to your Prism account in Settings first."; Say(false, Message); return; }
         var summary = $"video {FormatSeconds(media?.Duration ?? 0)}; current edit {FormatSeconds(segment?.Duration ?? 0)}; caption {segment?.Caption ?? "none"}";
         var conversation = string.Join(" / ", chatMessages.SkipLast(1).TakeLast(6).Select(m => (m.IsUser ? "User: " : "Assistant: ") + m.Text));
-        ModelFallbackNote = null;
         IsBusy = true;
-        Message = "Gemini is planning your edit…";
+        Message = "Prism AI is planning your edit…";
         try
         {
             var command = await GeminiSelection.Interpret(text, summary, conversation, configuration);
             await UI(() =>
             {
                 IsBusy = false;
-                // The planning model note is its own message, even when the command starts another task.
-                var note = ModelFallbackNote;
-                ModelFallbackNote = null;
                 ExecuteAICommand(command, text);
-                if (note is not null) Say(false, note);
             });
         }
         catch (Exception error)
         {
-            await UI(() => { IsBusy = false; Message = "Gemini could not plan this edit: " + error.Message; Say(false, Message); });
+            await UI(() => { IsBusy = false; Message = "Prism AI could not plan this edit: " + error.Message; Say(false, Message); });
         }
     }
 
@@ -677,7 +670,7 @@ public sealed partial class AppSession
         }
         else if (Any("short", "analy", "best moment"))
         {
-            Say(false, "Gemini is analyzing the video for a complete moment.");
+            Say(false, "Prism AI is analyzing the video for a complete moment.");
             _ = MakeShort(requestedDuration: Number(text, "short", "make", "create"));
         }
         else if (Has("export"))

@@ -16,6 +16,8 @@ public sealed class MediaItem
     public string Note { get; set; } = "";
     public int Priority { get; set; } = 50;
     public DateTime Created { get; set; } = DateTime.UtcNow;
+    /// <summary>SHA-256 of the file's bytes, worked out after import; it names the video to Prism's server (<see cref="UsageLimit.ServerKey"/>).</summary>
+    public string? ContentHash { get; set; }
 
     [JsonIgnore] public string Name => FileName(Path);
     /// <summary>Managed projects can have paths saved on either Windows or a Unix system.</summary>

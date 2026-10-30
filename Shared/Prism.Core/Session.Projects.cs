@@ -361,6 +361,8 @@ public sealed partial class AppSession
             IsBusy = false;
             return;
         }
+        // The hash names the video to Prism's server; without one (unreadable file) it keeps its name-based usage key.
+        item.ContentHash = await HashOrNull(copied);
         // "Choose a different video" before any Shorts exist replaces the first pick; otherwise the project kept the rejected
         // copy and was named after it.
         var previousMedia = project.Media.ToList();
@@ -394,6 +396,12 @@ public sealed partial class AppSession
     }
 
     /// <summary>Reads a video's length, size and audio, and saves a thumbnail; null for files that aren't playable video.</summary>
+    static async Task<string?> HashOrNull(string path)
+    {
+        try { return await Task.Run(() => UsageLimit.ContentHash(path)); }
+        catch (Exception) { return null; }
+    }
+
     public static async Task<MediaItem?> Inspect(string path, string thumbnailDirectory)
     {
         if (!VideoExtensions.Contains(Path.GetExtension(path).TrimStart('.').ToLowerInvariant()) || !FFmpeg.IsAvailable) return null;

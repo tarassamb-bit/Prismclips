@@ -176,7 +176,7 @@ public sealed partial class PrismWindow
             cards[style] = (card, check);
         }
         page.Children.Add(AdaptiveGrid(190, cards.Values.Select(item => (UIElement)item.Card), 14));
-        var note = Text("This style follows each spoken word. Gemini times the words; if a clip has none, its captions show as whole phrases.", 12, muted: true);
+        var note = Text("This style follows each spoken word. Prism AI times the words; if a clip has none, its captions show as whole phrases.", 12, muted: true);
         page.Children.Add(note);
         page.Children.Add(StepFooter("Back to settings", 0, Button("Next: Choose content type", () => { createStep = 2; InvalidateScreen(); }, true, icon: "\uE76C")));
         updateScreen = () =>

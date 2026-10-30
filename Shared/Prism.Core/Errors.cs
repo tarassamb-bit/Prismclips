@@ -15,36 +15,36 @@ public sealed class ShortMakerException(ShortMakerFailure failure, string? detai
     };
 }
 
-public enum GeminiFailure { InvalidConfiguration, Request, InvalidResponse, InvalidTiming, NoDistinctClips, NoStrongClips, AudioExport, RequestTooLarge }
+public enum GeminiFailure { SignIn, UsageLimit, Request, InvalidResponse, InvalidTiming, NoDistinctClips, NoStrongClips, AudioExport, RequestTooLarge }
 
-public sealed class GeminiException(GeminiFailure failure, int status = 0) : Exception(Describe(failure, status))
+/// <param name="reason">The server's own explanation, shown instead of the generic text when it sent one.</param>
+public sealed class GeminiException(GeminiFailure failure, int status = 0, string? reason = null) : Exception(reason ?? Describe(failure, status))
 {
     public GeminiFailure Failure { get; } = failure;
-    /// <summary>The HTTP status for <see cref="GeminiFailure.Request"/>.</summary>
+    /// <summary>The HTTP status for <see cref="GeminiFailure.Request"/> and <see cref="GeminiFailure.UsageLimit"/>.</summary>
     public int Status { get; } = status;
 
     static string Describe(GeminiFailure failure, int status) => failure switch
     {
-        GeminiFailure.AudioExport => "Could not prepare audio for Gemini. Your existing Shorts were kept.",
-        GeminiFailure.RequestTooLarge => "This Gemini request exceeds the safe upload size. Choose a shorter source region.",
+        GeminiFailure.SignIn => "Sign in to your Prism account to use Prism AI.",
+        GeminiFailure.UsageLimit => "You've reached your beta usage limit. Ask for a promo code to get more, then enter it in Settings › Usage.",
+        GeminiFailure.AudioExport => "Could not prepare audio for Prism AI. Your existing Shorts were kept.",
+        GeminiFailure.RequestTooLarge => "This Prism AI request exceeds the safe upload size. Choose a shorter source region.",
         GeminiFailure.NoDistinctClips => "No new distinct moments were found in this range. Try another region or length. Your existing clips were kept.",
         GeminiFailure.NoStrongClips => "Prism could not find a strong, self-contained Short in this part of the video. Try another part of the video or a different clip length.",
-        GeminiFailure.InvalidTiming => "Gemini returned speech timestamps that could not be aligned safely.",
-        GeminiFailure.InvalidConfiguration => "Add your Google AI Studio key and a valid model name in Settings.",
+        GeminiFailure.InvalidTiming => "Prism AI returned speech timestamps that could not be aligned safely.",
         GeminiFailure.Request => status switch
         {
-            400 => "Gemini rejected this request. Check that the selected model supports audio, images and structured output.",
-            401 or 403 => "Google rejected the API key or model access. Check your key in Settings.",
-            404 => "This Gemini model is unavailable. Choose another model in Settings.",
-            429 => "Google’s quota or rate limit was reached. Check your AI Studio quota before retrying.",
-            503 => "Google’s servers for this Gemini model are overloaded right now (HTTP 503). This is not your quota or rate limit.",
-            _ => $"Google could not complete the request (HTTP {status}). Please try again.",
+            401 or 403 => "Your Prism sign-in was not accepted. Sign in again in Settings › Account.",
+            429 => "Prism AI is handling too many requests right now. Wait a moment, then try again.",
+            503 => "Prism AI is overloaded right now (HTTP 503). Wait a moment, then try again.",
+            _ => $"Prism AI could not complete the request (HTTP {status}). Please try again.",
         },
-        _ => "Gemini returned an incomplete or invalid response. Your existing edits were kept.",
+        _ => "Prism AI returned an incomplete or invalid response. Your existing edits were kept.",
     };
 }
 
-/// A failure in one stage of a long run, kept whole so the app can tell a busy server from a bad key or an unusable range.
+/// A failure in one stage of a long run, kept whole so the app can tell a busy server from a sign-in problem or an unusable range.
 public sealed class StageFailure(string stage, Exception underlying) : Exception($"{stage}: {underlying.Message} Your existing clips were kept.", underlying)
 {
     public string Stage { get; } = stage;

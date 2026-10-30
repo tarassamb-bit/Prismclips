@@ -196,7 +196,7 @@ public sealed partial class PrismWindow
             grid.Append(card);
         }
         page.Append(grid);
-        var note = Text("This style follows each spoken word. Gemini times the words; if a clip has none, its captions show as whole phrases.", "muted");
+        var note = Text("This style follows each spoken word. Prism AI times the words; if a clip has none, its captions show as whole phrases.", "muted");
         note.MarginTop = 12;
         page.Append(note);
         page.Append(StepFooter("Back to settings", 0, IconText("go-next-symbolic", "Next: Choose content type", () => { createStep = 2; InvalidateScreen(); }, "primary")));
