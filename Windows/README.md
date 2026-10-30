@@ -41,6 +41,10 @@ Use `win-arm64` for Windows on ARM. Keep the complete output folder, including l
 
 The project uses `EnableWindowsTargeting` and can compile on macOS/Linux. WPF can only run on Windows.
 
+## Preview from a Mac
+
+`zsh Windows/preview.sh` runs the last commit on a GitHub Windows machine and opens its screen in your browser (`.github/workflows/windows-preview.yml`). The first run creates the `PREVIEW_PASSWORD` secret and keeps it in the Mac Keychain. Needs `gh` signed in with write access to the repo. Ctrl+C ends the session; it stops by itself after 3 hours. The screen has no GPU, so animations are slower than on a real PC.
+
 ## Files and desktop behavior
 
 - Projects: `%LOCALAPPDATA%\Prism\Library\Projects`.

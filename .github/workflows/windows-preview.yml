@@ -1,0 +1,62 @@
+# Runs the real Windows app on a GitHub Windows machine and shows its screen in your browser (TightVNC + noVNC over a Cloudflare tunnel).
+# Start it from the Mac with:  zsh Windows/preview.sh   (pushes the current commit to the windows-preview branch)
+# Logs are public: the tunnel link is only shown encrypted with the PREVIEW_PASSWORD secret, which also guards the screen.
+name: Windows preview
+
+on:
+  push:
+    branches: [windows-preview]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-preview
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    env:
+      PREVIEW_PASSWORD: ${{ secrets.PREVIEW_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: "10.0.x" }
+      - name: Publish Prism
+        run: dotnet publish Windows/Prism.Windows -c Release -r win-x64 --self-contained -p:DebugType=none -o dist/windows
+      - name: Add ffmpeg
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg
+          $root = Get-ChildItem ffmpeg -Directory | Select-Object -First 1
+          Copy-Item "$($root.FullName)\bin\ffmpeg.exe", "$($root.FullName)\bin\ffprobe.exe" dist/windows/
+      - name: Start the screen server and tunnel
+        shell: pwsh
+        run: |
+          if (-not $env:PREVIEW_PASSWORD) { throw "The PREVIEW_PASSWORD repository secret is missing; zsh Windows/preview.sh sets it." }
+          # Prism opens at 1440x920; the runner's default 1024x768 desktop would clip it.
+          try { Set-DisplayResolution -Width 1920 -Height 1080 -Force } catch { Write-Warning "Screen keeps its default size: $_" }
+          # Loopback must be allowed: websockify reaches the VNC server on localhost.
+          choco install tightvnc -y --no-progress --ia "ADDLOCAL=Server SET_USEVNCAUTHENTICATION=1 VALUE_OF_USEVNCAUTHENTICATION=1 SET_PASSWORD=1 VALUE_OF_PASSWORD=$env:PREVIEW_PASSWORD SET_ALLOWLOOPBACK=1 VALUE_OF_ALLOWLOOPBACK=1 SET_ACCEPTHTTPCONNECTIONS=1 VALUE_OF_ACCEPTHTTPCONNECTIONS=0"
+          python -m pip install --quiet websockify
+          Invoke-WebRequest https://github.com/novnc/noVNC/archive/refs/tags/v1.5.0.zip -OutFile novnc.zip
+          Expand-Archive novnc.zip -DestinationPath .
+          Start-Process python -ArgumentList "-m", "websockify", "--web", "noVNC-1.5.0", "6080", "localhost:5900" -WindowStyle Hidden -RedirectStandardError websockify.log
+          Invoke-WebRequest https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe -OutFile cloudflared.exe
+          Start-Process ./cloudflared.exe -ArgumentList "tunnel", "--no-autoupdate", "--url", "http://localhost:6080" -WindowStyle Hidden -RedirectStandardError tunnel.log
+          foreach ($i in 1..60) { if (Select-String -Path tunnel.log -Pattern 'trycloudflare\.com' -Quiet) { exit 0 }; Start-Sleep 2 }
+          throw "The Cloudflare tunnel did not start."
+      - name: Publish the encrypted link
+        shell: bash
+        run: |
+          url=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel.log | head -1)
+          echo "::notice title=preview::$(printf %s "$url" | openssl enc -aes-256-cbc -pbkdf2 -md sha256 -a -A -pass env:PREVIEW_PASSWORD)"
+      - name: Start Prism
+        shell: pwsh
+        run: Start-Process dist/windows/Prism.exe -WorkingDirectory dist/windows
+      - name: Keep the machine on (cancel the run to stop)
+        shell: pwsh
+        run: while ($true) { Start-Sleep 60 }
