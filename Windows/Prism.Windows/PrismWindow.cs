@@ -63,6 +63,7 @@ public sealed partial class PrismWindow : Window
         Activated += (_, _) => TintCaption(); Deactivated += (_, _) => TintCaption();
         SourceInitialized += (_, _) => { TintTitleBar(); System.Windows.Interop.HwndSource.FromHwnd(new System.Windows.Interop.WindowInteropHelper(this).Handle)?.AddHook(CaptionHook); };
         session = new AppSession(new WindowsPlatform());
+        updater = CreateUpdater();
         InstallStyles();
         ApplyTheme();
         SetResourceReference(BackgroundProperty, "Surface0");
@@ -71,8 +72,15 @@ public sealed partial class PrismWindow : Window
         editor = new WindowsEditor(session, this);
         editor.Error += message => ShowNotice("Could not complete action", message);
         var root = new Grid();
+        root.RowDefinitions.Add(new RowDefinition());
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.Children.Add(layout);
-        root.Children.Add(overlayHost);
+        root.Children.Add(updateBanner);
+        root.Children.Add(tutorialShade);
+        tutorialCoach.SetResourceReference(Border.BackgroundProperty, "Surface1"); tutorialCoach.SetResourceReference(Border.BorderBrushProperty, "Line");
+        Grid.SetRow(tutorialCoach, 1); root.Children.Add(tutorialCoach);
+        Grid.SetRowSpan(overlayHost, 2); root.Children.Add(overlayHost);
+        LayoutUpdated += (_, _) => PlaceSpotlight();
         (minimize, maximize, close) = (CaptionButton("\uE921", "Minimize"), CaptionButton("\uE922", "Maximize"), CaptionButton("\uE8BB", "Close"));
         minimize.Click += (_, _) => WindowState = WindowState.Minimized;
         maximize.Click += (_, _) => ToggleMaximize();
@@ -118,6 +126,7 @@ public sealed partial class PrismWindow : Window
         activityTimer.Tick += (_, _) => { if (modalKind is "progress" or "working" or "testing") updateModal?.Invoke(); };
         activityTimer.Start();
         RestartResourceTimer();
+        StartUpdates();
         Refresh();
     }
 
@@ -156,7 +165,7 @@ public sealed partial class PrismWindow : Window
         {
             Screen.Home => $"home:{homeRevision}:{showAll}:{showUnfinished}:{openFolder}",
             Screen.Create or Screen.ImportSource => $"create:{createStep}:{session.ShortsSource?.Id}",
-            Screen.Settings => $"settings:{settingsCategory}:{session.Account.IsSignedIn}", _ => "editor",
+            Screen.Settings => $"settings:{settingsCategory}:{session.Account.IsSignedIn}:{updater.ReadyVersion}:{updater.AvailableVersion}:{updater.CheckResult}", _ => "editor",
         };
         if (renderedScreen != key)
         {
@@ -182,6 +191,8 @@ public sealed partial class PrismWindow : Window
                 ShowNotice("Could not complete action", lastMessage);
         }
         RefreshModal();
+        RefreshBanner();
+        UpdateTutorial();
     }
 
     void InvalidateScreen() { renderedScreen = ""; Refresh(); }

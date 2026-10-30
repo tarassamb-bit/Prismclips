@@ -47,6 +47,8 @@ public sealed class WindowsEditor : IDisposable
     bool resumePlayback, previewSuspended, updatingSeek, disposed, expanded, noticeRetry;
 
     public UIElement Widget => root;
+    /// <summary>What each step of the editor tour highlights.</summary>
+    public Dictionary<FirstRunTutorial.Step, FrameworkElement> TutorialTargets { get; }
     public event Action<string>? Error;
 
     public WindowsEditor(AppSession session, Window window)
@@ -152,7 +154,9 @@ public sealed class WindowsEditor : IDisposable
         rightPanel = Panel(captionPanel, new Thickness(1, 0, 0, 0)); Add(panes, rightPanel, 0, 4); Add(root, panes, 1);
         timelineSplitter = new GridSplitter { Height = 5, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch, ResizeDirection = GridResizeDirection.Rows, ResizeBehavior = GridResizeBehavior.PreviousAndNext, ShowsPreview = true, Background = Brushes.Transparent, Cursor = Cursors.SizeNS };
         Add(root, timelineSplitter, 2);
-        timeline = new WindowsTimeline(session); Add(root, Panel(timeline.Widget, new Thickness(0, 1, 0, 0)), 3);
+        timeline = new WindowsTimeline(session); var timelinePanel = Panel(timeline.Widget, new Thickness(0, 1, 0, 0)); Add(root, timelinePanel, 3);
+        TutorialTargets = new() { [FirstRunTutorial.Step.Shorts] = leftPanel, [FirstRunTutorial.Step.Preview] = viewer, [FirstRunTutorial.Step.Editing] = rightPanel,
+            [FirstRunTutorial.Step.Timeline] = timelinePanel, [FirstRunTutorial.Step.Export] = export };
         var footer = new DockPanel { Height = 28, Margin = new Thickness(16, 0, 16, 0) };
         var format = Text("Shorts export at 1080 × 1920 · MP4", 11, true); format.SetResourceReference(TextBlock.FontFamilyProperty, "MonoFont"); DockPanel.SetDock(format, Dock.Right); footer.Children.Add(format);
         status.FontSize = 11; status.TextWrapping = TextWrapping.NoWrap; status.TextTrimming = TextTrimming.CharacterEllipsis; status.SetResourceReference(TextBlock.ForegroundProperty, "Ink"); footer.Children.Add(status);
@@ -565,7 +569,7 @@ public sealed class WindowsEditor : IDisposable
     void OnKeyDown(object sender, KeyEventArgs args)
     {
         if (disposed || session.Screen != Screen.Editor || !root.IsEnabled || !session.Account.IsSignedIn || session.IsBusy
-            || session.ExportChoice is not null || session.ExportSummary is not null || session.GenerationError is not null || session.PendingPaidRun is not null || Typing()) return;
+            || session.ExportChoice is not null || session.ExportSummary is not null || session.GenerationError is not null || session.PendingPaidRun is not null || session.Tutorial.IsActive || Typing()) return;
         try
         {
             var shift = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);

@@ -148,6 +148,8 @@ public static class AppPaths
     }
 }
 
+public sealed record ReleaseRecord(string Version, List<string> Notes);
+
 /// App settings that macOS keeps in UserDefaults, saved as one JSON file.
 public sealed class AppSettings
 {
@@ -165,7 +167,14 @@ public sealed class AppSettings
     public bool MainVideoCollapsed { get; set; }
     public bool CaptionStyleCollapsed { get; set; }
     public bool CaptionTextCollapsed { get; set; }
-
+    /// <summary>Accounts (lowercased emails) that finished the first-video tutorial on this computer.</summary>
+    public List<string> TutorialCompletedAccounts { get; set; } = [];
+    /// <summary>Every version this computer has run, oldest first, with its release notes; Settings › Updates lists them.</summary>
+    public List<ReleaseRecord> UpdateHistory { get; set; } = [];
+    /// <summary>The update being installed and its notes, so the relaunched app can say what changed.</summary>
+    public string? PendingUpdateVersion { get; set; }
+    public List<string> PendingUpdateNotes { get; set; } = [];
+    public DateTime? LastUpdateCheck { get; set; }
 
     static string FilePath => System.IO.Path.Combine(AppPaths.Config, "settings.json");
 
@@ -175,6 +184,9 @@ public sealed class AppSettings
         {
             var settings = PrismJson.Deserialize<AppSettings>(File.ReadAllText(FilePath)) ?? new AppSettings();
             settings.RecentProjects ??= [];
+            settings.TutorialCompletedAccounts ??= [];
+            settings.UpdateHistory = (settings.UpdateHistory ?? []).Where(release => release is { Version.Length: > 0 }).ToList();
+            settings.PendingUpdateNotes ??= [];
             settings.ProjectFolders = (settings.ProjectFolders ?? []).Where(folder => folder is not null).ToList();
             foreach (var folder in settings.ProjectFolders) { folder.ProjectPaths ??= []; folder.Name ??= "Folder"; }
             if (!Enum.IsDefined(settings.ExportQuality)) settings.ExportQuality = ExportQuality.Full;

@@ -336,6 +336,7 @@ public sealed partial class AppSession
                 Message = resultMessage;
                 Say(false, Message);
                 SelectPreview(fresh[0].Id);
+                Tutorial.DidCreateVideo();
             }).ConfigureAwait(false);
         }
         catch (Exception error)

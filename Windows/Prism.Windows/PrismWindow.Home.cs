@@ -87,6 +87,7 @@ public sealed partial class PrismWindow
         hero.SetResourceReference(StyleProperty, "Hero"); hero.SetResourceReference(BackgroundProperty, "Action");
         hero.Foreground = OnAction; hero.BorderThickness = new Thickness(0); hero.MinHeight = 86; hero.Padding = new Thickness(22, 16, 26, 16); hero.Margin = new Thickness(0);
         hero.ToolTip = "Start creating · Ctrl+N"; hero.HorizontalAlignment = HorizontalAlignment.Stretch; AutomationProperties.SetName(hero, "Start creating");
+        TutorialTarget(FirstRunTutorial.Step.Start, hero);
         var body = new Grid();
         foreach (var width in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto }) body.ColumnDefinitions.Add(new ColumnDefinition { Width = width });
         var plus = PlusTile(30, 15); plus.Margin = new Thickness(0, 0, 18, 0); body.Children.Add(plus);

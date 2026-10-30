@@ -29,6 +29,8 @@ public sealed partial class AppSession : INotifyPropertyChanged, IDisposable
     public AppSettings Settings { get; }
     /// <summary>The Prism account: Prism AI needs it, and it counts exports on the website.</summary>
     public Account Account { get; }
+    /// <summary>The first-video tutorial, kept per account.</summary>
+    public FirstRunTutorial Tutorial { get; }
 
     /// <param name="network">Tests answer the account and Prism AI with a fake server; the app uses the real network.</param>
     public AppSession(IPlatform platform, AppSettings? settings = null, HttpMessageHandler? network = null)
@@ -39,6 +41,8 @@ public sealed partial class AppSession : INotifyPropertyChanged, IDisposable
         Settings = settings ?? AppSettings.Load();
         Account = new Account(platform.AccountStore, network is null ? null : new HttpClient(network, disposeHandler: false));
         Account.PropertyChanged += (_, _) => Post(() => Changed(nameof(Account)));
+        Tutorial = new FirstRunTutorial(Settings);
+        Tutorial.PropertyChanged += (_, _) => Post(() => Changed(nameof(Tutorial)));
         Directory.CreateDirectory(AppPaths.Projects);
         RestoreSavedProjects();
     }

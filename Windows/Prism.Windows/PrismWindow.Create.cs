@@ -36,10 +36,12 @@ public sealed partial class PrismWindow
         foreach (var line in new[] { eyebrow, title, subtitle }) { line.TextAlignment = TextAlignment.Center; line.HorizontalAlignment = HorizontalAlignment.Center; }
         page.Children.Add(eyebrow); page.Children.Add(title); page.Children.Add(subtitle);
         page.Children.Add(new Border { Height = 20 });
-        if (video is null) UploadStep(page);
-        else if (step == 2) SettingsStep(page, video);
-        else if (step == 3) CaptionStep(page);
-        else TypeStep(page);
+        // Each step's controls, Next button included, are what the first-video tutorial highlights.
+        var controls = Column(); page.Children.Add(controls);
+        if (video is null) UploadStep(TutorialTarget(FirstRunTutorial.Step.Upload, controls));
+        else if (step == 2) SettingsStep(TutorialTarget(FirstRunTutorial.Step.Settings, controls), video);
+        else if (step == 3) CaptionStep(TutorialTarget(FirstRunTutorial.Step.Captions, controls));
+        else TypeStep(TutorialTarget(FirstRunTutorial.Step.ContentType, controls));
         var home = Link(Button("Back to Home", () => Navigate(Screen.Home), icon: "\uE76B")); home.Margin = new Thickness(0, 20, 0, 0);
         page.Children.Add(home);
         return Scroll(page);

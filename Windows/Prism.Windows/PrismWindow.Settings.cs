@@ -21,7 +21,8 @@ public sealed partial class PrismWindow
             CategoryTile(1, "\uEC4A", "Usage", UsageTileDetail()),
             CategoryTile(2, "", "System resources", "RAM and storage updates"));
         tiles.Margin = new Thickness(0, 16, 0, 20); page.Children.Add(tiles);
-        page.Children.Add(settingsCategory switch { 0 => AccountSettings(), 1 => UsageSettings(), _ => ResourceSettings() });
+        tiles.Children.Add(CategoryTile(3, "\uE895", "Updates", $"Prism {updater.Version}"));
+        page.Children.Add(settingsCategory switch { 0 => AccountSettings(), 1 => UsageSettings(), 3 => UpdateSettings(), _ => ResourceSettings() });
         return Scroll(page);
     }
 
@@ -65,6 +66,7 @@ public sealed partial class PrismWindow
             section.Children.Add(Surface(Row(check, who), 12, 12));
             section.Children.Add(Stretched(Button("Sign out", account.SignOut, danger: true)));
             section.Children.Add(Stretched(Button("See your stats in the browser", () => WindowsPlatform.OpenExternal(Account.StatsPage))));
+            section.Children.Add(Stretched(Button("Replay first-video tutorial", () => { session.Tutorial.Restart(email); Navigate(Screen.Home); })));
         }
         else
         {

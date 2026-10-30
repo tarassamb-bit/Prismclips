@@ -36,3 +36,5 @@ Name: "{autodesktop}\Prism"; Filename: "{app}\Prism.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\Prism.exe"; Description: "Open Prism"; Flags: nowait postinstall skipifsilent
+; "Restart to update" installs silently, then reopens Prism.
+Filename: "{app}\Prism.exe"; Flags: nowait; Check: WizardSilent
