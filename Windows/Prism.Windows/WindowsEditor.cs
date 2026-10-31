@@ -201,7 +201,7 @@ public sealed class WindowsEditor : IDisposable
         var signature = session.Project is null ? "" : session.Project.Id + "|" + string.Join("|", session.Project.Media.Select(m => $"{m.Id}:{m.Thumbnail}:{m.Path}"))
             + string.Join("|", session.Project.Segments.Select(s => $"{s.Id}:{s.Start}:{s.Duration}:{s.SuggestedTitle}:{s.Score}")) + session.PreviewShortId + "|" + session.Selection + "|" + session.IsBusy;
         if (signature != mediaSignature) { mediaSignature = signature; BuildMedia(); }
-        var selected = session.ActiveSegment; var clipSignature = selected is null ? "source" : PrismJson.Serialize(selected);
+        var selected = session.ActiveSegment; var clipSignature = (selected is null ? "source" : PrismJson.Serialize(selected)) + "|" + session.TimingShortIds.Count;
         if (inspectorId != selected?.Id || inspectorSignature != clipSignature && !TextEditingInside(inspector))
         { inspectorId = selected?.Id; inspectorSignature = clipSignature; BuildInspector(); }
         if (captionSignature != clipSignature && !TextEditingInside(captions)) { captionSignature = clipSignature; BuildCaptions(); }
@@ -512,8 +512,10 @@ public sealed class WindowsEditor : IDisposable
             System.Windows.Automation.AutomationProperties.SetName(button, style.Title());
             styles.Children.Add(button);
         }
-        if (current.UsesWordTiming() && clip.SpeechWords is not { Count: > 0 } && hasAudio)
-            styles.Children.Add(Text(session.IsBusy ? "Prism AI is timing the words so captions follow the speech…" : "Word timing is estimated for this Short. Transcribing may improve it.", 11, true));
+        if (session.TimingShortIds.Count > 0)
+            styles.Children.Add(Text(session.TimingShortIds.Count == 1 ? "Timing the words of 1 Short…" : $"Timing the words of {session.TimingShortIds.Count} Shorts…", 11, true));
+        else if (current.UsesWordTiming() && clip.SpeechWords is not { Count: > 0 } && hasAudio)
+            styles.Children.Add(Text("Word timing is estimated for this Short. Transcribing may improve it.", 11, true));
         styles.Children.Add(Caption("Position", false));
         var positions = Enum.GetValues<CaptionPosition>();
         styles.Children.Add(Segmented(positions.Select(p => p.Title()).ToArray(), Array.IndexOf(positions, clip.CaptionPosition ?? CaptionPosition.Bottom), index => session.SetSelectedCaptionLayout(position: positions[index])));

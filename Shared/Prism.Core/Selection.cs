@@ -570,10 +570,11 @@ public static class GeminiSelection
 
     public sealed record CloudCaptions(List<TimedCaption> Cues, List<TimedSpeechWord> Words, string? Notice);
 
+    /// <param name="saved">The project's sentence transcript of this range when it has one; it saves a second audio upload.</param>
     public static async Task<CloudCaptions> RegenerateCaptions(string path, (double Start, double End) interval, GeminiConfiguration configuration,
-                                                               CancellationToken cancellation = default)
+                                                               CancellationToken cancellation = default, IReadOnlyList<TimedCaption>? saved = null)
     {
-        var reference = await TranscribeSentences(path, interval, configuration, cancellation: cancellation);
+        var reference = saved is { Count: > 0 } ? [.. saved] : await TranscribeSentences(path, interval, configuration, cancellation: cancellation);
         if (reference.Count == 0) return new CloudCaptions([], [], null);
         try
         {

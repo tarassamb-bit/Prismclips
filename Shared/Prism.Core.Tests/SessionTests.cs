@@ -386,6 +386,49 @@ public class SessionTests
         Assert.Equal("Plain name", ProjectInfo.FolderTitle(@"C:\Prism\Plain name.relio\"));
     }
 
+    /// Signs in and answers every Prism AI request with the same three timed words.
+    sealed class TimingServer : HttpMessageHandler
+    {
+        public int AiRequests;
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var reply = request.RequestUri!.AbsolutePath switch
+            {
+                "/auth/v1/token" => """{"refresh_token":"new","access_token":"access","expires_in":3600}""",
+                "/functions/v1/gemini" => Answer(),
+                var path => throw new InvalidOperationException("Unexpected request " + path),
+            };
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(reply) });
+        }
+        string Answer()
+        {
+            Interlocked.Increment(ref AiRequests);
+            var words = """{"words":[{"text":"hello","start":0.1,"end":0.5},{"text":"world","start":0.6,"end":1.0},{"text":"again","start":1.1,"end":1.6}]}""";
+            return System.Text.Json.JsonSerializer.Serialize(new { candidates = new[] { new { finishReason = "STOP", content = new { parts = new[] { new { text = words } } } } } });
+        }
+    }
+
+    [Fact]
+    public async Task WordTimingIsWorkedOutInTheBackgroundFromTheSavedTranscript()
+    {
+        using var fixture = new Fixture();
+        fixture.Platform.AccountStore.Save("""{"Email":"me@example.com","RefreshToken":"old"}""");
+        using var server = new TimingServer();
+        using var session = new AppSession(fixture.Platform, new AppSettings(), server);
+        var clip = new EditSegment { Start = 0, Duration = 4, Captions = [new TimedCaption("hello world again", 0, 2)] };
+        var media = fixture.Open(await Media.Pauses(), clip);
+        session.Open(fixture.Path);
+        session.Project!.Transcripts = new() { [PrismJson.Key(media.Id)] = new SentenceTranscript(0, 6, [new TimedCaption("hello world again", 0, 2)]) };
+        session.TimeWordsForAllShorts();
+        Assert.Single(session.TimingShortIds);
+        for (var wait = 0; wait < 200 && session.TimingShortIds.Count > 0; wait++) await Task.Delay(50);
+        Assert.Empty(session.TimingShortIds);
+        Assert.Equal(["hello", "world", "again"], session.Project.Segments[0].SpeechWords!.Select(w => w.Text));
+        Assert.Equal(["hello", "world", "again"], fixture.Saved().Segments[0].SpeechWords!.Select(w => w.Text));
+        // The saved sentence transcript was reused: one request for the words, none for the sentences.
+        Assert.Equal(1, server.AiRequests);
+    }
+
     [Fact]
     public async Task UsageKeysMatchTheMacApp()
     {

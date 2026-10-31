@@ -337,6 +337,8 @@ public sealed partial class AppSession
                 Say(false, Message);
                 SelectPreview(fresh[0].Id);
                 Tutorial.DidCreateVideo();
+                // A word-by-word caption style needs exact word timing; it is worked out in the background.
+                if (captionStyle.UsesWordTiming()) TimeWordsForAllShorts();
             }).ConfigureAwait(false);
         }
         catch (Exception error)

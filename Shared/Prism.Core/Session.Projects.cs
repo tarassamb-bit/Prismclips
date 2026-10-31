@@ -39,6 +39,7 @@ public sealed partial class AppSession
             ProjectPath = path;
             ResetPreview();
             SourcePath = "";
+            timingShortIds.Clear();
             editHistory = [];
             ClearRedo();
             Changed(nameof(CanUndo));
@@ -89,6 +90,7 @@ public sealed partial class AppSession
             store?.Dispose();
             store = opened;
             opened = null;
+            timingShortIds.Clear();
             editHistory = [];
             ClearRedo();
             Changed(nameof(CanUndo));

@@ -275,6 +275,63 @@ public sealed partial class AppSession
     {
         if (IsBusy || ActiveSegment is null) return;
         if (ApplyEdit((segment, _) => { segment.CaptionStyle = style; return style.Title() + " subtitles applied."; }, captionsOnly: true) is { } reply) Message = reply;
+        if (style.UsesWordTiming()) TimeWordsForAllShorts();
+    }
+
+    readonly HashSet<Guid> timingShortIds = [];
+    /// <summary>Shorts whose words Prism AI is timing in the background.</summary>
+    public IReadOnlyCollection<Guid> TimingShortIds => timingShortIds;
+
+    /// <summary>Transcribes every Short in the project that has speech but no exact word timing, several at a time, in the
+    /// background. The editor stays usable; each Short updates as soon as its timing arrives.</summary>
+    public void TimeWordsForAllShorts()
+    {
+        if (project is null) return;
+        var projectId = project.Id;
+        var jobs = project.Segments
+            .Where(s => s.SpeechWords is not { Count: > 0 } && !timingShortIds.Contains(s.Id) && project.Media.FirstOrDefault(m => m.Id == s.MediaId)?.HasAudio == true)
+            .Select(s => (Segment: PrismJson.Clone(s), Video: project.Media.First(m => m.Id == s.MediaId)))
+            .Select(job => (job.Segment, job.Video.Path, Configuration: GeminiConfiguration(job.Video),
+                // The project's saved sentence transcript covers most Shorts, so only their words need a new transcription.
+                Saved: project.Transcripts?.GetValueOrDefault(PrismJson.Key(job.Video.Id))?.CuesCovering(job.Segment.Start, job.Segment.Start + job.Segment.Duration)))
+            .Where(job => job.Configuration is not null).ToList();
+        if (jobs.Count == 0) return;
+        foreach (var job in jobs) timingShortIds.Add(job.Segment.Id);
+        Changed(nameof(TimingShortIds));
+        _ = Concurrency.Map(jobs, async (job, token) =>
+        {
+            GeminiSelection.CloudCaptions? cloud = null;
+            try { cloud = await GeminiSelection.RegenerateCaptions(job.Path, (job.Segment.Start, job.Segment.Start + job.Segment.Duration), job.Configuration!, token, job.Saved); }
+            catch (Exception) { }
+            await UI(() =>
+            {
+                timingShortIds.Remove(job.Segment.Id);
+                Changed(nameof(TimingShortIds));
+                if (cloud is not null && project?.Id == projectId) ApplyWordTiming(cloud, job.Segment);
+            });
+            return 0;
+        }, CancellationToken.None, limit: 6);
+    }
+
+    /// Stores timing for the Short it was made for, as long as its range hasn't moved meanwhile. Caption lines the
+    /// person edited in the meantime are kept; only untouched lines are replaced by the timed transcript.
+    void ApplyWordTiming(GeminiSelection.CloudCaptions cloud, EditSegment snapshot)
+    {
+        if (project?.Segments.FindIndex(s => s.Id == snapshot.Id) is not (>= 0 and var index)) return;
+        var current = project.Segments[index];
+        if (current.Start != snapshot.Start || current.Duration != snapshot.Duration) return;
+        var previous = PrismJson.Clone(current);
+        var untouched = PrismJson.Serialize(current.Captions) == PrismJson.Serialize(snapshot.Captions);
+        var changed = false;
+        if (cloud.Cues.Count > 0 && untouched) { current.Captions = [.. cloud.Cues.Select(c => c with { Start = c.Start - snapshot.Start })]; changed = true; }
+        if (cloud.Words.Count > 0) { current.SpeechWords = [.. cloud.Words.Select(w => w with { Start = w.Start - snapshot.Start })]; current.CaptionNotice = null; changed = true; }
+        if (!changed) return;
+        try { Save(); }
+        catch (Exception) { project.Segments[index] = previous; return; }
+        ProjectChanged();
+        Changed(nameof(ActiveSegment));
+        // Captions draw over the player, so a Short being previewed shows its new timing on its next render.
+        if (PreviewShortId == snapshot.Id) SelectPreview(snapshot.Id);
     }
 
     public void SetSelectedCaptionLayout(CaptionPosition? position = null, CaptionSize? size = null, bool? animated = null)
