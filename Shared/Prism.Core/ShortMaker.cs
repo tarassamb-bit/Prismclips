@@ -56,7 +56,7 @@ public static class ShortMaker
         var clips = await GeminiSelection.Select(path, transcript, interval, clipDuration, targetCount, gemini, excluding, videoType.SelectionGuidance(),
             (fraction, stage) => progress(0.55 + 0.15 * fraction, stage), cancellation: cancellation);
         // Screens and gameplay lose their edges in a vertical crop, whatever the picker suggested.
-        var picks = clips.Select(c => (c.Start, Duration: c.End - c.Start, Fit: c.Layout == "fit" || videoType.ForcesFit(), c.Title, c.Reason, c.Score)).ToList();
+        var picks = clips.Select(c => (c.Start, Duration: c.End - c.Start, Fit: c.Layout == "fit" || videoType.ForcesFit(), c.Title, c.Reason, c.Score, c.Description)).ToList();
         var steps = 0;
         void ReportStep(string stage)
         {
@@ -111,7 +111,8 @@ public static class ShortMaker
             var warning = shot.ReferenceCues.Count == 0 || shot.Words.Count > 0 ? null : GeminiSelection.SentenceTimingNotice;
             var title = candidate.Title is { } t ? Truncate(t, 100) : captions.FirstOrDefault() is { } first ? Truncate(first.Text, 100) : null;
             return new ShortResult(start, duration, "", captions, keyframes, words, warning, title,
-                                   candidate.Reason is { } reason ? Truncate(reason, 400) : null, candidate.Fit, videoType, (int)Math.Round(candidate.Score * 10));
+                                   candidate.Reason is { } reason ? Truncate(reason, 400) : null, candidate.Fit, videoType, (int)Math.Round(candidate.Score * 10),
+                                   candidate.Description is { } description ? Truncate(description, 1000) : null);
         }, cancellation);
         // Returning the beginning of the source here made a failed analysis look like a successful Short. Keep existing
         // edits intact and ask for another range instead of silently inventing a selection.

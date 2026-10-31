@@ -12,10 +12,14 @@ public static class Renderer
     /// <summary>Finished previews kept between edits, so going back to a Short doesn't render it again.</summary>
     public static string CacheDirectory { get; set; } = Path.Combine(Path.GetTempPath(), "PrismRenderCache");
 
-    /// <summary>Renders the Short into <paramref name="destination"/>, which must not exist yet.</summary>
+    /// <summary>Renders the Short into <paramref name="destination"/>, which must not exist yet. Its title and description go into the
+    /// MP4's metadata and into a .txt file beside it (<see cref="NotesPath"/>), as on the Mac.</summary>
     public static async Task Export(string source, EditSegment segment, string destination, ExportQuality quality = ExportQuality.Full,
                                     Action<double>? progress = null, CancellationToken cancellation = default)
     {
+        var title = segment.SuggestedTitle?.Trim() ?? "";
+        var description = segment.SuggestedDescription?.Trim() ?? "";
+        string[] metadata = [.. title.Length > 0 ? new[] { "-metadata", "title=" + title } : [], .. description.Length > 0 ? new[] { "-metadata", "description=" + description } : []];
         if (File.Exists(destination)) throw new ShortMakerException(ShortMakerFailure.DestinationExists);
         var folder = Path.GetDirectoryName(Path.GetFullPath(destination))!;
         Directory.CreateDirectory(folder);
@@ -30,12 +34,28 @@ public static class Renderer
                 ExportQuality.Small => ["-c:v", "libx264", "-preset", "medium", "-crf", "21", "-profile:v", "high"],
                 _ => ["-c:v", "libx264", "-preset", "medium", "-crf", "18", "-profile:v", "high"],
             };
-            await Render(source, segment, temporary, width, height, video, "160k", progress, cancellation);
+            await Render(source, segment, temporary, width, height, [.. video, .. metadata], "160k", progress, cancellation);
             if (File.Exists(destination)) throw new ShortMakerException(ShortMakerFailure.DestinationExists);
-            File.Move(temporary, destination);
+            // The notes file is published first without replacing an existing one; if the video then fails, only that new file goes.
+            var notes = string.Join("\n\n", new[] { title, description }.Where(text => text.Length > 0));
+            if (notes.Length == 0) { File.Move(temporary, destination); return; }
+            var notesPath = NotesPath(destination);
+            var temporaryNotes = Path.Combine(folder, $".prism-{Guid.NewGuid()}.txt");
+            try
+            {
+                await File.WriteAllTextAsync(temporaryNotes, notes + "\n", cancellation);
+                cancellation.ThrowIfCancellationRequested();
+                File.Move(temporaryNotes, notesPath);
+                try { cancellation.ThrowIfCancellationRequested(); File.Move(temporary, destination); }
+                catch { try { File.Delete(notesPath); } catch { } throw; }
+            }
+            finally { try { File.Delete(temporaryNotes); } catch { } }
         }
         finally { try { File.Delete(temporary); } catch { } }
     }
+
+    /// <summary>The .txt file holding a Short's title and description, next to its MP4.</summary>
+    public static string NotesPath(string video) => Path.ChangeExtension(video, ".txt");
 
     /// <summary>A fast 540×960 render for the editor's player, cached by everything that changes the picture or sound.</summary>
     public static async Task<string> Preview(string source, EditSegment segment, CancellationToken cancellation = default)

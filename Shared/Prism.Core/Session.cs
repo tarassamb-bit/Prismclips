@@ -16,7 +16,9 @@ public enum GenerationFailureKind { NoMoments, Settings, Limit, Temporary, Other
 public sealed record GenerationFailure(string Message, GenerationFailureKind Kind, bool IsExport = false);
 
 /// <summary>What the export card is set to.</summary>
-public sealed record ExportChoice(IReadOnlySet<Guid> ShortIds, bool IncludeSource, ExportQuality Quality, string Folder, string? Error = null);
+/// <param name="Titles">Titles and descriptions as edited on the card, by Short; they are saved on the Shorts when the export starts.</param>
+public sealed record ExportChoice(IReadOnlySet<Guid> ShortIds, bool IncludeSource, ExportQuality Quality, string Folder, string? Error = null,
+    IReadOnlyDictionary<Guid, string>? Titles = null, IReadOnlyDictionary<Guid, string>? Descriptions = null);
 
 /// Everything the Prism window shows and does, independent of the toolkit: the Windows (WPF) and Linux (GTK) apps both drive
 /// this one object, a port of the macOS app's AppModel. Call it from the UI thread; it reports changes through PropertyChanged

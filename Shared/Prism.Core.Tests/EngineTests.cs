@@ -220,6 +220,16 @@ public class GeminiTests
     }
 
     [Fact]
+    public async Task DescriptionsAreMatchedToTheirShortsAndBadIdsIgnored()
+    {
+        var gemini = new FakeGemini();
+        gemini.Payloads.Enqueue("""{"items":[{"id":1,"description":"Second #b"},{"id":7,"description":"Nobody"},{"id":0,"description":"  "}]}""");
+        var written = await GeminiSelection.Describe([("One", "first words"), ("Two", "second words")], gemini.Configuration());
+        Assert.Equal(new Dictionary<int, string> { [1] = "Second #b" }, written);
+        Assert.Contains("SHORTS_JSON", Assert.Single(gemini.Bodies));
+    }
+
+    [Fact]
     public async Task UsageLimitsAndSignInAreReportedAsSuch()
     {
         var limited = new FakeGemini { DefaultStatus = 429, ErrorBody = """{"error":{"code":"usage_limit","message":"You've reached your beta usage limit."}}""" };

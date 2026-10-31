@@ -50,6 +50,8 @@ public sealed class EditSegment
     public int? Score { get; set; }
     public string? SuggestedTitle { get; set; }
     public string? SelectionReason { get; set; }
+    /// <summary>Post description from Prism AI, editable before export; null for older Shorts.</summary>
+    public string? SuggestedDescription { get; set; }
     public string? CaptionNotice { get; set; }
     public CaptionStyle? CaptionStyle { get; set; }
     public VideoType? VideoType { get; set; }
@@ -295,4 +297,5 @@ public static class ExportQualities
 /// The result of analysis: one Short before it becomes an <see cref="EditSegment"/>.
 public sealed record ShortResult(
     double Start, double Duration, string Caption, List<TimedCaption> Captions, List<CropKeyframe> CropKeyframes,
-    List<TimedSpeechWord> SpeechWords, string? AnalysisWarning, string? SuggestedTitle, string? SelectionReason, bool FitToFrame, VideoType VideoType = VideoType.General, int? Score = null);
+    List<TimedSpeechWord> SpeechWords, string? AnalysisWarning, string? SuggestedTitle, string? SelectionReason, bool FitToFrame, VideoType VideoType = VideoType.General, int? Score = null,
+    string? SuggestedDescription = null);

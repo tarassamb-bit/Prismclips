@@ -341,6 +341,27 @@ public class SessionTests
     }
 
     [Fact]
+    public async Task ExportCardTitlesAndDescriptionsAreSavedOnTheShorts()
+    {
+        using var fixture = new Fixture();
+        var clip = new EditSegment { Duration = 2, SuggestedTitle = "Old" };
+        fixture.Open(null, clip);
+        var session = fixture.Session;
+        session.ChooseExport();
+        var choice = session.ExportChoice!;
+        Assert.Equal("Old", choice.Titles![clip.Id]);
+        Assert.Equal("", choice.Descriptions![clip.Id]);
+        await session.Export(choice with
+        {
+            ShortIds = new HashSet<Guid>(),
+            Titles = new Dictionary<Guid, string> { [clip.Id] = "New title" },
+            Descriptions = new Dictionary<Guid, string> { [clip.Id] = "Watch this #prism" },
+        });
+        var saved = Assert.Single(fixture.Saved().Segments);
+        Assert.Equal(("New title", "Watch this #prism"), (saved.SuggestedTitle, saved.SuggestedDescription));
+    }
+
+    [Fact]
     public async Task UsageKeysMatchTheMacApp()
     {
         var media = new MediaItem { Path = "/Users/me/Movies/clip.mp4", Duration = 59.5 };

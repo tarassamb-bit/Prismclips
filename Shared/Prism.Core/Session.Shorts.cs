@@ -302,7 +302,7 @@ public sealed partial class AppSession
                 MediaId = video.Id, Start = result.Start, Duration = result.Duration, Caption = result.Caption,
                 FitToFrame = result.FitToFrame, Captions = result.Captions, CropKeyframes = result.CropKeyframes,
                 CropTrackingVersion = SubjectFramer.Version, SpeechWords = result.SpeechWords,
-                SuggestedTitle = result.SuggestedTitle, Score = result.Score, SelectionReason = result.SelectionReason,
+                SuggestedTitle = result.SuggestedTitle, Score = result.Score, SelectionReason = result.SelectionReason, SuggestedDescription = result.SuggestedDescription,
                 CaptionNotice = result.AnalysisWarning, CaptionStyle = captionStyle, VideoType = result.VideoType,
                 SplitScreen = result.VideoType == VideoType.Podcast ? true : null,
                 CaptionPosition = result.VideoType == VideoType.Podcast ? Prism.Core.CaptionPosition.Middle : null,
@@ -402,7 +402,51 @@ public sealed partial class AppSession
     {
         if (IsBusy || project is null || project.Media.Count == 0) return;
         ExportChoice = new ExportChoice(project.Segments.Where(s => only is null || s.Id == only).Select(s => s.Id).ToHashSet(),
-            false, Settings.ExportQuality, DefaultExportFolder());
+            false, Settings.ExportQuality, DefaultExportFolder(),
+            Titles: project.Segments.ToDictionary(s => s.Id, s => s.SuggestedTitle ?? ""),
+            Descriptions: project.Segments.ToDictionary(s => s.Id, s => s.SuggestedDescription ?? ""));
+    }
+
+    bool isWritingDescriptions;
+    /// <summary>True while the export card asks Prism AI for missing descriptions.</summary>
+    public bool IsWritingDescriptions { get => isWritingDescriptions; private set => Set(ref isWritingDescriptions, value); }
+
+    /// <summary>Fills the export card's empty descriptions with one Prism AI request; titles and typed text are kept.</summary>
+    public async Task WriteMissingDescriptions()
+    {
+        if (ExportChoice is not { } choice || project is null || IsWritingDescriptions) return;
+        string Description(EditSegment s) => choice.Descriptions?.GetValueOrDefault(s.Id) ?? s.SuggestedDescription ?? "";
+        var missing = project.Segments.Where(s => Description(s).Trim().Length == 0).ToList();
+        if (missing.Count == 0) return;
+        if (project.Media.FirstOrDefault(m => m.Id == missing[0].MediaId) is not { } video || GeminiConfiguration(video) is not { } configuration)
+        { ExportChoice = choice with { Error = "Sign in to your Prism account to write descriptions." }; return; }
+        IsWritingDescriptions = true;
+        try
+        {
+            var written = await GeminiSelection.Describe(missing.Select(s => (choice.Titles?.GetValueOrDefault(s.Id) ?? s.SuggestedTitle ?? "",
+                string.Join(" ", (s.Captions ?? []).Select(c => c.Text)))).ToList(), configuration);
+            // The card may have changed while the request ran; only still-empty fields are filled.
+            if (ExportChoice is not { } current) return;
+            var descriptions = new Dictionary<Guid, string>(current.Descriptions ?? new Dictionary<Guid, string>());
+            foreach (var (index, text) in written)
+                if ((descriptions.GetValueOrDefault(missing[index].Id) ?? "").Length == 0) descriptions[missing[index].Id] = text;
+            ExportChoice = current with
+            {
+                Descriptions = descriptions,
+                Error = written.Count < missing.Count ? $"Prism AI wrote {written.Count} of {missing.Count} descriptions. Write the rest yourself or try again." : null,
+            };
+        }
+        catch (Exception error) { if (ExportChoice is { } current) ExportChoice = current with { Error = "Couldn't write descriptions: " + error.Message }; }
+        finally { IsWritingDescriptions = false; }
+    }
+
+    /// <summary>A free name for a Short's MP4 whose notes file is free too.</summary>
+    static string ExportDestination(string name, string folder)
+    {
+        var destination = Path.Combine(folder, name + ".mp4");
+        for (var copy = 2; File.Exists(destination) || Directory.Exists(destination) || File.Exists(Renderer.NotesPath(destination)); copy++)
+            destination = Path.Combine(folder, $"{name} {copy}.mp4");
+        return destination;
     }
 
     public string DefaultExportFolder() => Path.Combine(platform.DownloadsFolder, "Prism", ExportFileName(project?.DisplayTitle) ?? "Prism export");
@@ -417,6 +461,24 @@ public sealed partial class AppSession
     public async Task Export(ExportChoice choice)
     {
         if (IsBusy || project is null) return;
+        // Titles and descriptions edited on the card stay on the Shorts, and go into the files below.
+        var previous = PrismJson.Clone(project.Segments);
+        var edited = false;
+        foreach (var segment in project.Segments)
+        {
+            if (choice.Titles?.GetValueOrDefault(segment.Id) is { } title && title != (segment.SuggestedTitle ?? "")) { segment.SuggestedTitle = title; edited = true; }
+            if (choice.Descriptions?.GetValueOrDefault(segment.Id) is { } description && description != (segment.SuggestedDescription ?? "")) { segment.SuggestedDescription = description; edited = true; }
+        }
+        if (edited)
+        {
+            try { Save(); ProjectChanged(); }
+            catch (Exception error)
+            {
+                project.Segments = previous;
+                ExportChoice = choice with { Error = $"Could not save the titles: {error.Message}" };
+                return;
+            }
+        }
         var segments = project.Segments.Select((segment, index) => (Segment: PrismJson.Clone(segment), Number: index + 1))
             .Where(pair => choice.ShortIds.Contains(pair.Segment.Id)).ToList();
         var media = PrismJson.Clone(project.Media);
@@ -500,7 +562,7 @@ public sealed partial class AppSession
                 await UI(() => { if (Current() && !token.IsCancellationRequested) Message = $"Rendering Short {number}…"; }).ConfigureAwait(false);
                 token.ThrowIfCancellationRequested();
                 var name = ExportFileName(segment.SuggestedTitle) ?? $"{ExportFileName(projectName) ?? "Prism"} Short {number}";
-                var destination = UniqueDestination(name + ".mp4", folder);
+                var destination = ExportDestination(name, folder);
                 await Task.Run(() => Renderer.Export(video.Path, segment, destination, choice.Quality,
                     fraction => Post(() =>
                     {

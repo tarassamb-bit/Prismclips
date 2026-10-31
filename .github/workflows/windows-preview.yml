@@ -16,6 +16,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Runs beside the preview: the shared tests on Windows with the release's ffmpeg, including the render and export tests a Mac without ffmpeg skips.
+  tests:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: "10.0.x" }
+      - name: Add ffmpeg
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg
+          $bin = (Get-ChildItem ffmpeg -Directory | Select-Object -First 1).FullName + "\bin"
+          "PRISM_FFMPEG=$bin\ffmpeg.exe" >> $env:GITHUB_ENV
+          "PRISM_FFPROBE=$bin\ffprobe.exe" >> $env:GITHUB_ENV
+      - name: Shared tests
+        run: dotnet test Shared/Prism.Core.Tests
+
   preview:
     runs-on: windows-latest
     timeout-minutes: 180
