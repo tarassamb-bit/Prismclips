@@ -200,8 +200,13 @@ public sealed partial class AppSession
         if (sourceRegion == SourceRegion.Custom && CustomRangeError is { } rangeError) { Message = rangeError; return; }
         if (!Account.IsSignedIn) { await RunShorts(video, count, duration, sourceRegion); return; }
         var projectId = project.Id;
+        // The progress card shows while the video is checked, so Cancel works from the first moment, as on the Mac.
+        var cancellation = new CancellationTokenSource();
+        generationCancellation = cancellation;
         IsBusy = true;
         GenerationError = null;
+        GenerationProgress = 0;
+        GenerationStage = "Preparing video…";
         Message = "Preparing video…";
         (int Runs, double Charge)? reanalysis;
         (double Used, double Allowance)? usage = null;
@@ -218,7 +223,15 @@ public sealed partial class AppSession
             reanalysis = await Account.Reanalysis(UsageLimit.ServerKey(video));
             if (reanalysis is { Runs: > 0 }) usage = await Account.UsageStatus();
         }
-        finally { IsBusy = false; }
+        finally
+        {
+            IsBusy = false;
+            GenerationProgress = null;
+            if (ReferenceEquals(generationCancellation, cancellation)) generationCancellation = null;
+            cancellation.Dispose();
+        }
+        // Cancelled while checking: nothing started, so nothing is charged and no popup follows.
+        if (cancellation.IsCancellationRequested) { Message = ""; return; }
         if (project?.Id != projectId || project.Media.All(m => m.Id != video.Id)) return;
         var unavailable = new GenerationFailure("Prism couldn't check your usage right now. Try again in a moment.", GenerationFailureKind.Temporary);
         if (reanalysis is not { } check) { Message = unavailable.Message; GenerationError = unavailable; return; }
