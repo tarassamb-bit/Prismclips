@@ -220,6 +220,16 @@ public class GeminiTests
     }
 
     [Fact]
+    public void LongPiecesAreSplitAtSentencesAndTimedByLength()
+    {
+        var split = GeminiSelection.SplitSentences([("One two three. Four five six seven eight nine? Ten.", 0, 10), ("Short. Piece.", 10, 14)]);
+        Assert.Equal(["One two three.", "Four five six seven eight nine?", "Ten.", "Short. Piece."], split.Select(p => p.Text));
+        Assert.Equal(0, split[0].Start); Assert.Equal(10, split[2].End);
+        Assert.True(split[1].End - split[1].Start > split[0].End - split[0].Start);
+        Assert.Equal((10.0, 14.0), (split[3].Start, split[3].End));
+    }
+
+    [Fact]
     public void TranscriptsAreReadFromJsonOrSubtitleStyleLines()
     {
         Assert.Equal([("Hi there.", 0.5, 1.25)], GeminiSelection.TranscriptAnswer("""{"segments":[{"text":"Hi there.","start":0.5,"end":1.25}]}"""));

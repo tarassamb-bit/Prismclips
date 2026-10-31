@@ -341,7 +341,7 @@ public static class GeminiSelection
             {Invariant($"Return absolute numeric source seconds, inside {interval.Start}…{interval.End}, using transcript boundaries.")}
             Include a concise title (up to 8 words) and a one-sentence reason naming the actual hook and payoff.
             Also write a description to post with the Short: one or two sentences for viewers that tease the payoff without giving it away, then up to three relevant hashtags.
-            Write all three in the source language and ground them in the clip's speech or frames. Keep personal anecdotes personal; never turn a reported result into a universal promise. The title and reason are review notes, not overlays.
+            Write all three in the language the TRANSCRIPT is spoken in, never another one, and ground them in the clip's speech or frames. Keep personal anecdotes personal; never turn a reported result into a universal promise. The title and reason are review notes, not overlays.
             Score 0–10; use 7–10 only for clips that pass the hook, context and complete-payoff tests. Choose layout 'fit' for charts, maps, satellite images, diagrams, screen recordings,
             multiple important subjects, or text that a vertical crop would lose. Choose 'track' only when a
             single person or compact object can be cropped safely. Frames are timestamped sparse context;
@@ -526,7 +526,7 @@ public static class GeminiSelection
             using var json = JsonDocument.Parse(answer);
             var root = json.RootElement;
             var list = root.TryGetProperty("words", out var w) ? w : root.GetProperty("segments");
-            return list.EnumerateArray().Select(e => (e.GetProperty("text").GetString() ?? "", e.GetProperty("start").GetDouble(), e.GetProperty("end").GetDouble())).ToList();
+            return SplitSentences(list.EnumerateArray().Select(e => (e.GetProperty("text").GetString() ?? "", e.GetProperty("start").GetDouble(), e.GetProperty("end").GetDouble())).ToList());
         }
         catch (Exception) { }
         var lines = answer.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -537,7 +537,28 @@ public static class GeminiSelection
             if (!match.Success) return null;
             parsed.Add((match.Groups[3].Value.Trim(), double.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture), double.Parse(match.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture)));
         }
-        return parsed.Count > 0 ? parsed : null;
+        return parsed.Count > 0 ? SplitSentences(parsed) : null;
+    }
+
+    /// <summary>Some audio models return a whole chunk as one "sentence" spanning 20–30 seconds, which leaves Shorts no sentence end to
+    /// stop on. A long piece with several sentences is split at its sentence punctuation, each sentence timed by its share of the text.</summary>
+    public static List<(string Text, double Start, double End)> SplitSentences(List<(string Text, double Start, double End)> pieces)
+    {
+        var result = new List<(string, double, double)>();
+        foreach (var (text, start, end) in pieces)
+        {
+            var sentences = System.Text.RegularExpressions.Regex.Split(text.Trim(), @"(?<=[.!?…])\s+").Where(part => part.Length > 0).ToList();
+            if (end - start <= 6 || sentences.Count < 2 || !double.IsFinite(start) || !double.IsFinite(end)) { result.Add((text, start, end)); continue; }
+            var total = sentences.Sum(part => part.Length);
+            var at = start;
+            for (var index = 0; index < sentences.Count; index++)
+            {
+                var next = index == sentences.Count - 1 ? end : at + (end - start) * sentences[index].Length / total;
+                result.Add((sentences[index], at, next));
+                at = next;
+            }
+        }
+        return result;
     }
 
     public sealed record CloudCaptions(List<TimedCaption> Cues, List<TimedSpeechWord> Words, string? Notice);

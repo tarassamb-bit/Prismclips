@@ -262,7 +262,8 @@ public sealed class WindowsEditor : IDisposable
     void Tick(object? sender, EventArgs args)
     {
         if (disposed || session.Screen != Screen.Editor) return;
-        updatingSeek = true; seek.Value = player.CurrentTime; updatingSeek = false;
+        // While the slider is held, it shows where the person drags it, not where playback was a moment ago.
+        if (!seek.IsMouseCaptureWithin) { updatingSeek = true; seek.Value = player.CurrentTime; updatingSeek = false; }
         playerTime.Text = Format.Clock(player.CurrentTime) + " / " + Format.Clock(session.PreviewLength);
         playGlyph.Text = player.IsPlaying ? "\uE769" : "\uE768";
     }
