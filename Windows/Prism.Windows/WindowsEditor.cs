@@ -19,7 +19,7 @@ public sealed class WindowsEditor : IDisposable
     readonly Window window;
     readonly Grid root = new();
     readonly Grid panes = new();
-    readonly StackPanel media = Column(), captions = Column(), inspector = Column(), chatHistory = Column();
+    readonly StackPanel media = Column(), captions = Column();
     readonly TextBlock detail = Text("", 11, true);
     readonly MediaElement video = new() { LoadedBehavior = MediaState.Manual, UnloadedBehavior = MediaState.Manual, ScrubbingEnabled = true, Stretch = Stretch.Uniform };
     readonly TextBlock title = Text("Editor", 12), saved = Text("", 11, true), engine = Text("Prism AI cloud", 12, true), status = Text("", 12, true), playerTime = Text("00:00 / 00:00", 11, true), sourceName = Text("Source video", 12, true);
@@ -30,8 +30,6 @@ public sealed class WindowsEditor : IDisposable
     readonly TextBlock playGlyph, expandGlyph;
     readonly Button play, expand, export;
     readonly Slider seek = new() { Minimum = 0, Maximum = 1, SmallChange = 0.1, LargeChange = 5, VerticalAlignment = VerticalAlignment.Center, MinWidth = 80 };
-    readonly TextBox chatInput = new() { MinHeight = 36, Margin = new Thickness(0, 8, 0, 0) };
-    readonly ScrollViewer chatScroll;
     readonly WindowsTimeline timeline;
     readonly PreviewPlayer player;
     readonly DispatcherTimer ticker = new() { Interval = TimeSpan.FromMilliseconds(100) };
@@ -39,10 +37,8 @@ public sealed class WindowsEditor : IDisposable
     readonly Dictionary<CaptionStyle, byte[]> stylePreviews = [];
     readonly HashSet<string> loadingThumbnails = [];
     readonly GridSplitter leftSplitter, rightSplitter, timelineSplitter;
-    string? mediaSignature, inspectorSignature, captionSignature;
-    Guid? inspectorId;
+    string? mediaSignature, captionSignature;
     string? loadedPath, loadedIdentity;
-    int chatCount = -1;
     double pendingSeek;
     bool resumePlayback, previewSuspended, updatingSeek, disposed, expanded, noticeRetry;
     Button? saveCaptions;
@@ -84,8 +80,6 @@ public sealed class WindowsEditor : IDisposable
         panes.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(5) });
         panes.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(session.Settings.RightSidebarWidth), MinWidth = 220 });
         var library = Column(); library.Children.Add(media);
-        var editDetails = new Expander { Header = "Clip settings", Content = inspector, IsExpanded = false, Margin = new Thickness(14, 6, 14, 10) };
-        library.Children.Add(editDetails);
         var autoSettings = Button("Auto Shorts settings", () => session.Screen = Screen.ImportSource); Plain(autoSettings);
         autoSettings.HorizontalAlignment = HorizontalAlignment.Stretch; autoSettings.Padding = new Thickness(14); autoSettings.FontSize = 11;
         var autoBar = new Border { Child = autoSettings, BorderThickness = new Thickness(0, 1, 0, 0) }; autoBar.SetResourceReference(Border.BorderBrushProperty, "Line");
@@ -133,25 +127,6 @@ public sealed class WindowsEditor : IDisposable
         captionHeading.SetResourceReference(Border.BorderBrushProperty, "Line");
         DockPanel.SetDock(captionHeading, Dock.Top); captionPanel.Children.Add(captionHeading);
         captionPanel.Children.Add(Scroll(captions));
-        var chat = new DockPanel();
-        var composer = Column(); composer.Margin = new Thickness(12); DockPanel.SetDock(composer, Dock.Bottom);
-        var suggestions = new WrapPanel { Margin = new Thickness(0, 0, 0, 6) };
-        foreach (var suggestion in new[] { "Make a 30 second Short", "Add subtitles", "Make it 20 seconds" })
-        {
-            var chip = AsyncButton(suggestion, () => session.SendChat(suggestion)); chip.FontSize = 11; chip.Padding = new Thickness(9, 5, 9, 5); chip.Margin = new Thickness(0, 0, 6, 6); suggestions.Children.Add(chip);
-        }
-        composer.Children.Add(suggestions);
-        chatInput.Tag = "Describe an edit…"; chatInput.Background = Brushes.Transparent; chatInput.BorderThickness = new Thickness(0); chatInput.Margin = new Thickness(0); chatInput.MinHeight = 0; chatInput.Padding = new Thickness(2, 6, 2, 6);
-        System.Windows.Automation.AutomationProperties.SetName(chatInput, "Editing instruction");
-        chatInput.TextChanged += (_, _) => session.ChatInput = chatInput.Text;
-        chatInput.KeyDown += async (_, args) => { if (args.Key == Key.Enter && !Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)) { args.Handled = true; await Safe(() => session.SendChat()); } };
-        var send = IconButton("", "Send editing instruction", () => { _ = Safe(() => session.SendChat()); }); send.SetResourceReference(Control.ForegroundProperty, "Accent");
-        var inputRow = new DockPanel(); DockPanel.SetDock(send, Dock.Right); inputRow.Children.Add(send); inputRow.Children.Add(chatInput);
-        var inputBox = new Border { Child = inputRow, CornerRadius = new CornerRadius(8), Padding = new Thickness(10, 4, 4, 4) }; inputBox.SetResourceReference(Border.BackgroundProperty, "Surface2");
-        composer.Children.Add(inputBox); chat.Children.Add(composer);
-        chatScroll = Scroll(chatHistory); chat.Children.Add(chatScroll);
-        var assistant = new Expander { Header = "AI assistant", Content = chat, Height = double.NaN, Margin = new Thickness(14, 0, 14, 10) };
-        chat.Height = 280; library.Children.Add(assistant);
         rightPanel = Panel(captionPanel, new Thickness(1, 0, 0, 0)); Add(panes, rightPanel, 0, 4); Add(root, panes, 1);
         timelineSplitter = new GridSplitter { Height = 5, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch, ResizeDirection = GridResizeDirection.Rows, ResizeBehavior = GridResizeBehavior.PreviousAndNext, ShowsPreview = true, Background = Brushes.Transparent, Cursor = Cursors.SizeNS };
         Add(root, timelineSplitter, 2);
@@ -203,11 +178,7 @@ public sealed class WindowsEditor : IDisposable
             + string.Join("|", session.Project.Segments.Select(s => $"{s.Id}:{s.Start}:{s.Duration}:{s.SuggestedTitle}:{s.Score}")) + session.PreviewShortId + "|" + session.Selection + "|" + session.IsBusy;
         if (signature != mediaSignature) { mediaSignature = signature; BuildMedia(); }
         var selected = session.ActiveSegment; var clipSignature = (selected is null ? "source" : PrismJson.Serialize(selected)) + "|" + session.TimingShortIds.Count;
-        if (inspectorId != selected?.Id || inspectorSignature != clipSignature && !TextEditingInside(inspector))
-        { inspectorId = selected?.Id; inspectorSignature = clipSignature; BuildInspector(); }
         if (captionSignature != clipSignature && !TextEditingInside(captions)) { captionSignature = clipSignature; BuildCaptions(); }
-        if (chatCount != session.ChatMessages.Count) { chatCount = session.ChatMessages.Count; BuildChatHistory(); }
-        if (!FocusInside(chatInput) && chatInput.Text != session.ChatInput) chatInput.Text = session.ChatInput;
         timeline.Refresh();
     }
 
@@ -403,90 +374,6 @@ public sealed class WindowsEditor : IDisposable
         if (picker.ShowDialog(window) == true) await session.ImportSource(picker.FileName);
     }
 
-    void BuildInspector()
-    {
-        inspector.Children.Clear(); inspector.Margin = new Thickness(8);
-        if (session.ActiveSegment is not { } clip)
-        {
-            var mark = Glyph("", 25, null, true); mark.HorizontalAlignment = HorizontalAlignment.Left; mark.Margin = new Thickness(0, 30, 0, 10); inspector.Children.Add(mark);
-            var heading = Text("Select a clip to edit", 13); heading.FontWeight = FontWeights.Medium; inspector.Children.Add(heading);
-            inspector.Children.Add(Text("Choose a Short from the media bin, or add a clip to the timeline.", 12, true));
-            if (session.Selection is not null) { var add = Button("Add clip to timeline", session.AddManualClip); add.HorizontalAlignment = HorizontalAlignment.Left; inspector.Children.Add(add); }
-            return;
-        }
-        var name = Text(clip.SuggestedTitle ?? "Video", 13); name.FontWeight = FontWeights.Medium; inspector.Children.Add(name);
-        if (clip.SelectionReason is { Length: > 0 } reason)
-        {
-            inspector.Children.Add(Caption("Why suggested", false));
-            var why = Text(reason, 11, true); if (reason.StartsWith("Weaker pick", StringComparison.Ordinal)) why.SetResourceReference(TextBlock.ForegroundProperty, "Amber"); inspector.Children.Add(why);
-        }
-        if (clip.CaptionNotice is { Length: > 0 } notice) { var note = Text("ⓘ " + notice, 11); note.SetResourceReference(TextBlock.ForegroundProperty, "Amber"); inspector.Children.Add(note); }
-        inspector.Children.Add(Caption("Clip range"));
-        var start = NumberBox(clip.Start); var duration = NumberBox(clip.Duration);
-        var timed = clip.SpeechWords is { Count: > 0 };
-        inspector.Children.Add(NumberRow("Start (seconds)", start)); inspector.Children.Add(NumberRow(timed ? "Target duration (seconds)" : "Duration (seconds)", duration));
-        var span = Text("", 11, true); span.SetResourceReference(TextBlock.FontFamilyProperty, "MonoFont"); inspector.Children.Add(span);
-        void Span() => span.Text = Value(start) is { } a && Value(duration) is { } b ? $"{Format.Clock(a)} → {Format.Clock(a + b)} in the source video" : "";
-        start.TextChanged += (_, _) => Span(); duration.TextChanged += (_, _) => Span(); Span();
-        if (timed) inspector.Children.Add(Text("Cuts move slightly to keep the first and last spoken words whole.", 11, true));
-        inspector.Children.Add(Rule());
-        inspector.Children.Add(Caption("Video layout"));
-        var layout = clip.SplitScreen == true ? 2 : clip.FitToFrame == true ? 0 : 1;
-        inspector.Children.Add(Segmented(["Fit", "Fill", "Split"], layout, index => { if (index == 2) _ = Safe(session.SetSplitScreen); else session.SetFraming(index == 0); }));
-        var position = new Slider { Minimum = 0, Maximum = 1, SmallChange = 0.01, LargeChange = 0.1, Value = Math.Clamp(clip.CropPosition ?? 0.5, 0, 1) };
-        var zoom = new Slider { Minimum = 1, Maximum = 1.5, SmallChange = 0.05, LargeChange = 0.1, Value = Math.Clamp(clip.CropZoom ?? 1.08, 1, 1.5), IsSnapToTickEnabled = true, TickFrequency = 0.05 };
-        if (clip.SplitScreen == true) inspector.Children.Add(Text("Two people: the left side of the video shows on top, the right side on the bottom. Captions sit in the middle.", 11, true));
-        else
-        {
-            if (clip.FitToFrame != true)
-            {
-                var where = Text("", 11, true); where.SetResourceReference(TextBlock.FontFamilyProperty, "MonoFont");
-                void Where() => where.Text = position.Value < 0.34 ? "Left" : position.Value > 0.66 ? "Right" : "Center";
-                position.ValueChanged += (_, _) => Where(); Where();
-                inspector.Children.Add(Heading(Text(clip.CropKeyframes is null ? "Horizontal framing" : "Tracking offset", 11, true), where));
-                inspector.Children.Add(position);
-                var ends = new Grid(); foreach (var (text, align) in new[] { ("Left", HorizontalAlignment.Left), ("Center", HorizontalAlignment.Center), ("Right", HorizontalAlignment.Right) }) { var mark = Text(text, 11, true); mark.HorizontalAlignment = align; ends.Children.Add(mark); }
-                inspector.Children.Add(ends);
-                var percent = Text("", 11, true); percent.SetResourceReference(TextBlock.FontFamilyProperty, "MonoFont");
-                void Percent() => percent.Text = $"{(int)Math.Round(zoom.Value * 100)}%";
-                zoom.ValueChanged += (_, _) => Percent(); Percent();
-                inspector.Children.Add(Heading(Text("Crop zoom", 11, true), percent)); inspector.Children.Add(zoom);
-            }
-            inspector.Children.Add(Text(clip.FitToFrame == true ? "Show the complete source over a blurred background."
-                : clip.CropKeyframes is null ? "Manually added clips glide across wide footage. Zoom trims source edges."
-                : clip.CropKeyframes.Count > 0 ? "Auto framing follows the main subject, holds steady while it is framed, and resets on scene cuts. Adjust tracking offset here. Zoom trims source edges."
-                : "No clear subject was detected in this Short, so its crop holds steady. Adjust the framing offset here.", 11, true));
-            if (clip.FitToFrame != true)
-            {
-                var hold = Link("Center & hold", "", session.HoldFramingAtCenter); var retrack = Link("Re-track", "", session.RetrackSelectedSubject);
-                hold.IsEnabled = retrack.IsEnabled = !session.IsBusy; inspector.Children.Add(Row(hold, retrack));
-            }
-        }
-        inspector.Children.Add(Rule());
-        inspector.Children.Add(Caption("On-screen text"));
-        var overlay = new TextBox { Text = clip.Caption, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 70, Padding = new Thickness(6), VerticalContentAlignment = VerticalAlignment.Top };
-        System.Windows.Automation.AutomationProperties.SetName(overlay, "Clip text"); inspector.Children.Add(overlay);
-        inspector.Children.Add(Text("Speech captions are edited in the Captions tab.", 11, true));
-        var textStart = NumberBox(clip.CaptionStart ?? 0); var textDuration = NumberBox(Math.Min(clip.CaptionDuration ?? clip.Duration, clip.Duration - (clip.CaptionStart ?? 0)));
-        inspector.Children.Add(NumberRow("Text starts at", textStart)); inspector.Children.Add(NumberRow("Text duration", textDuration));
-        inspector.Children.Add(Text("Times are relative to this Short.", 11, true));
-        void Apply()
-        {
-            if (new[] { start, duration, textStart, textDuration }.Any(box => Value(box) is null)) { SignalError("Choose valid clip and text ranges within the source and clip duration."); return; }
-            var length = Value(duration)!.Value; var textAt = Value(textStart)!.Value;
-            session.UpdateSelectedEdit(Value(start)!.Value, length, overlay.Text, textAt, Math.Min(Value(textDuration)!.Value, Math.Max(0, length - textAt)), zoom.Value, position.Value);
-        }
-        foreach (var box in new[] { start, duration, textStart, textDuration }) box.KeyDown += (_, args) => { if (args.Key == Key.Enter) { args.Handled = true; try { Apply(); } catch (Exception error) { SignalError(error.Message); } } };
-        var apply = Button("Apply changes", Apply, primary: true); apply.HorizontalAlignment = HorizontalAlignment.Stretch; apply.Padding = new Thickness(0, 9, 0, 9); apply.Margin = new Thickness(0, 8, 0, 4);
-        inspector.Children.Add(apply);
-        inspector.Children.Add(Rule());
-        var mute = new CheckBox { Content = "Mute source audio", IsChecked = clip.IsMuted == true, FontSize = 12 };
-        mute.Click += (_, _) => { try { session.ToggleSelectedAudio(); } catch (Exception error) { SignalError(error.Message); } }; inspector.Children.Add(mute);
-        var export = Button("Export this Short", () => session.ChooseExport(clip.Id)); export.HorizontalAlignment = HorizontalAlignment.Stretch; export.Margin = new Thickness(0, 10, 0, 0);
-        export.ToolTip = "Choose quality and where this Short goes"; inspector.Children.Add(export);
-        inspector.IsEnabled = !session.IsBusy;
-    }
-
     void BuildCaptions()
     {
         captions.Children.Clear(); captions.Margin = new Thickness(6); saveCaptions = null;
@@ -551,18 +438,6 @@ public sealed class WindowsEditor : IDisposable
         lines.Children.Add(save);
     }
 
-    void BuildChatHistory()
-    {
-        chatHistory.Children.Clear(); chatHistory.Margin = new Thickness(14);
-        var source = Text("Prism AI · Cloud", 11); source.SetResourceReference(TextBlock.ForegroundProperty, "Accent"); chatHistory.Children.Add(source);
-        foreach (var message in session.ChatMessages)
-        {
-            var bubble = new Border { CornerRadius = new CornerRadius(8), Padding = new Thickness(10), Margin = new Thickness(0, 6, 0, 6), Child = Text(message.Text, 12) };
-            bubble.SetResourceReference(Border.BackgroundProperty, message.IsUser ? "AccentWash" : "Surface2"); chatHistory.Children.Add(bubble);
-        }
-        chatScroll.Dispatcher.BeginInvoke(() => chatScroll.ScrollToEnd(), DispatcherPriority.Loaded);
-    }
-
     void SavePaneSizes()
     {
         if (session.IsPlayerExpanded || panes.ActualWidth <= 0 || root.RowDefinitions[3].ActualHeight <= 0) return;
@@ -624,11 +499,6 @@ public sealed class WindowsEditor : IDisposable
         return false;
     }
     static DependencyObject? Parent(DependencyObject node) => node is Visual or System.Windows.Media.Media3D.Visual3D ? VisualTreeHelper.GetParent(node) : LogicalTreeHelper.GetParent(node);
-    static bool FocusInside(DependencyObject ancestor)
-    {
-        for (var focused = Keyboard.FocusedElement as DependencyObject; focused is not null; focused = Parent(focused)) if (ReferenceEquals(focused, ancestor)) return true;
-        return false;
-    }
     static bool TextEditingInside(DependencyObject ancestor)
     {
         var editing = false;
@@ -714,12 +584,6 @@ public sealed class WindowsEditor : IDisposable
         }
         return grid;
     }
-    static DockPanel NumberRow(string title, TextBox box)
-    {
-        box.Width = 74; box.TextAlignment = TextAlignment.Right; box.Padding = new Thickness(7); box.FontSize = 11; box.SetResourceReference(Control.FontFamilyProperty, "MonoFont");
-        box.ToolTip = "Press Enter to apply"; System.Windows.Automation.AutomationProperties.SetName(box, title);
-        var row = new DockPanel { Margin = new Thickness(0, 3, 0, 3) }; DockPanel.SetDock(box, Dock.Right); row.Children.Add(box); row.Children.Add(Text(title, 11, true)); return row;
-    }
     static ControlTemplate RoundTemplate()
     {
         var border = new FrameworkElementFactory(typeof(Border)); border.SetValue(Border.CornerRadiusProperty, new CornerRadius(11)); border.SetBinding(Border.BackgroundProperty, new System.Windows.Data.Binding("Background") { RelativeSource = System.Windows.Data.RelativeSource.TemplatedParent });
@@ -736,8 +600,6 @@ public sealed class WindowsEditor : IDisposable
     }
     static FrameworkElement Field(string title, FrameworkElement control)
     { var panel = Column(); panel.Margin = new Thickness(0, 4, 0, 4); panel.Children.Add(Text(title, 11, true)); panel.Children.Add(control); return panel; }
-    static TextBox NumberBox(double value) => new() { Text = value.ToString("0.###", CultureInfo.InvariantCulture), MinHeight = 30 };
-    static double? Value(TextBox box) => double.TryParse(box.Text.Trim().Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out var value) && double.IsFinite(value) ? value : null;
     static ComboBox Combo(string[] values, int selected) => new() { ItemsSource = values, SelectedIndex = selected, MinHeight = 32 };
     static void StyleTabs(TabControl tabs)
     {
