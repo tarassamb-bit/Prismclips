@@ -75,62 +75,72 @@ function fail(status: number, message: string): Response {
   });
 }
 
-const LIMIT_MESSAGE = "You've used your 60 beta minutes. Ask for a promo code to get more, then enter it in Settings › Usage.";
+const LIMIT_MESSAGE = "You've reached your beta usage limit. Ask for a promo code to get more, then enter it in Settings › Usage.";
 
-/// The video limit, enforced here. The app sends the video, its length and the local day with every request.
-/// The database checks and records it with the signed-in user's own token, so no request skips the limit.
-/// Returns the response to send back when the request must stop, and the session the cost is recorded with.
-type Session = { url: string; headers: Record<string, string> };
+/// Verify the caller, then reserve usage through a service-only database function.
+type Session = { url: string; headers: Record<string, string>; user: string };
 async function checkVideoLimit(request: Request): Promise<{ refused: Response | null; session: Session | null }> {
   const stop = (response: Response) => ({ refused: response, session: null });
   const video = request.headers.get("x-prism-video") ?? "";
   const minutes = Number(request.headers.get("x-prism-minutes"));
-  const day = request.headers.get("x-prism-day") ?? "";
-  if (!/^[0-9a-f]{64}$/.test(video) || !(minutes > 0 && minutes <= 600) || !/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+  if (!/^[0-9a-f]{64}$/.test(video) || !Number.isFinite(minutes) || !(minutes > 0 && minutes <= 600)) {
     return stop(fail(400, "Prism AI needs the video it is working on. Make Shorts from a video in the app."));
   }
+  // Each analysis run sends one id with all its requests, so the server counts re-analyses per video.
+  // Other requests (framing at export, chat, descriptions) send none and are not runs.
+  const run = request.headers.get("x-prism-run");
+  if (run !== null && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(run)) {
+    return stop(fail(400, "Prism AI got an invalid analysis run. Update Prism and try again."));
+  }
   const url = Deno.env.get("SUPABASE_URL");
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   const auth = request.headers.get("Authorization") ?? "";
   const apikey = request.headers.get("apikey") ?? "";
-  if (!url || !auth.startsWith("Bearer ") || !apikey) return stop(fail(401, "Sign in to your Prism account to continue."));
-  const rest = { "Authorization": auth, "apikey": apikey, "Content-Type": "application/json" };
-  const session: Session = { url, headers: rest };
-
-  const check = await fetch(`${url}/rest/v1/rpc/usage_allowed`, {
+  if (!url || !serviceKey) return stop(fail(503, "Prism AI is not configured for secure usage tracking."));
+  if (!auth.startsWith("Bearer ") || !apikey) return stop(fail(401, "Sign in to your Prism account to continue."));
+  const identity = await fetch(`${url}/auth/v1/user`, { headers: { "Authorization": auth, "apikey": apikey } });
+  if (identity.status === 401 || identity.status === 403) return stop(fail(401, "Sign in to your Prism account to continue."));
+  if (!identity.ok) return stop(fail(503, "Prism could not verify your sign-in right now."));
+  const user = await identity.json().catch(() => null);
+  if (typeof user?.id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(user.id)) {
+    return stop(fail(401, "Sign in to your Prism account to continue."));
+  }
+  const headers = { "Authorization": `Bearer ${serviceKey}`, "apikey": serviceKey, "Content-Type": "application/json" };
+  const session: Session = { url, headers, user: user.id };
+  const record = await fetch(`${url}/rest/v1/rpc/prism_reserve_beta_usage`, {
     method: "POST",
-    headers: rest,
-    body: JSON.stringify({ p_video: video, p_day: day, p_minutes: minutes }),
+    headers,
+    body: JSON.stringify({ p_user: user.id, p_video: video, p_minutes: minutes }),
   });
-  if (check.status === 401) return stop(fail(401, "Sign in to your Prism account to continue."));
-  if (!check.ok) return stop(fail(503, "Prism could not check your video limit right now. Try again shortly."));
-  if ((await check.json()) !== true) return stop(limitReached());
-
-  // The real protection: the dollars this account has spent. Minutes the app reports can't move it.
-  const spend = await fetch(`${url}/rest/v1/rpc/spend_allowed`, { method: "POST", headers: rest, body: "{}" });
-  if (spend.status === 401) return stop(fail(401, "Sign in to your Prism account to continue."));
-  if (!spend.ok) return stop(fail(503, "Prism could not check your allowance right now. Try again shortly."));
-  if ((await spend.json()) !== true) return stop(limitReached());
-
-  // Record the video once for the day. A repeat is ignored; a refusal here means the limit was just reached.
-  const record = await fetch(`${url}/rest/v1/usage_videos`, {
-    method: "POST",
-    headers: { ...rest, "Prefer": "resolution=ignore-duplicates,return=minimal" },
-    body: JSON.stringify({ video, day, minutes }),
-  });
-  if (record.status === 401) return stop(fail(401, "Sign in to your Prism account to continue."));
-  if (!record.ok && record.status !== 409) return stop(limitReached());
+  if (!record.ok) return stop(fail(503, "Prism could not check your allowance right now. Try again shortly."));
+  if ((await record.json()) !== true) return stop(limitReached());
+  if (run !== null) {
+    // The first run is covered by the reservation above; the database charges each re-analysis a share of the minutes.
+    const begun = await fetch(`${url}/rest/v1/rpc/prism_begin_analysis_run`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ p_user: user.id, p_video: video, p_run: run, p_minutes: minutes }),
+    });
+    if (!begun.ok) return stop(fail(503, "Prism could not check your allowance right now. Try again shortly."));
+    if ((await begun.json()) !== true) return stop(limitReached());
+  }
   return { refused: null, session };
 }
 
+// Free models report a cost of 0, which would let an account use them without limit. Every answer counts at least this
+// much, so the spend cap also bounds free use: the default cap of 60 minutes × $0.05 allows about 1,500 answers.
+const MIN_ANSWER_USD = 0.002;
+
 /// Adds what one model answer cost to the account. OpenRouter reports the cost in each response.
 async function recordSpend(session: Session, answer: any) {
-  const usd = Number(answer?.usage?.cost ?? 0);
-  if (!(usd > 0)) return;
-  await fetch(`${session.url}/rest/v1/rpc/add_spend`, {
+  const reported = Number(answer?.usage?.cost ?? 0);
+  const usd = Math.max(Number.isFinite(reported) ? reported : 0, MIN_ANSWER_USD);
+  const response = await fetch(`${session.url}/rest/v1/rpc/prism_record_beta_spend`, {
     method: "POST",
     headers: session.headers,
-    body: JSON.stringify({ p_usd: usd }),
+    body: JSON.stringify({ p_user: session.user, p_usd: usd }),
   });
+  if (!response.ok) throw new Error("Usage accounting failed");
 }
 
 function limitReached(): Response {
@@ -144,8 +154,6 @@ Deno.serve(async (request) => {
   if (request.method !== "POST") return fail(405, "Use POST.");
   const key = Deno.env.get("OPENROUTER_API_KEY");
   if (!key) return fail(500, "The AI key is not set on the server.");
-  const { refused, session } = await checkVideoLimit(request);
-  if (refused || !session) return refused ?? fail(401, "Sign in to your Prism account to continue.");
 
   let body: GeminiRequest;
   try {
@@ -160,6 +168,9 @@ Deno.serve(async (request) => {
     return fail(400, (error as Error).message);
   }
 
+  const { refused, session } = await checkVideoLimit(request);
+  if (refused || !session) return refused ?? fail(401, "Sign in to your Prism account to continue.");
+
   const chosen = Deno.env.get("OPENROUTER_MODEL");
   const models = [...new Set([...(chosen ? [chosen] : []), ...converted.models])];
   let status = 503, message = "No model answered.", reply: any = null;
@@ -170,8 +181,11 @@ Deno.serve(async (request) => {
       body: JSON.stringify({ model, ...converted.request }),
     });
     const answer = await upstream.json().catch(() => ({}));
-    await recordSpend(session, answer);
-    if (upstream.ok && answer?.choices?.length) { reply = answer; break; }
+    // Only answers count toward the cap, so a model that refuses or is down doesn't use up the person's allowance.
+    if (upstream.ok && answer?.choices?.length) {
+      try { await recordSpend(session, answer); } catch { return fail(503, "Prism could not record usage. Please try again later."); }
+      reply = answer; break;
+    }
     status = upstream.status;
     message = `${model}: ${answer?.error?.message ?? `HTTP ${upstream.status}`}`;
     console.error(message);
@@ -184,8 +198,6 @@ Deno.serve(async (request) => {
   const choice = reply.choices[0];
   const raw: string = choice?.message?.content ?? "";
   const text = converted.wantsJSON ? cleanJSON(raw) : raw;
-  // Visible in Supabase → Edge Functions → Logs, so a model that answers in an unexpected shape can be diagnosed.
-  console.log(`answer from ${reply.model ?? "model"} (first 300 characters): ${text.slice(0, 300)}`);
   const finished = choice?.finish_reason === "length" ? "MAX_TOKENS" : "STOP";
   return new Response(
     JSON.stringify({ candidates: [{ content: { parts: [{ text }] }, finishReason: finished }] }),
