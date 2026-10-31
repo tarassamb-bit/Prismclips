@@ -220,6 +220,19 @@ public class GeminiTests
     }
 
     [Fact]
+    public void OnlyHesitationAndSignOffsAreTrimmedFromShortEdges()
+    {
+        TimedCaption Cue(string text, double start) => new(text, start, 1);
+        var cues = new[] { Cue("Um.", 0), Cue("Yes.", 1), Cue("That is the answer.", 2), Cue("Thank you.", 3), Cue("Thanks for watching!", 4) };
+        Assert.Equal((1.0, 3.0), TranscriptSelection.TrimmedFiller(0, 5, cues, 1));
+        var words = new[] { new TimedSpeechWord("So", 0, 0.2), new TimedSpeechWord("um", 0.3, 0.2), new TimedSpeechWord("this", 1, 0.3), new TimedSpeechWord("works", 1.4, 0.3) };
+        Assert.Equal(0.92, ShortMaker.StrongOpening(0, 5, words, 1).Start, 3);
+        var and = new[] { new TimedSpeechWord("And", 0, 0.2), new TimedSpeechWord("then", 0.3, 0.2) };
+        Assert.Equal(0, ShortMaker.StrongOpening(0, 5, and, 1).Start);
+        Assert.Equal([new TimedCaption("in", 0.5, 0.5)], ShortMaker.ClipCaptions([new("before", 0, 1), new("in", 1.5, 1), new("after", 3, 1)], 1, 1));
+    }
+
+    [Fact]
     public void LongPiecesAreSplitAtSentencesAndTimedByLength()
     {
         var split = GeminiSelection.SplitSentences([("One two three. Four five six seven eight nine? Ten.", 0, 10), ("Short. Piece.", 10, 14)]);

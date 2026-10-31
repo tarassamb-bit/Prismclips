@@ -60,7 +60,13 @@ public static class TranscriptSelection
     {
         var expected = reference.SelectMany(r => Tokens(r.Text)).ToList();
         var actual = words.SelectMany(w => Tokens(w.Text)).ToList();
-        if (expected.Count == 0 || actual.Count == 0 || actual[0] != expected[0] || actual[^1] != expected[^1]
+        // The edges may differ by a word or two (a dropped "so", an added "uh"); the overlap check below still
+        // demands 95% of the words, so a lost payoff is still caught.
+        if (expected.Count == 0 || actual.Count == 0
+            || !words.All(w => double.IsFinite(w.Start) && double.IsFinite(w.Duration) && w.Duration > 0)
+            || words.Zip(words.Skip(1)).Any(pair => pair.First.Start > pair.Second.Start)
+            || !(expected.Take(3).Contains(actual[0]) || actual.Take(3).Contains(expected[0]))
+            || !(expected.TakeLast(3).Contains(actual[^1]) || actual.TakeLast(3).Contains(expected[^1]))
             || actual.Count > expected.Count * 3 / 2 + 3) return false;
         var previous = new int[actual.Count + 1];
         foreach (var token in expected)
@@ -74,10 +80,14 @@ public static class TranscriptSelection
         foreach (var cue in reference)
         {
             var cueTokens = Tokens(cue.Text);
-            if (cueTokens.Count < 4) continue;
-            var nearby = words.Where(w => w.Start + w.Duration > cue.Start - 0.7 && w.Start < cue.Start + cue.Duration + 0.7)
-                              .SelectMany(w => Tokens(w.Text)).ToHashSet();
-            var coverage = (double)cueTokens.Count(nearby.Contains) / cueTokens.Count;
+            if (cueTokens.Count == 0) continue;
+            // Each nearby word matches one cue word at most, so a repeated word can't cover a line on its own.
+            var remaining = words.Where(w => w.Start + w.Duration > cue.Start - 0.7 && w.Start < cue.Start + cue.Duration + 0.7)
+                                 .SelectMany(w => Tokens(w.Text)).GroupBy(t => t).ToDictionary(g => g.Key, g => g.Count());
+            var matched = 0;
+            foreach (var token in cueTokens)
+                if (remaining.GetValueOrDefault(token) > 0) { remaining[token]--; matched++; }
+            var coverage = (double)matched / cueTokens.Count;
             if (coverage < 0.65) return false;
         }
         return true;
@@ -150,22 +160,20 @@ public static class TranscriptSelection
     // shortcut: English filler words only; add per-language lists if non-English sources matter.
     public static (double Start, double Duration) TrimmedFiller(double start, double duration, IReadOnlyList<TimedCaption> cues, double minDuration)
     {
-        HashSet<string> filler = ["okay", "ok", "so", "um", "uh", "erm", "hmm", "yeah", "right", "alright", "all", "anyway", "well",
-                                  "and", "but", "now", "oh", "hey", "hi", "hello", "guys", "everyone", "thanks", "thank", "you", "for", "watching"];
-        bool IsFiller(TimedCaption cue)
-        {
-            var words = Tokens(cue.Text);
-            return words.Count > 0 && words.Count <= 4 && words.All(filler.Contains);
-        }
+        // Short replies such as "Yes", "Right", or "Thank you" can be the payoff.
+        // Trim only unambiguous hesitation at the start and explicit sign-offs at the end.
+        HashSet<string> openingFiller = ["um", "uh", "erm", "hmm", "so", "okay so", "ok so"];
+        HashSet<string> closingFiller = ["thanks for watching", "thank you for watching"];
+        string Normalized(TimedCaption cue) => string.Join(" ", Tokens(cue.Text));
         var inside = cues.Where(c => c.Start >= start - 0.05 && c.Start + c.Duration <= start + duration + 0.05).OrderBy(c => c.Start).ToList();
         var begin = start;
         var end = start + duration;
-        while (inside.Count > 1 && IsFiller(inside[0]) && end - inside[1].Start >= minDuration)
+        while (inside.Count > 1 && openingFiller.Contains(Normalized(inside[0])) && end - inside[1].Start >= minDuration)
         {
             inside.RemoveAt(0);
             begin = inside[0].Start;
         }
-        while (inside.Count > 1 && IsFiller(inside[^1]) && inside[^2].Start + inside[^2].Duration - begin >= minDuration)
+        while (inside.Count > 1 && closingFiller.Contains(Normalized(inside[^1])) && inside[^2].Start + inside[^2].Duration - begin >= minDuration)
         {
             inside.RemoveAt(inside.Count - 1);
             end = inside[^1].Start + inside[^1].Duration;

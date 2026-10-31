@@ -105,12 +105,7 @@ public static class ShortMaker
             var candidate = picks[candidateIndex];
             double start = shot.Start, duration = shot.Duration;
             var source = shot.Words.Count > 0 ? GeminiSelection.CaptionCues(shot.Words, (start, start + duration)) : TranscriptSelection.SentenceCaptionGroups(shot.ReferenceCues);
-            var captions = source.Where(c => c.Start + c.Duration > start && c.Start < start + duration).Select(c =>
-            {
-                var clippedStart = Math.Max(0, c.Start - start);
-                var clippedEnd = Math.Min(duration, c.Start + c.Duration - start);
-                return new TimedCaption(c.Text, clippedStart, Math.Max(0.15, clippedEnd - clippedStart));
-            }).ToList();
+            var captions = ClipCaptions(source, start, duration);
             var words = shot.Words.Where(w => w.Start >= start - 0.01 && w.Start + w.Duration <= start + duration + 0.01)
                                   .Select(w => w with { Start = w.Start - start }).ToList();
             var keyframes = candidate.Fit
@@ -213,15 +208,22 @@ public static class ShortMaker
     /// <summary>Drops up to three throat-clearing words ("So", "Um", "And", "Okay") from a Short's first line, so it opens on its hook.
     /// Needs real word timing; the cut lands 0.08 s before the next word and the Short keeps <paramref name="minDuration"/>.</summary>
     // shortcut: English filler words only; add per-language lists if non-English sources matter.
+    /// <summary>Shift captions into the clip's timeline without extending them beyond its end.</summary>
+    public static List<TimedCaption> ClipCaptions(IEnumerable<TimedCaption> cues, double start, double duration)
+        => cues.Select(c => (Text: c.Text, From: Math.Max(0, c.Start - start), To: Math.Min(duration, c.Start + c.Duration - start)))
+               .Where(c => c.To > c.From).Select(c => new TimedCaption(c.Text, c.From, c.To - c.From)).ToList();
+
     public static (double Start, double Duration) StrongOpening(double start, double duration, IReadOnlyList<TimedSpeechWord> words, double minDuration)
     {
-        // Only words that are filler at the start of a line; "like", "now", "then" and "right" often carry meaning there.
-        HashSet<string> weak = ["so", "and", "but", "um", "uh", "erm", "okay", "ok", "well", "anyway", "alright", "yeah"];
+        // Replies and conjunctions can carry meaning. Only remove unmistakable hesitation,
+        // plus "so" immediately followed by a hesitation ("so, um...").
+        HashSet<string> hesitation = ["um", "uh", "erm"];
         var end = start + duration;
         var spoken = words.Where(w => w.Start >= start - 0.05 && w.Start < end).OrderBy(w => w.Start).ToList();
         static string Bare(TimedSpeechWord word) => new(word.Text.ToLowerInvariant().Where(char.IsLetter).ToArray());
         var dropped = 0;
-        while (dropped < Math.Min(3, spoken.Count - 1) && weak.Contains(Bare(spoken[dropped]))) dropped += 1;
+        if (spoken.Count > 1 && Bare(spoken[0]) == "so" && hesitation.Contains(Bare(spoken[1]))) dropped = 1;
+        while (dropped < Math.Min(3, spoken.Count - 1) && hesitation.Contains(Bare(spoken[dropped]))) dropped += 1;
         if (dropped == 0) return (start, duration);
         var newStart = Math.Max(start, spoken[dropped].Start - 0.08);
         return end - newStart >= minDuration ? (newStart, end - newStart) : (start, duration);
