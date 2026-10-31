@@ -512,11 +512,8 @@ public sealed class WindowsEditor : IDisposable
             System.Windows.Automation.AutomationProperties.SetName(button, style.Title());
             styles.Children.Add(button);
         }
-        if (current.UsesWordTiming() && clip.SpeechWords is not { Count: > 0 })
-        {
-            var warning = Text(session.IsBusy ? "Prism AI is timing the words so captions follow the speech…" : $"{current.Title()} follows each spoken word, which needs word timing this Short doesn't have. Transcribe it to add timing; until then captions show as whole phrases.", 11);
-            warning.SetResourceReference(TextBlock.ForegroundProperty, "Amber"); styles.Children.Add(warning);
-        }
+        if (current.UsesWordTiming() && clip.SpeechWords is not { Count: > 0 } && hasAudio)
+            styles.Children.Add(Text(session.IsBusy ? "Prism AI is timing the words so captions follow the speech…" : "Word timing is estimated for this Short. Transcribing may improve it.", 11, true));
         styles.Children.Add(Caption("Position", false));
         var positions = Enum.GetValues<CaptionPosition>();
         styles.Children.Add(Segmented(positions.Select(p => p.Title()).ToArray(), Array.IndexOf(positions, clip.CaptionPosition ?? CaptionPosition.Bottom), index => session.SetSelectedCaptionLayout(position: positions[index])));

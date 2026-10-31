@@ -31,9 +31,9 @@ public sealed partial class PrismWindow : Window
     readonly TextBlock heading = Text("Home", 18, display: true);
     readonly TextBlock status = Text("", 12, muted: true);
     readonly ProgressBar busy = new() { IsIndeterminate = true, Width = 44, Height = 4, Margin = new Thickness(12, 0, 0, 0) };
-    TextBlock memory = new(), storage = new(), ringLabel = new();
+    TextBlock memory = new(), storage = new(), ringLabel = new(), freeLabel = new();
     ProgressBar memoryBar = new(), storageBar = new();
-    System.Windows.Shapes.Path? ring;
+    System.Windows.Shapes.Path? ring, storageRing;
     readonly Dictionary<Screen, Button> navButtons = [];
     readonly List<Action> appearanceUpdates = [];
     readonly Button minimize, maximize, close;
@@ -248,7 +248,13 @@ public sealed partial class PrismWindow : Window
         button.HorizontalContentAlignment = sidebarCollapsed ? HorizontalAlignment.Center : HorizontalAlignment.Left;
         AutomationProperties.SetName(button, title);
         FrameworkElement mark = prominent ? PlusTile(16, 9) : Glyph(glyph, sidebarCollapsed ? 16 : 15);
-        if (sidebarCollapsed) button.Content = mark;
+        if (sidebarCollapsed)
+        {
+            // Only the icon gets a small pill, with its name below, so the narrow sidebar stays light (as on the Mac).
+            var name = Text(prominent ? "Create" : title, 10); name.FontWeight = FontWeights.Medium; name.Margin = new Thickness(0, 5, 0, 0); name.HorizontalAlignment = HorizontalAlignment.Center;
+            mark.HorizontalAlignment = HorizontalAlignment.Center;
+            button.Content = Column(mark, name);
+        }
         else { mark.Margin = new Thickness(0, 0, 12, 0); button.Content = Row(mark, Label(title, 14)); }
         if (prominent) { button.SetResourceReference(Control.BackgroundProperty, "Action"); button.Foreground = OnAction; }
         navButtons[screen] = button;
@@ -264,7 +270,7 @@ public sealed partial class PrismWindow : Window
         storageBar = new ProgressBar { Height = 4, Maximum = 1, Margin = new Thickness(0, 4, 0, 0) };
         panel.Children.Add(ResourceLine("", "RAM used", memory)); panel.Children.Add(memoryBar);
         panel.Children.Add(ResourceLine("", "Storage free", storage)); panel.Children.Add(storageBar);
-        ring = null;
+        ring = storageRing = null;
         return panel;
     }
     static DockPanel ResourceLine(string glyph, string title, TextBlock value)
@@ -276,18 +282,34 @@ public sealed partial class PrismWindow : Window
         line.Children.Add(Row(mark, label));
         return line;
     }
-    /// The collapsed sidebar shows RAM as a ring, like the Mac app.
+    /// The collapsed sidebar shows RAM (outer ring) and free storage (inner ring) with the free space below, like the Mac app.
     UIElement RamRing()
     {
-        var host = new Grid { Width = 44, Height = 44, Margin = new Thickness(0, 17, 0, 0), HorizontalAlignment = HorizontalAlignment.Center };
-        var track = new Ellipse { StrokeThickness = 4 }; track.SetResourceReference(Shape.StrokeProperty, "Line"); host.Children.Add(track);
+        var host = new Grid { Width = 50, Height = 50, HorizontalAlignment = HorizontalAlignment.Center };
+        Ellipse Track(double inset, double width) { var track = new Ellipse { StrokeThickness = width, Margin = new Thickness(inset) }; track.SetResourceReference(Shape.StrokeProperty, "Line"); return track; }
+        host.Children.Add(Track(2, 4)); host.Children.Add(Track(8, 3));
         ring = new System.Windows.Shapes.Path { StrokeThickness = 4, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round }; ring.SetResourceReference(Shape.StrokeProperty, "Ink");
-        host.Children.Add(ring);
-        ringLabel = Text("", 9, display: true); ringLabel.Margin = new Thickness(0); ringLabel.TextAlignment = TextAlignment.Center; ringLabel.HorizontalAlignment = HorizontalAlignment.Center;
-        host.Children.Add(ringLabel);
+        storageRing = new System.Windows.Shapes.Path { StrokeThickness = 3, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round }; storageRing.SetResourceReference(Shape.StrokeProperty, "Accent");
+        host.Children.Add(ring); host.Children.Add(storageRing);
+        var ram = Text("RAM", 7, muted: true); ram.FontWeight = FontWeights.Medium; ram.Margin = new Thickness(0); ram.HorizontalAlignment = HorizontalAlignment.Center;
+        ringLabel = Text("", 10, display: true); ringLabel.Margin = new Thickness(0); ringLabel.HorizontalAlignment = HorizontalAlignment.Center;
+        var middle = Column(ram, ringLabel); middle.VerticalAlignment = VerticalAlignment.Center; host.Children.Add(middle);
+        freeLabel = Text("", 9); freeLabel.FontWeight = FontWeights.Medium; freeLabel.SetResourceReference(TextBlock.ForegroundProperty, "Accent");
+        freeLabel.HorizontalAlignment = HorizontalAlignment.Center; freeLabel.Margin = new Thickness(0, 6, 0, 0);
         memory = new TextBlock(); storage = new TextBlock(); memoryBar = new ProgressBar(); storageBar = new ProgressBar();
-        return host;
+        var column = Column(host, freeLabel); column.Margin = new Thickness(0, 17, 0, 0); column.HorizontalAlignment = HorizontalAlignment.Center;
+        return column;
     }
+
+    /// An arc from twelve o'clock, clockwise, for `fraction` of a circle of `radius` around the ring's centre.
+    static Geometry Arc(double fraction, double radius)
+    {
+        var used = Math.Clamp(fraction, 0, 0.9999); var angle = used * 2 * Math.PI;
+        var figure = new PathFigure { StartPoint = new Point(25, 25 - radius) };
+        figure.Segments.Add(new ArcSegment(new Point(25 + radius * Math.Sin(angle), 25 - radius * Math.Cos(angle)), new Size(radius, radius), 0, used > 0.5, SweepDirection.Clockwise, true));
+        return new PathGeometry([figure]);
+    }
+
     void RestartResourceTimer()
     {
         resourceTimer.Stop();
@@ -300,14 +322,13 @@ public sealed partial class PrismWindow : Window
         memory.Text = string.Create(CultureInfo.InvariantCulture, $"{profile.MemoryUsedGB:0.0} / {profile.MemoryGB} GB");
         storage.Text = $"{profile.FreeGB} / {profile.StorageGB} GB";
         memoryBar.Value = profile.MemoryUsage; storageBar.Value = profile.FreeStorageRatio;
-        if (ring is null) return;
-        var used = Math.Clamp(profile.MemoryUsage, 0, 0.9999);
-        var angle = used * 2 * Math.PI;
-        var figure = new PathFigure { StartPoint = new Point(22, 2) };
-        figure.Segments.Add(new ArcSegment(new Point(22 + 20 * Math.Sin(angle), 22 - 20 * Math.Cos(angle)), new Size(20, 20), 0, used > 0.5, SweepDirection.Clockwise, true));
-        ring.Data = new PathGeometry([figure]);
-        ringLabel.Text = $"{(int)(profile.MemoryUsage * 100)}%\nRAM";
-        ring.ToolTip = string.Create(CultureInfo.InvariantCulture, $"RAM used: {profile.MemoryUsedGB:0.0} of {profile.MemoryGB} GB · Storage free: {profile.FreeGB} of {profile.StorageGB} GB");
+        if (ring is null || storageRing is null) return;
+        ring.Data = Arc(profile.MemoryUsage, 21); storageRing.Data = Arc(profile.FreeStorageRatio, 15.5);
+        ringLabel.Text = $"{(int)(profile.MemoryUsage * 100)}%";
+        freeLabel.Text = $"{profile.FreeGB} GB free";
+        var summary = string.Create(CultureInfo.InvariantCulture, $"RAM used: {profile.MemoryUsedGB:0.0} of {profile.MemoryGB} GB · Storage free: {profile.FreeGB} of {profile.StorageGB} GB");
+        ring.ToolTip = storageRing.ToolTip = summary;
+        AutomationProperties.SetName(freeLabel, $"RAM {(int)(profile.MemoryUsage * 100)} percent used; {profile.FreeGB} gigabytes of storage free");
     }
 
     /// The dark/light switch: two icon segments in a pill, shared with the editor header.
