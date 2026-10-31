@@ -173,7 +173,11 @@ public sealed partial class AppSession : INotifyPropertyChanged, IDisposable
 
     int shortCount = 3;
     public int ShortCount { get => shortCount; set => Set(ref shortCount, Math.Clamp(value, 1, 20)); }
-    double shortDuration = 30;
+    bool isShortCountAuto = true;
+    /// <summary>Prism AI decides how many Shorts the video holds instead of a fixed count.</summary>
+    public bool IsShortCountAuto { get => isShortCountAuto; set => Set(ref isShortCountAuto, value); }
+    /// <summary>Approximate Short length in seconds; 0 is Auto, where Prism AI gives each Short the length its story needs.</summary>
+    double shortDuration;
     public double ShortDuration { get => shortDuration; set => Set(ref shortDuration, value); }
     SourceRegion shortSourceRegion = SourceRegion.EntireVideo;
     public SourceRegion ShortSourceRegion { get => shortSourceRegion; set => Set(ref shortSourceRegion, value); }

@@ -99,13 +99,14 @@ public sealed partial class PrismWindow
         var count = Label("", "medium");
         count.SetSizeRequest(70, -1);
         count.Xalign = 0.5f;
-        var fewer = Button("−", () => session.ShortCount = Math.Max(1, session.ShortCount - 1), "compact");
-        var more = Button("+", () => session.ShortCount = Math.Min(10, session.ShortCount + 1), "compact");
+        // The count starts on Auto; − and + switch to a fixed number.
+        var fewer = Button("−", () => { if (session.IsShortCountAuto) session.IsShortCountAuto = false; else session.ShortCount = Math.Max(1, session.ShortCount - 1); }, "compact");
+        var more = Button("+", () => { if (session.IsShortCountAuto) session.IsShortCountAuto = false; else session.ShortCount = Math.Min(10, session.ShortCount + 1); }, "compact");
         fewer.TooltipText = "Fewer Shorts"; more.TooltipText = "More Shorts";
         var stepper = Row(6);
         stepper.Append(fewer); stepper.Append(count); stepper.Append(more);
-        double[] durations = [15, 30, 45, 60];
-        var length = Combo(durations.Select(seconds => $"{seconds:0} seconds"), Math.Max(0, Array.IndexOf(durations, session.ShortDuration)), index =>
+        double[] durations = [0, 15, 30, 45, 60];
+        var length = Combo(durations.Select(seconds => seconds == 0 ? "Auto" : $"{seconds:0} seconds"), Math.Max(0, Array.IndexOf(durations, session.ShortDuration)), index =>
         { if (index >= 0) session.ShortDuration = durations[index]; });
         var regions = Enum.GetValues<SourceRegion>();
         var region = Combo(regions.Select(value => value.Title()), Array.IndexOf(regions, session.ShortSourceRegion), index =>
@@ -134,8 +135,8 @@ public sealed partial class PrismWindow
         page.Append(next);
         updateScreen = () =>
         {
-            count.SetText($"{session.ShortCount} Shorts");
-            fewer.Sensitive = session.ShortCount > 1; more.Sensitive = session.ShortCount < 10;
+            count.SetText(session.IsShortCountAuto ? "Auto" : $"{session.ShortCount} Shorts");
+            fewer.Sensitive = session.IsShortCountAuto || session.ShortCount > 1; more.Sensitive = session.IsShortCountAuto || session.ShortCount < 10;
             custom.Visible = session.ShortSourceRegion == SourceRegion.Custom;
             if (session.CustomRangeError is { } error) { rangeNote.SetText("⚠ " + error); rangeNote.AddCssClass("warning"); }
             else
@@ -148,7 +149,9 @@ public sealed partial class PrismWindow
                 }
                 catch (Exception) { rangeNote.SetText(""); }
             }
-            explanation.SetText($"Prism will analyze frames and available speech, then suggest up to {session.ShortCount} distinct moments of about {session.ShortDuration:0} seconds in the {session.ShortSourceRegion.Title().ToLowerInvariant()}. Review every pick before exporting.");
+            var moments = session.IsShortCountAuto ? $"every strong moment it finds, up to {ShortMaker.MaxShorts}" : session.ShortCount == 1 ? "1 moment" : $"up to {session.ShortCount} moments";
+            var each = session.ShortDuration > 0 ? $"about {session.ShortDuration:0} seconds each" : "each 15–60 seconds, as long as its story needs";
+            explanation.SetText($"Prism analyzes the speech and frames of the {session.ShortSourceRegion.Title().ToLowerInvariant()} and suggests {moments}, {each}. Shorts never overlap. Review every pick before exporting.");
             next.Sensitive = !session.IsBusy && session.CustomRangeError is null;
         };
     }

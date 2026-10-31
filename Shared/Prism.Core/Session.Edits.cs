@@ -424,7 +424,7 @@ public sealed partial class AppSession
         if (IsBusy || project?.Media.FirstOrDefault(m => m.Id == Selection) is not { Duration: > 0 } video) return;
         var time = PreviewShortId is null ? Player?.CurrentTime ?? 0 : 0;
         var start = Math.Min(Math.Max(0, double.IsFinite(time) ? time : 0), Math.Max(0, video.Duration - 1));
-        var duration = Math.Min(ShortDuration, video.Duration - start);
+        var duration = Math.Min(ShortDuration > 0 ? ShortDuration : 30, video.Duration - start);
         if (!double.IsFinite(duration) || duration <= 0) return;
         var previous = PrismJson.Clone(project.Segments);
         var clip = new EditSegment { MediaId = video.Id, Start = start, Duration = duration };

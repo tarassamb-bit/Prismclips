@@ -182,7 +182,7 @@ public sealed partial class AppSession
     {
         var video = project?.Media.FirstOrDefault(m => m.Id == selection && m.Kind == "video")
             ?? project?.Media.FirstOrDefault(m => m.Kind == "video");
-        return video is null ? Task.CompletedTask : MakeShorts(video, shortCount, shortDuration, shortSourceRegion);
+        return video is null ? Task.CompletedTask : MakeShorts(video, isShortCountAuto ? 0 : shortCount, shortDuration, shortSourceRegion);
     }
 
     /// <summary>A re-analysis, which charges part of the video's minutes, waiting for the person to confirm it.</summary>

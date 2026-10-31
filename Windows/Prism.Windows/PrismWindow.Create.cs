@@ -100,8 +100,9 @@ public sealed partial class PrismWindow
         var count = Text("", 13); count.FontWeight = FontWeights.Medium; count.Margin = new Thickness(10, 0, 10, 0); count.MinWidth = 70; count.TextAlignment = TextAlignment.Center;
         var fewer = StepButton("\uE738", "Fewer Shorts", () => session.ShortCount = Math.Max(1, session.ShortCount - 1));
         var more = StepButton("\uE710", "More Shorts", () => session.ShortCount = Math.Min(20, session.ShortCount + 1));
-        double[] lengths = [15, 30, 45, 60];
-        var length = Combo(lengths.Select(seconds => $"{seconds:0} seconds"), Math.Max(0, Array.IndexOf(lengths, session.ShortDuration)), index => { if (index >= 0) session.ShortDuration = lengths[index]; });
+        // 0 is Auto: Prism AI gives each Short the length its story needs.
+        double[] lengths = [0, 15, 30, 45, 60];
+        var length = Combo(lengths.Select(seconds => seconds == 0 ? "Auto" : $"{seconds:0} seconds"), Math.Max(0, Array.IndexOf(lengths, session.ShortDuration)), index => { if (index >= 0) session.ShortDuration = lengths[index]; });
         var regions = Enum.GetValues<SourceRegion>();
         var start = Entry(session.CustomStartMinutes, "Start in minutes", value => session.CustomStartMinutes = value);
         var end = Entry(session.CustomEndMinutes, "End in minutes", value => session.CustomEndMinutes = value);
@@ -115,7 +116,11 @@ public sealed partial class PrismWindow
         var columns = new Grid { Margin = new Thickness(0, 6, 0, 6) };
         for (var index = 0; index < 3; index++) columns.ColumnDefinitions.Add(new ColumnDefinition());
         var stepper = Row(fewer, count, more);
-        var fields = new UIElement[] { IconField("\uE8FD", "How many", stepper), IconField("\uE916", "Approx. length", length), IconField("\uE8B2", "Take clips from", region) };
+        var auto = new CheckBox { Content = "Auto", IsChecked = session.IsShortCountAuto, FontWeight = FontWeights.Medium, Margin = new Thickness(0, 4, 0, 6),
+            ToolTip = "Prism AI finds every strong moment, up to one Short per minute of video and 20 in all" };
+        auto.Checked += (_, _) => session.IsShortCountAuto = true; auto.Unchecked += (_, _) => session.IsShortCountAuto = false;
+        var howMany = Column(auto, stepper);
+        var fields = new UIElement[] { IconField("\uE8FD", "How many", howMany), IconField("\uE916", "Approx. length", length), IconField("\uE8B2", "Take clips from", region) };
         for (var index = 0; index < 3; index++) { Grid.SetColumn(fields[index], index); ((FrameworkElement)fields[index]).Margin = new Thickness(0, 0, 18, 0); columns.Children.Add(fields[index]); }
         var explanation = Text("", 12, muted: true);
         var heading = Text("Shorts settings", 12, muted: true); heading.FontWeight = FontWeights.Medium;
@@ -126,6 +131,7 @@ public sealed partial class PrismWindow
         updateScreen = () =>
         {
             count.Text = $"{session.ShortCount} Shorts";
+            stepper.Visibility = session.IsShortCountAuto ? Visibility.Collapsed : Visibility.Visible;
             fewer.IsEnabled = session.ShortCount > 1; more.IsEnabled = session.ShortCount < 20;
             custom.Visibility = session.ShortSourceRegion == SourceRegion.Custom ? Visibility.Visible : Visibility.Collapsed;
             if (session.CustomRangeError is { } error) { rangeNote.Text = "⚠ " + error; rangeNote.SetResourceReference(TextBlock.ForegroundProperty, "Amber"); }
@@ -139,7 +145,9 @@ public sealed partial class PrismWindow
                 catch (Exception) { rangeNote.Text = ""; }
                 rangeNote.SetResourceReference(TextBlock.ForegroundProperty, "Muted");
             }
-            explanation.Text = $"Prism will analyze frames and available speech, then suggest up to {session.ShortCount} distinct moments of about {session.ShortDuration:0} seconds in the {session.ShortSourceRegion.Title().ToLowerInvariant()}. Review every pick before exporting.";
+            var moments = session.IsShortCountAuto ? $"every strong moment it finds, up to {ShortMaker.MaxShorts}" : session.ShortCount == 1 ? "1 moment" : $"up to {session.ShortCount} moments";
+            var each = session.ShortDuration > 0 ? $"about {session.ShortDuration:0} seconds each" : "each 15–60 seconds, as long as its story needs";
+            explanation.Text = $"Prism analyzes the speech and frames of the {session.ShortSourceRegion.Title().ToLowerInvariant()} and suggests {moments}, {each}. Shorts never overlap. Review every pick before exporting.";
             next.IsEnabled = !session.IsBusy && session.CustomRangeError is null;
         };
     }

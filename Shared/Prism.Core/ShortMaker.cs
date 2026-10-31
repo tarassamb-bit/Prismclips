@@ -3,6 +3,10 @@ namespace Prism.Core;
 /// Turns a long video into Shorts: transcript, selection, exact boundaries and framing, as in the macOS app.
 public static class ShortMaker
 {
+    public const int MaxShorts = 20;
+    /// <summary>How many Shorts Auto makes room for: one per minute of the analyzed part, 1 to 20.</summary>
+    public static int AutoCount(double seconds) => Math.Min(MaxShorts, Math.Max(1, (int)(seconds / 60)));
+
     public static async Task<List<ShortResult>> Analyze(
         string path, double requestedDuration, int count, SourceRegion sourceRegion, GeminiConfiguration gemini,
         double? customStart = null, double? customEnd = null, IReadOnlyList<SourceInterval>? excluding = null,
@@ -16,8 +20,10 @@ public static class ShortMaker
         if (info is not { HasVideo: true } || !double.IsFinite(info.Duration) || info.Duration <= 0) throw new ShortMakerException(ShortMakerFailure.NoVideo);
         var interval = sourceRegion.Interval(info.Duration, customStart, customEnd);
         if (excluding.Any(e => e.Start <= interval.Start && e.End >= interval.End)) throw new GeminiException(GeminiFailure.NoDistinctClips);
-        var clipDuration = Math.Min(Math.Max(1, requestedDuration), interval.End - interval.Start);
-        var targetCount = Math.Clamp(count, 1, 20);
+        // 0 is Auto length; Prism AI sizes each clip within GeminiSelection.LengthRange.
+        var clipDuration = requestedDuration > 0 ? Math.Min(Math.Max(1, requestedDuration), interval.End - interval.Start) : 0;
+        // A count of 0 means Auto: room for one Short per minute, and only clips Prism AI scores as strong fill it.
+        var targetCount = count > 0 ? Math.Min(count, MaxShorts) : AutoCount(interval.End - interval.Start);
         progress(0, "Preparing audio for Prism AI");
         List<TimedCaption> transcript;
         if (!info.HasAudio) transcript = [];
@@ -55,6 +61,9 @@ public static class ShortMaker
         progress(0.55, "Prism AI · choosing complete stories and layouts");
         var clips = await GeminiSelection.Select(path, transcript, interval, clipDuration, targetCount, gemini, excluding, videoType.SelectionGuidance(),
             (fraction, stage) => progress(0.55 + 0.15 * fraction, stage), cancellation: cancellation);
+        // Auto keeps only strong picks; when Prism AI found none, the single best weaker one beats failing.
+        var strong = clips.Where(c => c.Reason?.StartsWith("Weaker pick", StringComparison.Ordinal) != true).ToList();
+        if (count <= 0) clips = strong.Count == 0 ? [.. clips.Take(1)] : strong;
         // Screens and gameplay lose their edges in a vertical crop, whatever the picker suggested.
         var picks = clips.Select(c => (c.Start, Duration: c.End - c.Start, Fit: c.Layout == "fit" || videoType.ForcesFit(), c.Title, c.Reason, c.Score, c.Description)).ToList();
         var steps = 0;
@@ -136,8 +145,8 @@ public static class ShortMaker
         var phraseCut = TranscriptSelection.PhraseRange(start, duration, transcript, interval);
         // Cloud cues are whole sentences, so a Short never starts or stops in the middle of one.
         var sentences = TranscriptSelection.CompleteSentences(phraseCut.Start, phraseCut.Duration, transcript, interval,
-                                                              Math.Max(1, clipDuration * 0.65), Math.Min(90, clipDuration * 1.5));
-        var snapped = TranscriptSelection.TrimmedFiller(sentences.Start, sentences.Duration, transcript, Math.Max(1, clipDuration * 0.65));
+                                                              GeminiSelection.LengthRange(clipDuration).Min, GeminiSelection.LengthRange(clipDuration).Max);
+        var snapped = TranscriptSelection.TrimmedFiller(sentences.Start, sentences.Duration, transcript, GeminiSelection.LengthRange(clipDuration).Min);
         var phrase = TranscriptSelection.PaddedPhraseRange(snapped.Start, snapped.Duration, transcript, interval);
         var referenceCues = transcript.Where(c =>
         {
@@ -162,7 +171,7 @@ public static class ShortMaker
             }
         }
         var whole = SpeechSafeRange(phrase.Start, phrase.Duration, clipWords, interval);
-        var safe = StrongOpening(whole.Start, whole.Duration, clipWords, Math.Max(1, clipDuration * 0.65));
+        var safe = StrongOpening(whole.Start, whole.Duration, clipWords, GeminiSelection.LengthRange(clipDuration).Min);
         var quiet = await SilenceSnapped(path, safe.Start, safe.Duration, interval, clipWords, cancellation);
         return new PreparedShort(quiet.Start, quiet.Duration, clipWords, referenceCues, alignmentFailed);
     }
