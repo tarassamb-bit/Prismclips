@@ -6,12 +6,12 @@
   <meta name="theme-color" content="#0E0F14" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
   <title>Privacy — Prism</title>
-  <meta name="description" content="What Prism sends to Google, what stays on your computer, and what your Prism account stores.">
+  <meta name="description" content="What Prism sends for AI processing, what stays on your computer, and what your Prism account stores.">
   <link rel="canonical" href="https://prismclips.app/privacy">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Prism">
   <meta property="og:title" content="Privacy — Prism">
-  <meta property="og:description" content="What Prism sends to Google, what stays on your computer, and what your Prism account stores.">
+  <meta property="og:description" content="What Prism sends for AI processing, what stays on your computer, and what your Prism account stores.">
   <meta property="og:url" content="https://prismclips.app/privacy">
   <meta property="og:image" content="https://prismclips.app/og-image.png">
   <meta property="og:image:width" content="1200">
@@ -61,11 +61,11 @@
   </header>
   <main id="main">
 
-    <section class="page-hero container"><p class="eyebrow">PRIVACY</p><h1>Your footage<br><span class="muted-heading">stays yours.</span></h1><p>Plain-language summary of where your data goes. Last updated 2026-10-22.</p></section>
+    <section class="page-hero container"><p class="eyebrow">PRIVACY</p><h1>Your footage<br><span class="muted-heading">stays yours.</span></h1><p>Plain-language summary of where your data goes. Last updated 2026-10-27.</p></section>
     <section class="container prose">
-<h2>On your computer</h2><ul><li>Your source video files. Prism copies them into a project and never changes the originals.</li><li>Projects, previews and rendered MP4s.</li><li>Your Gemini API key. On Mac it is stored in the Keychain, never in projects or preferences.</li></ul>
-<h2>Sent to Google</h2><p>Prism has no offline mode. Every AI step runs on Google’s Gemini API, so Google’s terms and privacy policy apply to this data:</p><ul><li>Audio chunks of the part of the video you selected.</li><li>Transcripts.</li><li>Sampled frames: up to 12 per refinement batch, and about 1 per second of each tracked Short.</li><li>Editor chat messages, with recent conversation and a short edit summary.</li></ul><p>Temporary audio files are deleted after each request. See <a href="https://policies.google.com/privacy">Google’s Privacy Policy</a> and the <a href="https://ai.google.dev/gemini-api/terms">Gemini API terms</a>.</p>
-<h2>Your Prism account</h2><p>Your Prism account is stored with our database provider, Supabase. Payments are handled by Paddle, our reseller; Prism never sees your card details. The account stores:</p><ul><li>Your email address and password. The password is stored hashed by Supabase Auth.</li><li>Your plan’s Paddle subscription and customer IDs, status and next billing date.</li><li>One record per finished export from the Mac app: the date, number of Shorts, total length in seconds and export quality.</li></ul><p>No video, audio, transcripts or titles are sent to your account. Database rules let each user read only their own records. Deleting your account deletes its export records.</p>
+<h2>On your computer</h2><ul><li>Your source video files. Prism copies them into a project and never changes the originals.</li><li>Projects, previews and rendered MP4s.</li></ul>
+<h2>Sent for AI processing</h2><p>Prism has no offline mode. On Mac, requests go through Prism’s server (Supabase) to OpenRouter and an AI model provider. Windows and Linux send requests directly to Google’s Gemini API using your own API key. The relevant providers’ terms apply to this data:</p><ul><li>Audio chunks of the part of the video you selected.</li><li>Transcripts.</li><li>Sampled frames: up to 12 per refinement batch, and about 1 per second of each tracked Short.</li><li>Editor chat messages, with recent conversation and a short edit summary.</li></ul><p>Temporary audio files are deleted after each request. The Mac server logs may include portions of model responses for diagnostics. See <a href="https://openrouter.ai/privacy">OpenRouter’s Privacy Policy</a> and <a href="https://openrouter.ai/terms">Terms</a>, and <a href="https://policies.google.com/privacy">Google’s Privacy Policy</a> and <a href="https://ai.google.dev/gemini-api/terms">Gemini API terms</a>.</p>
+<h2>Your Prism account</h2><p>Your Prism account is stored with our database provider, Supabase. Paid plans are not available during the current beta. The account stores:</p><ul><li>Your email address and password. The password is stored hashed by Supabase Auth.</li><li>Any Paddle subscription and customer IDs, status and next billing date, if associated with your account.</li><li>One record per finished export from the Mac app: the date, number of Shorts, total length in seconds and export quality.</li><li>One record per video you make Shorts from: a fingerprint of the file’s name and length (not the video), the day and its length in minutes.</li><li>The total cost of your AI requests and any promo codes you redeemed, to enforce your allowance.</li></ul><p>No video, audio, transcripts or titles are stored in your account. Database rules let each user read only their own records. Deleting your account deletes its export records.</p>
 <h2>Questions or deletion requests</h2><p>Open an issue on <a href="https://github.com/tarassamb-bit/Prism/issues">GitHub</a> to ask a question or to have your account deleted.</p>
 <p class="note">This page describes how the software works. It is not legal advice.</p>
     </section>

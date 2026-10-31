@@ -1,4 +1,6 @@
-// Edit plans here. Price IDs are from the Paddle sandbox catalog; swap in live IDs for production.
+// Checkout stays disabled until live plans, entitlements and billing have been verified end to end.
+// The IDs below are from the Paddle sandbox catalog and must not be used for live sales.
+window.PRISM_BILLING_ENABLED = false;
 /**
  * @typedef {Object} Tier
  * @property {'Trial' | 'Creator' | 'Studio'} name

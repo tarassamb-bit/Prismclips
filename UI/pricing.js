@@ -7,6 +7,12 @@
   const db = window.prismDb;
   if (!grid || !status || !Array.isArray(tiers)) return;
 
+  if (window.PRISM_BILLING_ENABLED !== true) {
+    status.textContent = 'Paid plans are not available yet. Beta access uses an account and a usage allowance.';
+    status.dataset.kind = 'info';
+    return;
+  }
+
   const ACTIVE = ['active', 'trialing', 'past_due', 'paused'];
   let paddle = null;
   let user = null;

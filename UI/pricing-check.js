@@ -31,6 +31,7 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
   };
   const window = {
     prismDb: db,
+    PRISM_BILLING_ENABLED: true,
     PRISM_TIERS: [{ name: 'Creator', priceId: 'pri_test', features: [] }],
     Paddle: {
       Initialize() {}, Environment: { set() {} },
@@ -77,5 +78,18 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
   await settle();
   assert.equal(checkouts.length, 1, 'signing out in another tab must prevent a stale-user checkout');
   assert.equal(location.href, '/login?next=/pricing');
-  console.log('pricing-check: checkout errors, retries, repeated clicks, existing plans and sign-out passed');
+
+  const disabledGrid = new Element();
+  const disabledStatus = new Element();
+  let requestedConfig = false;
+  vm.runInNewContext(fs.readFileSync(`${__dirname}/pricing.js`, 'utf8'), {
+    window: { ...window, PRISM_BILLING_ENABLED: false },
+    document: { getElementById: (id) => id === 'tiers' ? disabledGrid : disabledStatus, createElement: () => new Element() },
+    location, console, setTimeout,
+    fetch: async () => { requestedConfig = true; throw new Error('Checkout must stay unavailable'); },
+  });
+  assert.equal(requestedConfig, false, 'disabled billing must not initialize checkout');
+  assert.equal(disabledGrid.children.length, 0, 'disabled billing must not display plan cards');
+  assert.match(disabledStatus.textContent, /Paid plans are not available yet/);
+  console.log('pricing-check: disabled billing, checkout errors, retries, repeated clicks, existing plans and sign-out passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

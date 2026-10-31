@@ -1,10 +1,10 @@
 # Prism
 
-> Prism is a desktop app that turns long videos into vertical Shorts with captions. AI finds moments that stand on their own; you review them and make the final cut. Captions are written in the language spoken in the video. Billing is simple and fair: three monthly plans, a 7-day free trial on Creator and Studio, AI processing included, cancel anytime.
+> Prism is a desktop app that turns long videos into vertical Shorts with captions. AI finds moments that stand on their own; you review them and make the final cut. Captions are written in the language spoken in the video. Prism is in beta; AI usage limits apply.
 
 - Who it's for: creators, podcasters and streamers who want short-form clips from long recordings.
-- Platforms: Windows 10 and 11 (64-bit), macOS 14 or later on Apple Silicon, Linux (x86_64 with GTK 4).
-- Plans (billed monthly, shown in local currency): Trial $9/month, Creator $39/month, Studio $149/month. Creator and Studio include a 7-day free trial. Cancel anytime from the dashboard.
+- Platforms: macOS 14 or later on Apple Silicon; Windows and Linux ports have not yet been tested on real devices.
+- Access: On Mac, sign in to try the beta; AI usage limits apply. Windows and Linux use your own Gemini API key. Paid plans are not available yet.
 - Status: beta. Review every Short before publishing.
 
 ## Pages
@@ -12,7 +12,7 @@
 - [Home](https://prismclips.app/): Overview of Prism and what it makes.
 - [Features](https://prismclips.app/features): Finding complete stories, reframing for vertical video, and caption styles.
 - [How it works](https://prismclips.app/how-it-works): The three steps from a long recording to a finished Short.
-- [Pricing](https://prismclips.app/pricing): The three monthly plans, the free trial and billing questions.
+- [Pricing](https://prismclips.app/pricing): Information about beta access and AI usage limits.
 - [Download](https://prismclips.app/download): Installers for macOS, Windows and Linux.
 - [FAQ](https://prismclips.app/faq): Answers about plans, privacy, editing and getting started.
 - [About](https://prismclips.app/about): What Prism is and who it's for.

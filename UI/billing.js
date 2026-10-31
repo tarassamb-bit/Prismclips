@@ -46,8 +46,13 @@
     // One plan per account; cancelling and card changes happen in the billing portal.
     tiers.hidden = subscriptions.length > 0;
     if (!subscriptions.length) {
-      show('No plan yet. Pick one in Plans & billing.');
-      if (note) note.textContent = 'Prices are in your local currency, with tax where it applies.';
+      if (window.PRISM_BILLING_ENABLED === true) {
+        show('No plan yet. Pick one in Plans & billing.');
+        if (note) note.textContent = 'Prices are in your local currency, with tax where it applies.';
+      } else {
+        show('Beta access');
+        if (note) note.textContent = 'Paid plans are not available yet. Check Settings in the Mac app for your beta usage allowance.';
+      }
       return;
     }
     const lines = subscriptions.map(describe);

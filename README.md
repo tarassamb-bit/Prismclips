@@ -5,7 +5,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/macOS-14%2B-0E0F14?style=flat-square&labelColor=20232B" alt="macOS 14+">
   <img src="https://img.shields.io/badge/Swift-6-0E0F14?style=flat-square&labelColor=20232B" alt="Swift 6">
-  <img src="https://img.shields.io/badge/AI-Gemini-3FA9F5?style=flat-square&labelColor=20232B" alt="Gemini">
+  <img src="https://img.shields.io/badge/AI-Cloud-3FA9F5?style=flat-square&labelColor=20232B" alt="Cloud AI">
   <img src="https://img.shields.io/badge/license-MIT-0E0F14?style=flat-square&labelColor=20232B" alt="MIT">
 </p>
 
@@ -16,7 +16,7 @@
   <a href="#testing"><b>Testing</b></a>
 </p>
 
-Drop in a podcast, lecture, vlog or stream. Prism finds the moments that work as standalone Shorts: each one opens on a hook, keeps its context and ends on the payoff. It renders them as 1080 × 1920 MP4s with captions and a crop that follows the speaker. You review and tweak every clip before export.
+Drop in a podcast, lecture, vlog or stream. Prism suggests moments intended to work as standalone Shorts, with a hook, context and payoff. It renders them as 1080 × 1920 MP4s with captions and an automatically framed crop. You review and tweak every clip before export.
 
 > **Status:** early Phase 1 prototype. The core long-video-to-Short pipeline works end to end; see [Limits](#limits) before relying on it.
 
@@ -31,7 +31,7 @@ Drop in a podcast, lecture, vlog or stream. Prism finds the moments that work as
   <img src="macOS/assets/readme/create.png" width="49%" alt="Create: choose how many Shorts, their length and the source range.">
 </p>
 
-<sub>Screens use a generated demo library with illustrated footage. Regenerate them with <code>zsh macOS/scripts/readme-assets.sh</code>.</sub>
+<sub>Screens use a generated demo library with illustrated footage and may not show the current editor layout. Regenerate them with <code>zsh macOS/scripts/readme-assets.sh</code>.</sub>
 
 ## Contents
 
@@ -51,18 +51,18 @@ Drop in a podcast, lecture, vlog or stream. Prism finds the moments that work as
 
 | | |
 |---|---|
-| **Story-aware clip picking** | Gemini scores the whole transcript, refines a shortlist, then a final editor pass chooses distinct clips with a hook and a payoff. |
+| **Story-aware clip picking** | Cloud AI scores the whole transcript, refines a shortlist, then a final editor pass chooses distinct clips with a hook and a payoff. |
 | **Clean cuts** | Edges snap to whole sentences and words. Filler openings ("Okay, so.") and sign-offs ("Thanks for watching!") are trimmed. |
-| **Subject framing** | Gemini finds the subject in about one frame per second. A camera planner smooths the path and cuts hard on scene changes. |
+| **Subject framing** | Cloud AI finds the subject in about one frame per second. A camera planner smooths the path and cuts hard on scene changes. |
 | **Layouts** | Fill (tracked crop), Fit (whole frame over a blurred background) and Split screen (two speakers stacked). |
-| **Captions** | Seven styles, including word-by-word highlighting when Gemini's word timing verifies. |
+| **Captions** | Seven styles, including word-by-word highlighting when the AI's word timing verifies. |
 | **Video types** | Podcast, informational, tutorial, vlog, gaming or auto-detect, each steering selection and layout. |
-| **Never loses work** | New batches append and skip overlaps. Every batch can be undone. Originals are copied, never modified. |
+| **Non-destructive projects** | New batches append and skip overlaps. Every batch can be undone. Originals are copied, never modified. |
 | **Editor chat** | Ask in plain language: "trim to 20 seconds", "mute the audio", "export". |
 
 ## Quick start
 
-**You need:** macOS 14 or newer, Xcode command line tools (`xcode-select --install`) and a [Google AI Studio](https://aistudio.google.com/apikey) API key.
+**You need:** macOS 14 or newer, Xcode command line tools (`xcode-select --install`), an internet connection and a Prism account. You can create an account in the app. No API key is needed.
 
 ```sh
 git clone <this repo> && cd Relio
@@ -70,11 +70,11 @@ zsh macOS/scripts/package-app.sh
 open macOS/dist/Prism.app
 ```
 
-1. Open **Settings → AI & Cloud**, paste your API key and choose **Save key**. Use **Test connection** to check it.
-2. On Home, choose **Create a video** and pick a source file.
+1. Sign in, or create an account, when Prism opens. If confirmation is required, confirm your email and then sign in.
+2. On Home, choose **Start creating** and pick a source file.
 3. Set the number of Shorts, their length and the source range: entire video, first half, last half or custom minutes.
 4. Pick a caption style and video type, then generate. You can cancel at any time; existing clips are kept.
-5. Review each Short in the editor and adjust it, then **Export**. Each Short becomes its own MP4 in the project's `Exports/` folder.
+5. Review each Short in the editor and adjust it, then **Export**. Each Short becomes its own MP4, with its title and description in the file and in a `.txt` beside it. They go to Downloads › Prism › the project's name unless you choose another folder.
 
 > **Keychain prompts after every rebuild?** Run `zsh macOS/scripts/create-signing-identity.sh` once. See [Packaging and signing](#packaging-and-signing).
 
@@ -87,21 +87,21 @@ dotnet build Prism.sln
 dotnet test Shared/Prism.Core.Tests  # requires ffmpeg and ffprobe
 ```
 
-The native ports compile on the development Mac. Desktop playback, layout and platform services still need verification on real Windows/Linux machines; each platform guide includes dependencies, launch commands and a check list.
+Unlike the macOS app, the current Windows and Linux ports use a user-provided Google AI Studio API key and send AI requests directly to Gemini. Their usage may be billed by Google. The native ports compile on the development Mac, but desktop playback, layout and platform services still need verification on real Windows/Linux machines; each platform guide includes dependencies, launch commands and a check list.
 
 ## How a Short is made
 
 ```
 source video
    │
-   ├─ 1. Transcribe   Gemini, sentence-level, in chunks up to 2 min (saved and reused per video)
+   ├─ 1. Transcribe   Cloud AI, sentence-level, in chunks up to 2 min (saved and reused per video)
    ├─ 2. Classify     auto-detect the video type from the transcript
    ├─ 3. Score        overlapping transcript windows, scored 0–100 against fixed anchors
    ├─ 4. Refine       top windows → exact clips with title, reason and layout (3 batches in parallel)
-   ├─ 5. Final cut    one editor pass compares finalists; runner-ups are kept as backups
+   ├─ 5. Final cut    one editor pass chooses distinct stories; score-ranked backups are used if the pass fails
    ├─ 6. Snap         whole sentences → filler trimmed → padding → word-safe edges
-   ├─ 7. Captions     Gemini word timing, verified against the transcript; else whole-sentence captions
-   ├─ 8. Frame        Gemini subject positions → smoothed crop path with hard scene cuts
+   ├─ 7. Captions     AI word timing, verified against the transcript; else whole-sentence captions
+   ├─ 8. Frame        AI subject positions → smoothed crop path with hard scene cuts
    └─ 9. Render       AVFoundation, H.264, 1080 × 1920, on your Mac
 ```
 
@@ -115,32 +115,35 @@ Selection adapts the score → shortlist → detail pipeline from [OpenShorts](m
 
 ## Privacy and cost
 
-Prism is online-only: every AI step runs in Gemini, and there is no offline mode.
+The macOS AI features require an internet connection and a signed-in Prism account. The app sends requests through a [Supabase Edge Function](supabase/functions/gemini/index.ts) to OpenRouter and its model providers; the configured model and providers may change. The server holds the provider key. The Windows and Linux ports instead use Gemini directly with your own key.
 
-**Sent to Google:**
+**Sent for AI processing:**
 - Audio chunks of the selected range.
 - Transcripts.
 - Sampled frames: up to 12 per refinement batch, and about 1 per second of each tracked Short.
 - Chat messages, with recent conversation and a short edit summary.
 
+On macOS, the service also receives a hashed video identifier, its duration and the local date to check usage. The account service receives export statistics (Short count, duration and quality). The checked-in Edge Function does not log model response text; the deployed service must be updated separately to use this change.
+
 **Stays on your Mac:**
 - Your source files.
 - Projects.
 - Preview and rendering.
-- Your API key, stored in the macOS Keychain (item `Relio.Gemini`), never in projects or preferences.
+- Your account refresh session, stored in the macOS Keychain.
 
-Requests use an ephemeral URL session, and temporary audio files are deleted after each request. **Gemini usage is billed to your key.** Transcripts are saved per video, so creating more Shorts from the same video does not transcribe it again.
+Requests use an ephemeral URL session, and temporary audio files are deleted after each request. The checked-in beta configuration provides 60 minutes of source video per account, with promo codes able to add server-side allowance; usage and availability depend on the deployed service. Transcripts are saved per video, so creating more Shorts from the same video does not transcribe it again.
 
 ## Projects on disk
 
 ```
 ~/Library/Application Support/Relio/
 └── Library/
-    └── <name>.relio/
-        ├── project.sqlite   SQLite (WAL): versionable JSON project record
-        ├── Media/           copied source files; originals untouched
-        ├── Thumbnails/
-        └── Exports/         rendered MP4s
+    └── Projects/
+        └── <name>.relio/
+            ├── project.sqlite   SQLite (WAL): versionable JSON project record
+            ├── Media/           copied source files; originals untouched
+            ├── Thumbnails/
+            └── Exports/         older exports; new ones go to Downloads › Prism
 ```
 
 Each edit segment stores the following. Projects from older versions remain readable.
@@ -159,9 +162,9 @@ macOS/Sources/RelioApp/
   RelioApp.swift            app model, project actions, home, settings, chat
   EditorWorkspace.swift     editor: media bin, player, inspector, timeline
   ShortMaker.swift          analysis pipeline, captions, AVFoundation composition and export
-  GeminiSelection.swift     Gemini client: transcription, scoring, refinement, final cut, chat, Keychain
+  GeminiSelection.swift     AI client: transcription, scoring, refinement, final cut, chat, Keychain
   TranscriptSelection.swift windows, batching, sentence/word/filler snapping, alignment checks
-  SubjectFraming.swift      Gemini subject location, scene-cut detection, camera path planner
+  SubjectFraming.swift      AI subject location, scene-cut detection, camera path planner
   Core.swift                project store (SQLite), media inspection, data model
   Theme.swift               Prism design tokens and fonts
 macOS/Sources/CSQLite/            SQLite system module
@@ -169,7 +172,7 @@ macOS/Sources/CSQLite/            SQLite system module
 
 ## Testing
 
-Each test script compiles a small standalone runner with `swiftc`. No live API calls are made: Gemini is replaced by a mock `URLProtocol`.
+Each test script compiles a small standalone runner with `swiftc`. No live API calls are made: the AI service is replaced by a mock `URLProtocol`.
 
 | Command | Covers |
 |---|---|
@@ -184,7 +187,7 @@ Each test script compiles a small standalone runner with `swiftc`. No live API c
 **End-to-end fixture.** After the smoke test:
 
 1. Run `zsh macOS/scripts/generate-speech-fixture.sh` to build a spoken video with two self-contained stories plus an intro and outro.
-2. Run it through Prism. This uses your key and is billed normally.
+2. Run it through Prism with a signed-in account. This uses the deployed AI service and counts against the applicable beta allowance.
 3. Check the exports with `zsh macOS/scripts/verify-speech-workflow.sh PROJECT_DIRECTORY`.
 
 Mocks prove the logic, not clip quality. Judge real footage yourself.
@@ -203,9 +206,9 @@ A stable identity lets the Keychain's **Always Allow** survive rebuilds. See [RE
 
 ## Limits
 
-- **Needs a network and a Gemini key.** Nothing AI-driven works offline.
-- **Word timing is best-effort.** When Gemini's word timestamps fail verification, captions show whole sentences and word highlighting is off for that clip.
-- **Framing follows what Gemini sees at about 1 fps.** It does not identify a specific person across cuts or know who is speaking.
+- **Needs a network and an account on macOS.** Nothing AI-driven works offline. Windows and Linux use a Gemini key instead.
+- **Word timing is best-effort.** When AI word timestamps fail verification, captions show whole sentences and word highlighting is off for that clip.
+- **Framing follows sampled frames at about 1 fps.** It does not identify a specific person across cuts or know who is speaking.
 - **Very long recordings** may need a proxy or indexing pipeline.
 - **Filler trimming is English-only.**
 - **Not yet built:** YouTube upload, analytics, speaker memory, multi-clip storytelling.
@@ -222,7 +225,7 @@ The Prism design system uses:
 
 Tokens live in `macOS/Sources/RelioApp/Theme.swift`.
 
-Internal identifiers still say *Relio*, so existing projects, settings and the saved key keep working: bundle ID `app.relio.prototype`, the Application Support folder, the Keychain item and the target names.
+Internal identifiers still say *Relio*, including the bundle ID `app.relio.prototype`, the Application Support folder, the Keychain item and the target names.
 
 ## Credits and license
 
