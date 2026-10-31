@@ -342,11 +342,13 @@ public sealed partial class AppSession
                 {
                     Message = "No new distinct moments were found in this range. Your existing clips were kept. Try another region or length.";
                     GenerationError = new GenerationFailure(Message, GenerationFailureKind.NoMoments);
+                    Notified?.Invoke("No new Shorts found", Message);
                     return;
                 }
                 var resultMessage = $"Prism AI selected {fresh.Count} complete clip ranges and layouts. Review framing and captions before export.";
                 if (results.FirstOrDefault(r => r.AnalysisWarning is not null)?.AnalysisWarning is { } warning) resultMessage += " " + warning;
                 Message = resultMessage;
+                Notified?.Invoke(fresh.Count == 1 ? "1 Short ready" : $"{fresh.Count} Shorts ready", project?.DisplayTitle ?? "Prism");
                 Say(false, Message);
                 SelectPreview(fresh[0].Id);
                 Tutorial.DidCreateVideo();
@@ -360,7 +362,11 @@ public sealed partial class AppSession
             {
                 if (!Current()) return;
                 Message = token.IsCancellationRequested ? "Generation cancelled. Your existing clips were kept." : $"Analysis failed: {error.Message}";
-                if (!token.IsCancellationRequested) GenerationError = new GenerationFailure(error.Message, FailureKind(error));
+                if (!token.IsCancellationRequested)
+                {
+                    GenerationError = new GenerationFailure(error.Message, FailureKind(error));
+                    Notified?.Invoke("Couldn’t make Shorts", error.Message);
+                }
             }).ConfigureAwait(false);
         }
         finally
@@ -375,6 +381,10 @@ public sealed partial class AppSession
             cancellation.Dispose();
         }
     }
+
+    /// <summary>A long task finished: a run made Shorts or failed, an export finished or failed. The app tells a person who
+    /// switched away, as the Mac does with a notification.</summary>
+    public event Action<string, string>? Notified;
 
     public void CancelGeneration()
     {
@@ -631,6 +641,7 @@ public sealed partial class AppSession
                 if (sources.Count > 0) parts.Add("the main video");
                 Message = $"Exported {string.Join(" and ", parts)} to {DisplayPath(folder)}.";
                 ExportSummary = Message;
+                Notified?.Invoke("Export finished", Message);
                 // The website keeps the Mac app's quality names: full, compact, small.
                 _ = Account.RecordExport(segments.Count, segments.Sum(item => item.Segment.Duration), choice.Quality.ToString().ToLowerInvariant());
             }).ConfigureAwait(false);
@@ -646,7 +657,11 @@ public sealed partial class AppSession
                     : completed == 0 ? $"Export failed: {error.Message}"
                     : $"Export stopped after {completed} of {total} files. Completed files are in {DisplayPath(folder)}. {error.Message}";
                 if (token.IsCancellationRequested) ExportSummary = Message;
-                else GenerationError = new GenerationFailure(Message, FailureKind(error), IsExport: true);
+                else
+                {
+                    GenerationError = new GenerationFailure(Message, FailureKind(error), IsExport: true);
+                    Notified?.Invoke("Export failed", Message);
+                }
             }).ConfigureAwait(false);
         }
         finally

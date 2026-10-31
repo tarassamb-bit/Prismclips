@@ -113,6 +113,7 @@ public sealed partial class PrismWindow : Window
         main.Children.Add(top);
         Grid.SetRow(content, 1); main.Children.Add(content);
         session.PropertyChanged += SessionChanged;
+        session.Notified += (title, body) => Dispatcher.BeginInvoke(new Action(() => NotifyIfInBackground(title, body)));
         Closed += (_, _) => DisposeSession();
         PreviewKeyDown += (_, args) =>
         {
@@ -194,6 +195,23 @@ public sealed partial class PrismWindow : Window
         RefreshBanner();
         UpdateTutorial();
     }
+
+    /// While Prism is in the background, a finished run or export flashes its taskbar button until the person returns,
+    /// the Windows counterpart of the Mac's notification. The taskbar tooltip says what happened.
+    void NotifyIfInBackground(string title, string body)
+    {
+        if (disposed || IsActive) return;
+        Title = $"{title} · Prism";
+        var flash = new FlashInfo { Size = (uint)System.Runtime.InteropServices.Marshal.SizeOf<FlashInfo>(), Window = new System.Windows.Interop.WindowInteropHelper(this).Handle, Flags = 3 | 12 };
+        FlashWindowEx(ref flash);
+        void Restore(object? sender, EventArgs args) { Title = "Prism"; Activated -= Restore; }
+        Activated += Restore;
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    struct FlashInfo { public uint Size; public IntPtr Window; public uint Flags; public uint Count; public uint Timeout; }
+    // Flags: FLASHW_ALL (3) | FLASHW_TIMERNOFG (12), flashing until the window comes to the foreground.
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool FlashWindowEx(ref FlashInfo info);
 
     void InvalidateScreen() { renderedScreen = ""; Refresh(); }
     void Navigate(Screen screen)
