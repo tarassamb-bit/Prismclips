@@ -41,7 +41,7 @@ public sealed partial class PrismWindow : Window
     readonly DispatcherTimer activityTimer = new();
     readonly Dictionary<string, ProjectSummary> summaries = [];
     string renderedScreen = "", renderedPage = "", modalKind = "", lastMessage = "";
-    bool queued, disposed, showAll, showUnfinished, sidebarCollapsed;
+    bool queued, disposed, showAll, showUnfinished, sidebarCollapsed, notifying;
     int createStep, localRevision, settingsCategory;
     long homeRevision;
     Guid? openFolder;
@@ -154,6 +154,8 @@ public sealed partial class PrismWindow : Window
 
     void Refresh()
     {
+        // The title bar names the open project in the editor, like the Mac app; a pending notice keeps its own title.
+        if (!notifying) Title = session.Screen == Screen.Editor ? session.Project?.DisplayTitle ?? "Prism" : "Prism";
         heading.Text = session.Screen switch
         {
             Screen.Home => "Home", Screen.Settings => "Settings", Screen.Create or Screen.ImportSource => "Create Shorts",
@@ -213,10 +215,11 @@ public sealed partial class PrismWindow : Window
     void NotifyIfInBackground(string title, string body)
     {
         if (disposed || IsActive) return;
+        notifying = true;
         Title = $"{title} · Prism";
         var flash = new FlashInfo { Size = (uint)System.Runtime.InteropServices.Marshal.SizeOf<FlashInfo>(), Window = new System.Windows.Interop.WindowInteropHelper(this).Handle, Flags = 3 | 12 };
         FlashWindowEx(ref flash);
-        void Restore(object? sender, EventArgs args) { Title = "Prism"; Activated -= Restore; }
+        void Restore(object? sender, EventArgs args) { notifying = false; Activated -= Restore; Refresh(); }
         Activated += Restore;
     }
 
