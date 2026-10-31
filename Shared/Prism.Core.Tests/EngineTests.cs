@@ -511,7 +511,8 @@ public class RenderTests
         static int Count(SkiaSharp.SKBitmap bitmap, Func<SkiaSharp.SKColor, bool> match)
         {
             var count = 0;
-            for (var y = (int)(bitmap.Height * 0.72); y < bitmap.Height * 0.86; y += 2)
+            // Bottom captions are centred 620 px above the bottom of 1920, as on the Mac.
+            for (var y = (int)(bitmap.Height * 0.60); y < bitmap.Height * 0.76; y += 2)
                 for (var x = 0; x < bitmap.Width; x += 2)
                     if (match(bitmap.GetPixel(x, y))) count++;
             return count;
