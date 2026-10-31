@@ -349,7 +349,7 @@ public static class GeminiSelection
             Include a concise title (up to 8 words) and a one-sentence reason naming the actual hook and payoff.
             Also write a description to post with the Short: one or two sentences for viewers that tease the payoff without giving it away, then up to three relevant hashtags.
             Write all three in the language the TRANSCRIPT is spoken in, never another one, and ground them in the clip's speech or frames. Keep personal anecdotes personal; never turn a reported result into a universal promise. The title and reason are review notes, not overlays.
-            Score 0–10; use 7–10 only for clips that pass the hook, context and complete-payoff tests. Choose layout 'fit' for charts, maps, satellite images, diagrams, screen recordings,
+            Score 0–10 with one decimal place (for example 8.7, 9.2, 6.4), using the whole scale: never round to whole numbers or tens. Use 7 and above only for clips that pass the hook, context and complete-payoff tests. Choose layout 'fit' for charts, maps, satellite images, diagrams, screen recordings,
             multiple important subjects, or text that a vertical crop would lose. Choose 'track' only when a
             single person or compact object can be cropped safely. Frames are timestamped sparse context;
             they do not establish motion or speaker identity. Do not manufacture clips just to reach a count.
