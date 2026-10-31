@@ -71,24 +71,33 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          function Show-Logs { (Get-Content tunnel.log) -replace '[a-z0-9-]+\.trycloudflare\.com', '<tunnel>'; Get-Content websockify.log }
+          function Show-Logs { (Get-Content tunnel.log, upload.log) -replace '[a-z0-9-]+\.trycloudflare\.com', '<tunnel>'; Get-Content websockify.log, upload-server.log }
           Start-Process python -ArgumentList "-m", "websockify", "--web", "noVNC-1.5.0", "6080", "localhost:5900" -WindowStyle Hidden -RedirectStandardError websockify.log
           Start-Process ./cloudflared.exe -ArgumentList "tunnel", "--no-autoupdate", "--metrics", "127.0.0.1:20241", "--url", "http://127.0.0.1:6080" -WindowStyle Hidden -RedirectStandardError tunnel.log
+          # A second tunnel takes videos from preview.sh into the Videos folder, so nothing has to be downloaded on the runner.
+          Start-Process python -ArgumentList "Windows/preview-upload.py" -WindowStyle Hidden -RedirectStandardError upload-server.log
+          Start-Process ./cloudflared.exe -ArgumentList "tunnel", "--no-autoupdate", "--metrics", "127.0.0.1:20242", "--url", "http://127.0.0.1:8090" -WindowStyle Hidden -RedirectStandardError upload.log
           Start-Process dist/windows/Prism.exe -WorkingDirectory dist/windows
           # Checked locally: a brand-new trycloudflare name often fails to resolve on the runner for minutes.
           foreach ($i in 1..45) {
             $ready = curl.exe -s -o NUL -w '%{http_code}' http://127.0.0.1:20241/ready
             $web = curl.exe -s -o NUL -w '%{http_code}' http://127.0.0.1:6080/vnc.html
-            if ("$ready$web" -eq '200200') { break }
+            $uploads = curl.exe -s -o NUL -w '%{http_code}' http://127.0.0.1:20242/ready
+            if ("$ready$web$uploads" -eq '200200200') { break }
             Start-Sleep 4
           }
-          if ("$ready$web" -ne '200200') { Show-Logs; throw "Tunnel ready: $ready, noVNC: $web." }
+          if ("$ready$web$uploads" -ne '200200200') { Show-Logs; throw "Tunnel ready: $ready, noVNC: $web, uploads: $uploads." }
           $url = (Select-String -Path tunnel.log -Pattern 'https://[a-z0-9-]+\.trycloudflare\.com').Matches[0].Value
           [IO.File]::WriteAllText("$PWD/url.txt", $url)
           $cipher = & "$env:ProgramFiles\Git\usr\bin\openssl.exe" enc -aes-256-cbc -pbkdf2 -md sha256 -a -A -pass env:PREVIEW_PASSWORD -in url.txt
           Remove-Item url.txt
           gh api "repos/$env:GITHUB_REPOSITORY/statuses/$env:GITHUB_SHA" -f state=success -f "context=windows-preview/$env:GITHUB_RUN_ID" -f "description=$cipher" | Out-Null
           if ($LASTEXITCODE) { throw "Could not post the link." }
+          $uploadUrl = (Select-String -Path upload.log -Pattern 'https://[a-z0-9-]+\.trycloudflare\.com').Matches[0].Value
+          [IO.File]::WriteAllText("$PWD/url.txt", $uploadUrl)
+          $cipher = & "$env:ProgramFiles\Git\usr\bin\openssl.exe" enc -aes-256-cbc -pbkdf2 -md sha256 -a -A -pass env:PREVIEW_PASSWORD -in url.txt
+          Remove-Item url.txt
+          gh api "repos/$env:GITHUB_REPOSITORY/statuses/$env:GITHUB_SHA" -f state=success -f "context=windows-preview-upload/$env:GITHUB_RUN_ID" -f "description=$cipher" | Out-Null
           while ($true) {
             foreach ($name in 'tvnserver', 'python', 'cloudflared') {
               if (-not (Get-Process $name -ErrorAction SilentlyContinue)) { Show-Logs; throw "$name stopped." }

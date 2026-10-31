@@ -1,8 +1,14 @@
 #!/bin/zsh
 # Shows the real Windows app in your browser, run by .github/workflows/windows-preview.yml on a GitHub Windows machine.
-# Usage: zsh Windows/preview.sh   Runs the last commit; Ctrl+C here shuts the machine down (it stops by itself after 3 hours).
+# Usage: zsh Windows/preview.sh [video ...]   Runs the last commit; Ctrl+C here shuts the machine down (it stops by itself after 3 hours).
+# Videos given here are copied into the Windows machine's Videos folder once it is ready (up to 100 MB each, Cloudflare's limit).
 set -euo pipefail
+videos=("${@:A}")
 cd "${0:A:h}/.."
+for video in $videos; do
+  [[ -f $video ]] || { print "No file at $video"; exit 1; }
+  (( $(stat -f %z "$video") <= 100 * 1024 * 1024 )) || { print "$video is over 100 MB; Cloudflare's free tunnel won't carry it. Use a shorter clip."; exit 1; }
+done
 repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 service=prism-windows-preview
 
@@ -50,6 +56,19 @@ url=$(print -rn -- $cipher | PREVIEW_PASSWORD=$password openssl enc -d -aes-256-
 for i in {1..30}; do [[ $(curl -s -o /dev/null -w '%{http_code}' "$url/vnc.html" || true) == 200 ]] && break; sleep 4; done
 # The password goes in the # part, which the browser never sends over the network.
 open "$url/vnc.html#autoconnect=true&resize=scale&password=$password"
+if (( $#videos )); then
+  upload=$(gh api repos/$repo/commits/$(git rev-parse HEAD)/statuses -q ".[] | select(.context == \"windows-preview-upload/$run\") | .description" | head -1 \
+    | PREVIEW_PASSWORD=$password openssl enc -d -aes-256-cbc -pbkdf2 -md sha256 -a -A -pass env:PREVIEW_PASSWORD)
+  for video in $videos; do
+    print "Copying ${video:t} to the Windows machine…"
+    # The password travels in a header over HTTPS, never in the URL.
+    if curl -sf --retry 5 --retry-all-errors -T "$video" -H "X-Prism-Password: $password" "$upload/${video:t:gs/ /%20/}" >/dev/null; then
+      print "  Saved in Videos: in Prism choose Browse files › Videos."
+    else
+      print "  Copy failed. Start a new session with the video: zsh Windows/preview.sh <video>"
+    fi
+  done
+fi
 print "Windows is open in your browser ($url/vnc.html, password $password). Press Ctrl+C here to shut it down."
 while [[ $(gh run view $run --repo $repo --json status -q .status) != completed ]]; do sleep 60; done
 print "The Windows machine has stopped."
