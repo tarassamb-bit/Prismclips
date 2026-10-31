@@ -54,8 +54,25 @@ final class Account {
 
     // MARK: Video limit
 
-    /// Whether this account may start Shorts from `video`, `minutes` long, today. nil when signed out or Supabase can't be
-    /// reached, so the limit kept on this Mac applies instead.
+    /// How many analysis runs of `video` (its server key) this account has made, and the minutes the next
+    /// re-analysis would charge (0 before the first run); nil when it can't be checked.
+    func reanalysis(_ video: String) async -> (runs: Int, charge: Double)? {
+        guard isSignedIn, let token = await accessToken() else { return nil }
+        var request = Self.request("rest/v1/rpc/my_reanalysis")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["p_video": video])
+        guard let (data, response) = try? await URLSession.shared.data(for: request) else { return nil }
+        // A server without re-analysis charging doesn't have the function yet (HTTP 404), so every run is a first run there.
+        if (response as? HTTPURLResponse)?.statusCode == 404 { return (0, 0) }
+        guard (response as? HTTPURLResponse)?.statusCode == 200,
+              let row = (try? JSONSerialization.jsonObject(with: data) as? [[String: Any]])?.first,
+              let runs = (row["runs"] as? NSNumber)?.intValue,
+              let charge = (row["charge"] as? NSNumber)?.doubleValue else { return nil }
+        return (runs, charge)
+    }
+
+    /// Whether this account may start Shorts from `video`, `minutes` long, today. Nil means the preflight is unavailable;
+    /// the AI gateway still checks the account's allowance before processing a request.
     func usageAllowed(video: String, minutes: Double, on day: Date) async -> Bool? {
         guard isSignedIn, let token = await accessToken() else { return nil }
         var request = Self.request("rest/v1/rpc/usage_allowed")
@@ -64,18 +81,6 @@ final class Account {
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
         return (try? JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed)) as? Bool
-    }
-
-    /// Records that `video` (`minutes` long) was used on `day`. The database refuses it when a limit is passed; a repeat is ignored.
-    func recordUsage(video: String, minutes: Double, on day: Date) async {
-        guard isSignedIn, let token = await accessToken() else { return }
-        var request = Self.request("rest/v1/usage_videos")
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: ["video": video, "day": Self.dayString(day), "minutes": minutes])
-        if case .failure(let message, _) = await Self.send(request), !message.contains("duplicate") {
-            status = "Could not save this video to your usage: \(message)"
-        }
     }
 
     /// Minutes this account has used and its allowance (60 plus redeemed promo codes); nil when unavailable.

@@ -2,6 +2,7 @@ import Foundation
 import AVFoundation
 import AppKit
 import CSQLite
+import CryptoKit
 
 @main struct Smoke {
     /// The editor plays edits live: ready at once, with the Fit background drawn per frame like export.
@@ -132,6 +133,10 @@ import CSQLite
         precondition(kept.start == 9.9, "A strong opening must stay")
         let meaningful = ShortMaker.strongOpening(start: 9.9, duration: 20, words: words(["Like", "most", "people,", "I", "panicked."]), minDuration: 5)
         precondition(meaningful.start == 9.9, "Words that carry meaning at the start, like \"Like most people\", must stay")
+        for opening in ["Yeah,", "Okay,", "But", "So"] {
+            let preserved = ShortMaker.strongOpening(start: 9.9, duration: 20, words: words([opening, "that", "changed", "everything."]), minDuration: 5)
+            precondition(preserved.start == 9.9, "Meaningful opening words must remain: \(opening)")
+        }
         let short = ShortMaker.strongOpening(start: 9.9, duration: 1, words: words(["So", "go."]), minDuration: 1)
         precondition(short.start == 9.9, "Trimming must not break the minimum length")
         print("PASS cuts snap into the nearest audio pause, never into a word; weak openers are dropped")
@@ -184,6 +189,16 @@ import CSQLite
                      && (try? FileManager.default.contentsOfDirectory(atPath: notAProject.path))?.isEmpty == true
                      && (try? ProjectStore(root: root.appendingPathComponent("Picture project.relio"), create: false)) != nil,
                      "Opening a folder that is not a project must fail without leaving a database in it")
+        precondition(ProjectData.folderTitle(URL(fileURLWithPath: "/x/Video 2026-10-27 12-05-58 DAF0A412-EEC0-4B77-85BA-4D608246255C.relio")) == "Video 2026-10-27 12-05-58"
+                     && ProjectData.folderTitle(URL(fileURLWithPath: "/x/My talk.relio")) == "My talk", "Folder titles must drop only a trailing UUID")
+        // Usage is counted by the file's bytes when the hash is known; older imports keep their name-based key.
+        var keyed = imported
+        let oldKey = UsageLimit.serverKey(keyed)
+        keyed.contentHash = try MediaEngine.contentHash(of: source)
+        let sourceBytes = try Data(contentsOf: source)
+        precondition(keyed.contentHash == SHA256.hash(data: sourceBytes).map { String(format: "%02x", $0) }.joined()
+                     && UsageLimit.serverKey(keyed) == keyed.contentHash && oldKey != keyed.contentHash && oldKey.count == 64,
+                     "The usage key must be the content hash, else the old name-based key")
         print("PASS project persistence")
         var database: OpaquePointer?
         precondition(sqlite3_open(store.root.appendingPathComponent("project.sqlite").path, &database) == SQLITE_OK)
@@ -208,6 +223,9 @@ import CSQLite
         let safeSpeech = ShortMaker.speechSafeRange(start: 0.3, duration: 1, words: [.init(text: "Hello", start: 0.2, duration: 0.3)], interval: (0, 4))
         precondition(safeSpeech.start < 0.2 && abs(safeSpeech.start + safeSpeech.duration - 1.3) < 0.001,
                      "Protecting the opening word must not move the intended ending earlier")
+        let clippedCaptions = ShortMaker.clipCaptions([.init(text: "ending", start: 10.98, duration: 0.2)], start: 10, duration: 1)
+        precondition(clippedCaptions.count == 1 && abs(clippedCaptions[0].start + clippedCaptions[0].duration - 1) < 0.0001,
+                     "A short caption at the clip end must not extend past the exported video")
         let firstHalf = try ShortMaker.SourceRegion.firstHalf.interval(videoDuration: 600)
         let lastHalf = try ShortMaker.SourceRegion.lastHalf.interval(videoDuration: 600)
         precondition(firstHalf.start == 0 && firstHalf.end == 300)
@@ -257,6 +275,28 @@ import CSQLite
         let plainURL = root.appendingPathComponent("plain.mp4")
         let timedURL = root.appendingPathComponent("timed.mp4")
         try await ShortMaker.export(source: source, segment: EditSegment(mediaID: imported.id, duration: 3), destination: plainURL)
+        let notedURL = root.appendingPathComponent("noted.mp4")
+        var noted = EditSegment(mediaID: imported.id, duration: 3, suggestedTitle: "A hook worth staying for")
+        noted.suggestedDescription = "One line for viewers. #shorts"
+        try await ShortMaker.export(source: source, segment: noted, destination: notedURL)
+        let notedMetadata = try await AVURLAsset(url: notedURL).load(.commonMetadata)
+        let notedTitle = try await AVMetadataItem.metadataItems(from: notedMetadata, filteredByIdentifier: .commonIdentifierTitle).first?.load(.stringValue)
+        let notedDescription = try await AVMetadataItem.metadataItems(from: notedMetadata, filteredByIdentifier: .commonIdentifierDescription).first?.load(.stringValue)
+        precondition(notedTitle == "A hook worth staying for" && notedDescription == "One line for viewers. #shorts", "MP4 must carry the title and description")
+        let notes = try String(contentsOf: ShortMaker.notesURL(for: notedURL), encoding: .utf8)
+        precondition(notes == "A hook worth staying for\n\nOne line for viewers. #shorts\n")
+        precondition(!FileManager.default.fileExists(atPath: ShortMaker.notesURL(for: plainURL).path), "No .txt for a Short without a title or description")
+        let collisionURL = root.appendingPathComponent("notes-collision.mp4")
+        let existingNotes = ShortMaker.notesURL(for: collisionURL)
+        try Data("keep my notes".utf8).write(to: existingNotes)
+        do {
+            try await ShortMaker.export(source: source, segment: noted, destination: collisionURL)
+            fatalError("Existing notes overwritten")
+        } catch { }
+        let preservedNotes = try Data(contentsOf: existingNotes)
+        precondition(preservedNotes == Data("keep my notes".utf8), "Existing notes must survive an export")
+        precondition(!FileManager.default.fileExists(atPath: collisionURL.path), "A notes collision must not leave a published video")
+        print("PASS export title and description")
         try await ShortMaker.export(source: source, segment: EditSegment(mediaID: imported.id, duration: 3, caption: "Timed caption", captionStart: 1, captionDuration: 1), destination: timedURL)
         let fitURL = root.appendingPathComponent("fit.mp4")
         try await ShortMaker.export(source: source, segment: EditSegment(mediaID: imported.id, duration: 3, fitToFrame: true), destination: fitURL)

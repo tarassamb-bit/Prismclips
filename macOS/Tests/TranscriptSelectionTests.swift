@@ -42,6 +42,12 @@ import Foundation
         precondition(!TranscriptSelection.alignmentIsReliable(Array(aligned.dropLast(2)), reference: reference), "Missing payoff must reject word alignment")
         let drifting = aligned.map { TimedSpeechWord(text: $0.text, start: $0.start + 4, duration: $0.duration) }
         precondition(!TranscriptSelection.alignmentIsReliable(drifting, reference: reference), "Correct words on the wrong clock must be rejected")
+        let repeatedReference = [TimedCaption(text: "Go go go go", start: 0, duration: 1), TimedCaption(text: "Go go go go", start: 10, duration: 1)]
+        let repeatedWords = (0..<8).map { TimedSpeechWord(text: "Go", start: $0 == 0 ? 0 : 10 + Double($0 - 1) * 0.1, duration: 0.08) }
+        precondition(!TranscriptSelection.alignmentIsReliable(repeatedWords, reference: repeatedReference), "Repeated words cannot stand in for missing timed occurrences")
+        let shortReference = [TimedCaption(text: "Yes.", start: 0, duration: 0.5), TimedCaption(text: "Absolutely.", start: 10, duration: 0.5)]
+        let shortDrift = [TimedSpeechWord(text: "Yes.", start: 8, duration: 0.4), TimedSpeechWord(text: "Absolutely.", start: 10, duration: 0.4)]
+        precondition(!TranscriptSelection.alignmentIsReliable(shortDrift, reference: shortReference), "Short replies must also have timing anchors")
         let grouped = TranscriptSelection.sentenceCaptionGroups(reference)
         precondition(grouped.map(\.text).joined(separator: " ") == reference.map(\.text).joined(separator: " "))
         let padded = TranscriptSelection.paddedPhraseRange(start: 10, duration: 5,
@@ -69,6 +75,14 @@ import Foundation
         precondition(trimmed.start == 2 && trimmed.start + trimmed.duration == 32, "Filler-only openings and sign-offs are trimmed")
         let kept = TranscriptSelection.trimmedFiller(start: 0, duration: 34, cues: spoken, minDuration: 33)
         precondition(kept.start == 0 && kept.duration == 34, "Filler stays when trimming would make the clip too short")
+        for payoff in ["Right.", "Yeah.", "Thank you."] {
+            let cues = [TimedCaption(text: "This was the question.", start: 0, duration: 20), TimedCaption(text: payoff, start: 20, duration: 2)]
+            let range = TranscriptSelection.trimmedFiller(start: 0, duration: 22, cues: cues, minDuration: 10)
+            precondition(range.start + range.duration == 22, "A short answer or meaningful thanks must not be discarded")
+        }
+        let shortAnswer = [TimedCaption(text: "Okay.", start: 0, duration: 1), TimedCaption(text: "Here is why that matters.", start: 1, duration: 20)]
+        precondition(TranscriptSelection.trimmedFiller(start: 0, duration: 21, cues: shortAnswer, minDuration: 10).start == 0,
+                     "An opening reply can provide essential context")
         print("PASS sentence-complete cuts: ends finish their sentence or step back, starts move to a sentence start, length limits hold")
     }
 }

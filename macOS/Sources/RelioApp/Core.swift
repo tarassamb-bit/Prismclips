@@ -17,6 +17,9 @@ struct MediaItem: Identifiable, Codable, Hashable {
     var note: String = ""
     var priority: Int = 50
     var created: Date = .now
+    /// SHA-256 of the file's bytes, worked out in the background after import. Usage is counted by it, so a video
+    /// counts once however often it is imported or renamed. nil for older imports, which keep their name-based key.
+    var contentHash: String? = nil
     var name: String { Self.fileName(in: path) }
     static func fileName(in path: String) -> String { path.replacingOccurrences(of: "\\", with: "/").split(separator: "/").last.map(String.init) ?? "" }
 }
@@ -44,6 +47,8 @@ struct EditSegment: Identifiable, Codable, Hashable {
 
     var suggestedTitle: String? = nil
     var selectionReason: String? = nil
+    /// Post description from Prism AI, editable before export; nil for older Shorts.
+    var suggestedDescription: String? = nil
     /// Prism AI's rating of this Short, 0–100; nil for Shorts added by hand or made before scores were kept.
     var score: Int? = nil
     /// The kind of video this Short was cut from, as chosen or detected; Auto captions pick their style from it.
@@ -63,7 +68,7 @@ struct EditSegment: Identifiable, Codable, Hashable {
 
     private enum CodingKeys: String, CodingKey {
         case id, mediaID, start, duration, caption, isMuted, captionStart, captionDuration
-        case fitToFrame, captions, cropZoom, cropPosition, cropKeyframes, cropTrackingVersion, speechWords, suggestedTitle, selectionReason, captionNotice, captionStyle
+        case fitToFrame, captions, cropZoom, cropPosition, cropKeyframes, cropTrackingVersion, speechWords, suggestedTitle, selectionReason, suggestedDescription, captionNotice, captionStyle
         case captionPosition, captionSize, captionAnimated, splitScreen, splitCenters, score, videoType
     }
 
@@ -101,6 +106,7 @@ struct EditSegment: Identifiable, Codable, Hashable {
         speechWords = try values.decodeIfPresent([TimedSpeechWord].self, forKey: .speechWords)
         suggestedTitle = try values.decodeIfPresent(String.self, forKey: .suggestedTitle)
         selectionReason = try values.decodeIfPresent(String.self, forKey: .selectionReason)
+        suggestedDescription = try values.decodeIfPresent(String.self, forKey: .suggestedDescription)
         captionNotice = try values.decodeIfPresent(String.self, forKey: .captionNotice)
         captionPosition = try values.decodeIfPresent(CaptionPosition.self, forKey: .captionPosition)
         captionSize = try values.decodeIfPresent(CaptionSize.self, forKey: .captionSize)
@@ -305,6 +311,14 @@ struct ProjectData: Codable {
     /// Cloud sentence transcripts by media ID, so later runs on the same video skip transcription.
     var transcripts: [String: SentenceTranscript]? = nil
 
+    /// A project folder's name without the UUID that keeps folders unique, for when the project itself can't be read.
+    static func folderTitle(_ folder: URL) -> String {
+        let name = folder.deletingPathExtension().lastPathComponent
+        let parts = name.split(separator: " ")
+        guard let last = parts.last, UUID(uuidString: String(last)) != nil, parts.count > 1 else { return name }
+        return parts.dropLast().joined(separator: " ")
+    }
+
     /// What people see: their chosen name, else the first Short's title, else the video's name, else the dated folder name.
     var displayTitle: String {
         if let title, !title.isEmpty { return title }
@@ -384,6 +398,8 @@ final class ProjectStore {
             sqlite3_close(db); db = nil
             throw StoreError.database
         }
+        // Home reads projects while the open one is being saved; wait for the writer instead of failing at once.
+        sqlite3_busy_timeout(db, 3_000)
         do {
             try execute("PRAGMA journal_mode=WAL")
             if create { try execute("CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value BLOB NOT NULL)") }
@@ -427,6 +443,18 @@ final class ProjectStore {
 }
 
 enum MediaEngine {
+    /// SHA-256 of a file's bytes, read in 8 MB pieces so large videos never sit in memory at once.
+    static func contentHash(of url: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while let chunk = try handle.read(upToCount: 8 << 20), !chunk.isEmpty {
+            try Task.checkCancellation()
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
     static func inspect(_ url: URL, thumbnailDirectory: URL) async -> MediaItem? {
         let ext = url.pathExtension.lowercased()
         let kind = ["mov", "mp4", "m4v", "avi"].contains(ext) ? "video" : (["jpg", "jpeg", "png", "heic", "tiff"].contains(ext) ? "photo" : (["mp3", "wav", "m4a", "aiff"].contains(ext) ? "audio" : ""))
@@ -467,9 +495,7 @@ enum MediaEngine {
     }
 }
 
-/// The beta allowance: 60 minutes of video in total per account, each video counted once. Promo codes add minutes;
-/// the server keeps the real count when signed in, and this copy covers the Mac when the server can't be reached.
-// shortcut: counted on this Mac for offline use only; when signed in, the server's count decides.
+/// Local usage estimates for display. The server enforces account allowances, including promo minutes.
 enum UsageLimit {
     static let allowance = 60.0
     static let storageKey = "usage.videos"
@@ -482,9 +508,10 @@ enum UsageLimit {
 
     /// Two imports of the same file count as one video.
     static func videoKey(_ media: MediaItem) -> String { "\(media.name)|\(Int(media.duration.rounded()))" }
-    /// What Supabase stores: a SHA-256 of the video key, so the file name never leaves the Mac.
+    /// What Supabase stores: the content hash, or for older imports a SHA-256 of the video key; the file name never leaves the Mac.
     static func serverKey(_ media: MediaItem) -> String {
-        SHA256.hash(data: Data(videoKey(media).utf8)).map { String(format: "%02x", $0) }.joined()
+        if let hash = media.contentHash { return hash }
+        return SHA256.hash(data: Data(videoKey(media).utf8)).map { String(format: "%02x", $0) }.joined()
     }
     static func minutes(of media: MediaItem) -> Double { media.duration / 60 }
 
@@ -497,13 +524,6 @@ enum UsageLimit {
         var longest: [String: Double] = [:]
         for entry in entries { longest[entry.video] = max(longest[entry.video] ?? 0, entry.minutes) }
         return longest.values.reduce(0, +)
-    }
-
-    /// Why a video of `minutes` length can't be used now, or nil when it can.
-    static func refusal(for video: String, minutes: Double, entries: [Entry]) -> String? {
-        if entries.contains(where: { $0.video == video }) { return nil }
-        guard used(entries: entries) + minutes > allowance else { return nil }
-        return "You've used your \(Int(allowance)) beta minutes. Ask for a promo code to get more, then enter it in Settings › Usage."
     }
 
     static func recorded(_ video: String, minutes: Double, in entries: [Entry], now: Date = .now) -> [Entry] {

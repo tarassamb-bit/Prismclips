@@ -76,6 +76,8 @@ enum TranscriptSelection {
         // The edges may differ by a word or two (a dropped "so", an added "uh"); the overlap check below still
         // demands 95% of the words, so a lost payoff is still caught.
         guard !expected.isEmpty, !actual.isEmpty,
+              words.allSatisfy({ $0.start.isFinite && $0.duration.isFinite && $0.duration > 0 }),
+              zip(words, words.dropFirst()).allSatisfy({ $0.start <= $1.start }),
               expected.prefix(3).contains(actual[0]) || actual.prefix(3).contains(expected[0]),
               expected.suffix(3).contains(actual[actual.count - 1]) || actual.suffix(3).contains(expected[expected.count - 1]),
               actual.count <= expected.count * 3 / 2 + 3 else { return false }
@@ -90,9 +92,16 @@ enum TranscriptSelection {
         guard Double(previous.last!) / Double(expected.count) >= 0.95 else { return false }
         for cue in reference {
             let cueTokens = tokens(cue.text)
-            guard cueTokens.count >= 4 else { continue }
-            let nearby = Set(words.filter { $0.start + $0.duration > cue.start - 0.7 && $0.start < cue.start + cue.duration + 0.7 }.flatMap { tokens($0.text) })
-            let coverage = Double(cueTokens.filter { nearby.contains($0) }.count) / Double(cueTokens.count)
+            guard !cueTokens.isEmpty else { continue }
+            let nearby = words.filter { $0.start + $0.duration > cue.start - 0.7 && $0.start < cue.start + cue.duration + 0.7 }.flatMap { tokens($0.text) }
+            var remaining: [String: Int] = [:]
+            for token in nearby { remaining[token, default: 0] += 1 }
+            var matched = 0
+            for token in cueTokens where remaining[token, default: 0] > 0 {
+                remaining[token, default: 0] -= 1
+                matched += 1
+            }
+            let coverage = Double(matched) / Double(cueTokens.count)
             if coverage < 0.65 { return false }
         }
         return true
@@ -169,20 +178,22 @@ enum TranscriptSelection {
     /// so a Short opens on its hook and ends on its payoff.
     // shortcut: English filler words only; add per-language lists if non-English sources matter.
     static func trimmedFiller(start: Double, duration: Double, cues: [TimedCaption], minDuration: Double) -> (start: Double, duration: Double) {
-        let filler: Set<String> = ["okay", "ok", "so", "um", "uh", "erm", "hmm", "yeah", "right", "alright", "all", "anyway", "well",
-                                   "and", "but", "now", "oh", "hey", "hi", "hello", "guys", "everyone", "thanks", "thank", "you", "for", "watching"]
-        func isFiller(_ cue: TimedCaption) -> Bool {
+        // Short replies such as "Yes", "Right", or "Thank you" can be the payoff.
+        // Trim only unambiguous hesitation at the start and explicit sign-offs at the end.
+        let openingFiller: Set<String> = ["um", "uh", "erm", "hmm", "so", "okay so", "ok so"]
+        let closingFiller: Set<String> = ["thanks for watching", "thank you for watching"]
+        func normalized(_ cue: TimedCaption) -> String {
             let words = cue.text.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
-            return !words.isEmpty && words.count <= 4 && words.allSatisfy(filler.contains)
+            return words.joined(separator: " ")
         }
         var inside = cues.filter { $0.start >= start - 0.05 && $0.start + $0.duration <= start + duration + 0.05 }.sorted { $0.start < $1.start }
         var begin = start
         var end = start + duration
-        while inside.count > 1, isFiller(inside[0]), end - inside[1].start >= minDuration {
+        while inside.count > 1, openingFiller.contains(normalized(inside[0])), end - inside[1].start >= minDuration {
             inside.removeFirst()
             begin = inside[0].start
         }
-        while inside.count > 1, isFiller(inside[inside.count - 1]), inside[inside.count - 2].start + inside[inside.count - 2].duration - begin >= minDuration {
+        while inside.count > 1, closingFiller.contains(normalized(inside[inside.count - 1])), inside[inside.count - 2].start + inside[inside.count - 2].duration - begin >= minDuration {
             inside.removeLast()
             end = inside[inside.count - 1].start + inside[inside.count - 1].duration
         }

@@ -3,6 +3,7 @@ import AVFoundation
 import AppKit
 import SwiftUI
 import CSQLite
+import CryptoKit
 
 @main struct EditorModelTest {
     @MainActor static func main() async throws {
@@ -35,6 +36,20 @@ import CSQLite
         let createdIDs = try createdPaths.map { try ProjectStore(root: $0, create: false).load(ProjectData.self, key: "project")!.id }
         precondition(Set(createdIDs).count == 5)
         print("PASS rapid project creation preserves five separate projects")
+        // The content hash is worked out off the main thread and saved into the project, even after another project opens.
+        let hashModel = AppModel(appDirectory: root.appendingPathComponent("Hashing"))
+        hashModel.create()
+        let hashedProject = hashModel.projectURL!
+        var hashed = media; hashed.contentHash = nil
+        hashModel.project?.media = [hashed]
+        try hashModel.save()
+        hashModel.startHashing(hashed, in: hashedProject)
+        hashModel.create()  // a different project is open when the hash finishes
+        while hashModel.hashTasks[hashed.id] != nil { try await Task.sleep(for: .milliseconds(20)) }
+        let expectedHash = SHA256.hash(data: try Data(contentsOf: URL(fileURLWithPath: hashed.path))).map { String(format: "%02x", $0) }.joined()
+        let savedHash = try ProjectStore(root: hashedProject, create: false).load(ProjectData.self, key: "project")?.media.first?.contentHash
+        precondition(savedHash == expectedHash, "The hash must be saved into the project the video was imported into")
+        print("PASS content hash runs in the background and is saved into its own project")
         let exportFolder = root.appendingPathComponent("Collision checks")
         try FileManager.default.createDirectory(at: exportFolder, withIntermediateDirectories: true)
         try Data().write(to: exportFolder.appendingPathComponent("Story 2.mp4"))
@@ -105,17 +120,19 @@ import CSQLite
         precondition(!model.isBusy && model.generationError?.kind == .settings, "A missing key must open the Settings popup, not \"No Shorts found\"")
         model.generationError = nil
         print("PASS imported duration initializes the custom range and invalid minutes block generation")
-        // The run checks the video limit before any AI call: with today's 60 minutes used up, a new video is refused.
+        // Local history must not block a run: the account may have promo minutes or belong to another user.
         let savedUsage = UserDefaults.standard.data(forKey: UsageLimit.storageKey)
         UserDefaults.standard.set(try JSONEncoder().encode([UsageLimit.Entry(video: "earlier", date: .now, minutes: 60)]), forKey: UsageLimit.storageKey)
         let emailBeforeLimit = model.account.email
         model.account.email = "tester@example.com"
         model.makeConfiguredShorts()
-        precondition(!model.isBusy && model.generationError?.kind == .limit, "A video past today's 60 minutes must be refused before analysis")
+        precondition(model.isBusy && model.generationError == nil, "Local history must not override the account's server allowance")
+        model.cancelGeneration()
+        while model.isBusy { try await Task.sleep(for: .milliseconds(20)) }
         model.generationError = nil
         model.account.email = emailBeforeLimit
         UserDefaults.standard.set(savedUsage, forKey: UsageLimit.storageKey)
-        print("PASS a run past today's 60 minutes is refused before any AI call")
+        print("PASS local usage does not block an account with possible promo minutes")
         let generated = EditSegment(mediaID: media.id, start: 0, duration: 1, fitToFrame: true, suggestedTitle: "First story", selectionReason: "A specific hook and payoff.", captionNotice: "Sentence timing notice", captionStyle: .viral)
         _ = try model.appendGeneratedShorts([generated])
         let distinct = EditSegment(mediaID: media.id, start: 2, duration: 1)
@@ -188,14 +205,11 @@ import CSQLite
         model.selectPreview(nil)
         model.project?.segments = []
         print("PASS arrow keys move between Shorts in the order the list shows")
-        // Beta allowance: 60 minutes in total; a video counts once, and a video already used is always allowed again.
+        // Local estimates count each video only once; the server enforces account allowances.
         let entries = [UsageLimit.Entry(video: "a", date: .now, minutes: 40), UsageLimit.Entry(video: "b", date: .now, minutes: 15)]
         precondition(UsageLimit.used(entries: entries) == 55)
-        precondition(UsageLimit.refusal(for: "c", minutes: 10, entries: entries)?.contains("beta minutes") == true, "Going past 60 minutes in total must be refused")
-        precondition(UsageLimit.refusal(for: "c", minutes: 5, entries: entries) == nil, "Filling the allowance exactly is allowed")
-        precondition(UsageLimit.refusal(for: "a", minutes: 40, entries: entries) == nil, "A video already used is free to make again")
         precondition(UsageLimit.recorded("a", minutes: 40, in: entries).count == 2, "The same video is counted once")
-        print("PASS beta allowance: 60 minutes in total, each video counted once")
+        print("PASS local usage estimates count each video once")
         // Account: signed out means no sign-in state and no network call for exports; sign-out clears the saved email.
         UserDefaults.standard.set("tester@example.com", forKey: "account.email")
         let signedIn = Account()

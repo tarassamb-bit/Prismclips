@@ -16,6 +16,7 @@ struct ShortResult {
     var analysisWarning: String? = nil
     var suggestedTitle: String? = nil
     var selectionReason: String? = nil
+    var suggestedDescription: String? = nil
     var fitToFrame: Bool = false
     /// Prism AI's 0–10 clip score on a 0–100 scale.
     var score: Int? = nil
@@ -146,9 +147,9 @@ enum ShortMaker {
         // Auto keeps only strong picks; when Prism AI found none, the single best weaker one beats failing.
         let strong = clips.filter { $0.reason?.hasPrefix("Weaker pick") != true }
         let kept = count > 0 ? clips : (strong.isEmpty ? Array(clips.prefix(1)) : strong)
-        var planned = kept.map { (start: $0.start, duration: $0.end - $0.start, fit: $0.layout == "fit", title: $0.title, reason: $0.reason, score: $0.score) }
+        var planned = kept.map { (start: $0.start, duration: $0.end - $0.start, fit: $0.layout == "fit", title: $0.title, reason: $0.reason, description: $0.description, score: $0.score) }
         // Screens and gameplay lose their edges in a vertical crop, whatever the picker suggested.
-        if videoType.forcesFit { planned = planned.map { ($0.start, $0.duration, true, $0.title, $0.reason, $0.score) } }
+        if videoType.forcesFit { planned = planned.map { ($0.start, $0.duration, true, $0.title, $0.reason, $0.description, $0.score) } }
         let picks = planned
         let sentenceTimingNote = GeminiSelection.sentenceTimingNotice
         let finished = OSAllocatedUnfairLock(initialState: 0)
@@ -157,7 +158,7 @@ enum ShortMaker {
             generationProgress(0.70 + 0.29 * min(1, Double(done) / Double(targetCount * 2)), stage)
         }
         // Picks are prepared a wave at a time, side by side: exact boundaries, word timing and the nearest pauses.
-        // They are accepted in Prism AI's order; a pick that now overlaps an earlier one gives way to the next backup.
+        // Accept in Prism AI's order; if a pick now overlaps an earlier one, try the next available candidate.
         var accepted: [(candidate: Int, range: PreparedShort)] = []
         var wordAlignmentAvailable = true
         var next = 0
@@ -187,14 +188,7 @@ enum ShortMaker {
             let candidate = picks[candidateIndex]
             let start = shot.start, actualDuration = shot.duration
             let captionSource = !shot.words.isEmpty ? GeminiSelection.captionCues(shot.words, interval: (start, start + actualDuration)) : TranscriptSelection.sentenceCaptionGroups(shot.referenceCues)
-            let captions = captionSource.compactMap { cue -> TimedCaption? in
-                let cueEnd = cue.start + cue.duration
-                let clipEnd = start + actualDuration
-                guard cueEnd > start, cue.start < clipEnd else { return nil }
-                let clippedStart = max(0, cue.start - start)
-                let clippedEnd = min(actualDuration, cueEnd - start)
-                return TimedCaption(text: cue.text, start: clippedStart, duration: max(0.15, clippedEnd - clippedStart))
-            }
+            let captions = clipCaptions(captionSource, start: start, duration: actualDuration)
             let words = shot.words.compactMap { word -> TimedSpeechWord? in
                 guard word.start >= start - 0.01, word.start + word.duration <= start + actualDuration + 0.01 else { return nil }
                 return .init(text: word.text, start: word.start - start, duration: word.duration)
@@ -207,7 +201,8 @@ enum ShortMaker {
             let title = candidate.title.map { String($0.prefix(100)) } ?? captions.first.map { String($0.text.prefix(100)) }
             return ShortResult(start: start, duration: actualDuration, caption: "", captions: captions,
                 cropKeyframes: cropKeyframes, speechWords: words, analysisWarning: warning,
-                suggestedTitle: title, selectionReason: candidate.reason.map { String($0.prefix(400)) }, fitToFrame: candidate.fit,
+                suggestedTitle: title, selectionReason: candidate.reason.map { String($0.prefix(400)) },
+                suggestedDescription: candidate.description.map { String($0.prefix(1000)) }, fitToFrame: candidate.fit,
                 score: Int((min(10, max(0, candidate.score)) * 10).rounded()), videoType: detectedType)
         }
         if results.isEmpty {
@@ -227,6 +222,17 @@ enum ShortMaker {
     static let maxShorts = 20
     /// Prism AI requests that run side by side. Rate limits are retried, so this trades quota bursts for speed.
     static let parallelRequests = 6
+    /// Shift captions into the clip's timeline without extending them beyond its end.
+    static func clipCaptions(_ cues: [TimedCaption], start: Double, duration: Double) -> [TimedCaption] {
+        cues.compactMap { cue in
+            let cueEnd = cue.start + cue.duration
+            guard cueEnd > start, cue.start < start + duration else { return nil }
+            let clippedStart = max(0, cue.start - start)
+            let clippedEnd = min(duration, cueEnd - start)
+            guard clippedEnd > clippedStart else { return nil }
+            return TimedCaption(text: cue.text, start: clippedStart, duration: clippedEnd - clippedStart)
+        }
+    }
     /// How many Shorts Auto makes room for: one per minute of source, 1 to 20. Only strong picks fill them.
     static func autoCount(seconds: Double) -> Int { min(maxShorts, max(1, Int(seconds / 60))) }
 
@@ -350,17 +356,19 @@ enum ShortMaker {
         }
     }
 
-    /// Drops up to three throat-clearing words ("So", "Um", "And", "Okay") from a Short's first line, so it opens on its
+    /// Drops up to three throat-clearing words from a Short's first line, so it opens on its
     /// hook. Needs real word timing; the cut lands 0.08 s before the next word and the Short keeps `minDuration`.
     // shortcut: English filler words only; add per-language lists if non-English sources matter.
     static func strongOpening(start: Double, duration: Double, words: [TimedSpeechWord], minDuration: Double) -> (start: Double, duration: Double) {
-        // Only words that are filler at the start of a line; "like", "now", "then" and "right" often carry meaning there.
-        let weak: Set<String> = ["so", "and", "but", "um", "uh", "erm", "okay", "ok", "well", "anyway", "alright", "yeah"]
+        // Replies and conjunctions can carry meaning. Only remove unmistakable hesitation,
+        // plus "so" immediately followed by a hesitation ("so, um...").
+        let hesitation: Set<String> = ["um", "uh", "erm"]
         let end = start + duration
         let spoken = words.filter { $0.start >= start - 0.05 && $0.start < end }.sorted { $0.start < $1.start }
         func bare(_ word: TimedSpeechWord) -> String { word.text.lowercased().filter { $0.isLetter } }
         var dropped = 0
-        while dropped < min(3, spoken.count - 1), weak.contains(bare(spoken[dropped])) { dropped += 1 }
+        if spoken.count > 1, bare(spoken[0]) == "so", hesitation.contains(bare(spoken[1])) { dropped = 1 }
+        while dropped < min(3, spoken.count - 1), hesitation.contains(bare(spoken[dropped])) { dropped += 1 }
         guard dropped > 0 else { return (start, duration) }
         let newStart = max(start, spoken[dropped].start - 0.08)
         guard end - newStart >= minDuration else { return (start, duration) }
@@ -405,7 +413,7 @@ enum ShortMaker {
     /// Each cached file is a full-length Short, so keep only the newest ones.
     static func pruneRenderCache(keeping limit: Int = 24) {
         guard let files = try? FileManager.default.contentsOfDirectory(at: renderCacheDirectory, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
-        let finished = files.filter { ($0.lastPathComponent.hasPrefix("fit-") || $0.lastPathComponent.hasPrefix("split-")) && $0.pathExtension == "mp4" }
+        let finished = files.filter { file in ["fit-", "split-", "upscale-"].contains { file.lastPathComponent.hasPrefix($0) } && file.pathExtension == "mp4" }
         let dated = finished.map { ($0, (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) }
         for (file, _) in dated.sorted(by: { $0.1 > $1.1 }).dropFirst(max(0, limit)) { try? FileManager.default.removeItem(at: file) }
     }
@@ -455,12 +463,42 @@ enum ShortMaker {
         session.videoComposition = videoComposition
         session.outputURL = temporary
         session.outputFileType = .mp4
+        let title = segment.suggestedTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let description = segment.suggestedDescription?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        session.metadata = [(AVMetadataIdentifier.commonIdentifierTitle, title), (.commonIdentifierDescription, description)].compactMap { identifier, value in
+            guard !value.isEmpty else { return nil }
+            let item = AVMutableMetadataItem()
+            item.identifier = identifier; item.value = value as NSString; item.extendedLanguageTag = "und"
+            return item
+        }
         nonisolated(unsafe) let running = session
         await withTaskCancellationHandler { await running.export() } onCancel: { running.cancelExport() }
         try Task.checkCancellation()
         if session.status != .completed { throw session.error ?? Failure.cannotExport }
-        try FileManager.default.moveItem(at: temporary, to: destination)
+        // Publish the companion file without replacing an existing one. If publishing the
+        // video fails, remove only the companion file this export created.
+        let notes = [title, description].filter { !$0.isEmpty }.joined(separator: "\n\n")
+        if !notes.isEmpty {
+            let notesDestination = notesURL(for: destination)
+            let temporaryNotes = destination.deletingLastPathComponent().appendingPathComponent(".relio-\(UUID()).txt")
+            defer { try? FileManager.default.removeItem(at: temporaryNotes) }
+            try (notes + "\n").write(to: temporaryNotes, atomically: true, encoding: .utf8)
+            try Task.checkCancellation()
+            try FileManager.default.moveItem(at: temporaryNotes, to: notesDestination)
+            do {
+                try Task.checkCancellation()
+                try FileManager.default.moveItem(at: temporary, to: destination)
+            } catch {
+                try? FileManager.default.removeItem(at: notesDestination)
+                throw error
+            }
+        } else {
+            try FileManager.default.moveItem(at: temporary, to: destination)
+        }
     }
+
+    /// The .txt file holding a Short's title and description, next to its MP4.
+    static func notesURL(for video: URL) -> URL { video.deletingPathExtension().appendingPathExtension("txt") }
 
     /// Copy originals through a temporary file so a failed or cancelled copy never leaves a partial export.
     static func copySource(_ source: URL, to destination: URL) async throws {
@@ -507,9 +545,9 @@ enum ShortMaker {
             try composedAudio.insertTimeRange(range, of: audioTrack, at: .zero)
         }
         let natural = try await videoTrack.load(.naturalSize)
-        let preferred = try await videoTrack.load(.preferredTransform)
-        let transformed = CGRect(origin: .zero, size: natural).applying(preferred)
-        let oriented = CGSize(width: abs(transformed.width), height: abs(transformed.height))
+        var preferred = try await videoTrack.load(.preferredTransform)
+        var transformed = CGRect(origin: .zero, size: natural).applying(preferred)
+        var oriented = CGSize(width: abs(transformed.width), height: abs(transformed.height))
         let target = CGSize(width: 1080, height: 1920)
         guard oriented.width > 0, oriented.height > 0 else { throw Failure.noVideo }
         let isSplit = segment.splitScreen == true
@@ -541,6 +579,33 @@ enum ShortMaker {
             guard let blurredTrack = try await blurredAsset.loadTracks(withMediaType: .video).first else { throw Failure.cannotExport }
             composedVideo.removeTimeRange(CMTimeRange(start: .zero, duration: range.duration))
             try composedVideo.insertTimeRange(CMTimeRange(start: .zero, duration: range.duration), of: blurredTrack, at: .zero)
+        }
+        // A crop from a small source is enlarged about 5×, which the compositor does with plain resampling. Export first
+        // enlarges the range with Lanczos and light sharpening, so the crop starts from a sharper picture.
+        if !drawsFrames && !live && min(oriented.width, oriented.height) < 720 {
+            let factor = min(3, 1080 / min(oriented.width, oriented.height))
+            let enlarged = CGSize(width: (oriented.width * factor).rounded(), height: (oriented.height * factor).rounded())
+            let cached = renderCacheURL("upscale-v1|\(source.path)|\(segment.start)|\(segment.duration)", prefix: "upscale")
+            if !FileManager.default.fileExists(atPath: cached.path) {
+                try FileManager.default.createDirectory(at: renderCacheDirectory, withIntermediateDirectories: true)
+                let intermediate = renderCacheDirectory.appendingPathComponent(".relio-upscale-\(UUID()).mp4")
+                defer { try? FileManager.default.removeItem(at: intermediate) }
+                try await renderFrames(asset: asset, track: videoTrack, range: range, outputURL: intermediate, renderSize: enlarged) { image in
+                    ShortMaker.enlargedFrame(image, transform: upright, factor: factor, size: enlarged)
+                }
+                do { try FileManager.default.moveItem(at: intermediate, to: cached) }
+                catch { if !FileManager.default.fileExists(atPath: cached.path) { throw error } }
+                pruneRenderCache()
+            }
+            // Kept in a constant: a track whose asset is released can't be inserted.
+            let enlargedAsset = AVURLAsset(url: cached)
+            guard let enlargedTrack = try await enlargedAsset.loadTracks(withMediaType: .video).first else { throw Failure.cannotExport }
+            composedVideo.removeTimeRange(CMTimeRange(start: .zero, duration: range.duration))
+            try composedVideo.insertTimeRange(CMTimeRange(start: .zero, duration: range.duration), of: enlargedTrack, at: .zero)
+            // The enlarged copy is already upright, so the framing below works on it directly.
+            preferred = .identity
+            transformed = CGRect(origin: .zero, size: enlarged)
+            oriented = enlarged
         }
         let baseScale = segment.fitToFrame == true
             ? min(target.width / oriented.width, target.height / oriented.height)
@@ -720,6 +785,16 @@ enum ShortMaker {
     }
 
     /// One Fit frame at 1080×1920: the whole source, centered over a blurred, zoomed copy of itself.
+    /// An upright source frame enlarged `factor` times with Lanczos resampling and light luminance sharpening.
+    static func enlargedFrame(_ source: CIImage, transform: CGAffineTransform, factor: CGFloat, size: CGSize) -> CIImage {
+        let bounds = CGRect(origin: .zero, size: source.extent.size).applying(transform)
+        return source.transformed(by: transform)
+            .transformed(by: CGAffineTransform(translationX: -bounds.minX, y: -bounds.minY))
+            .applyingFilter("CILanczosScaleTransform", parameters: [kCIInputScaleKey: factor, kCIInputAspectRatioKey: 1])
+            .applyingFilter("CISharpenLuminance", parameters: [kCIInputSharpnessKey: 0.5, kCIInputRadiusKey: 1.5])
+            .cropped(to: CGRect(origin: .zero, size: size))
+    }
+
     static func blurredFitFrame(_ source: CIImage, transform: CGAffineTransform) -> CIImage {
         let renderSize = CGSize(width: 1080, height: 1920)
         let canvas = CGRect(origin: .zero, size: renderSize)
@@ -804,9 +879,8 @@ enum ShortMaker {
             .cropped(to: canvas)
     }
 
-    private static func renderFrames(asset: AVAsset, track: AVAssetTrack, range: CMTimeRange,
-                                     outputURL: URL, draw: (CIImage) -> CIImage) async throws {
-        let renderSize = CGSize(width: 1080, height: 1920)
+    private static func renderFrames(asset: AVAsset, track: AVAssetTrack, range: CMTimeRange, outputURL: URL,
+                                     renderSize: CGSize = CGSize(width: 1080, height: 1920), draw: (CIImage) -> CIImage) async throws {
         let reader = try AVAssetReader(asset: asset)
         reader.timeRange = range
         let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
@@ -821,7 +895,8 @@ enum ShortMaker {
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: Int(renderSize.width),
             AVVideoHeightKey: Int(renderSize.height),
-            AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: 8_000_000]
+            // Intermediate renders are encoded again on export, so they keep a high bitrate to lose little in between.
+            AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: 24_000_000]
         ])
         input.expectsMediaDataInRealTime = false
         let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
@@ -1044,7 +1119,7 @@ enum ShortMaker {
 
     /// The boxes a range of text covers, one per line, in the caption image's coordinates.
     private static func wordRects(_ range: NSRange, in frame: CTFrame, origin: CGPoint) -> [CGRect] {
-        let lines = CTFrameGetLines(frame) as! [CTLine]
+        let lines = (CTFrameGetLines(frame) as? [CTLine]) ?? []
         var origins = [CGPoint](repeating: .zero, count: lines.count)
         CTFrameGetLineOrigins(frame, CFRange(), &origins)
         return zip(lines, origins).compactMap { line, lineOrigin in

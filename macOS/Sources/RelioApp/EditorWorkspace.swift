@@ -104,14 +104,39 @@ extension ContentView {
         let binding = Binding(get: { model.exportChoice ?? choice }, set: { model.exportChoice = $0 })
         let videos = model.project?.media.filter { $0.kind == "video" }.count ?? 0
         let count = choice.shortIDs.count + (choice.includeSource ? videos : 0)
-        return ZStack {
+        let allOpen = !clips.isEmpty && clips.allSatisfy { openExportShorts.contains($0.id) }
+        // A field with a small label above it, drawn like the rest of the card instead of a system text box.
+        func field(_ label: String, _ prompt: String, _ text: Binding<String>, multiline: Bool, accessibility: String) -> some View {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(label).font(Prism.text(11, .medium)).foregroundStyle(Prism.textSecondary)
+                Group {
+                    // Room for a full post description with hashtags; it grows further as the text gets longer.
+                    if multiline { TextField(prompt, text: text, axis: .vertical).lineLimit(5...12).lineSpacing(3) }
+                    else { TextField(prompt, text: text) }
+                }
+                .textFieldStyle(.plain).font(Prism.text(14))
+                .padding(.horizontal, 12).padding(.vertical, 10)
+                .background(EditorStyle.panel, in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(EditorStyle.line))
+                .accessibilityLabel(accessibility)
+            }
+        }
+        return GeometryReader { window in
+        ZStack {
             Color.black.opacity(0.55).contentShape(Rectangle()).onTapGesture {}
             VStack(alignment: .leading, spacing: 14) {
                 Label("Export", systemImage: "square.and.arrow.up").font(Prism.text(16, .medium))
-                HStack {
-                    Text("Shorts").font(Prism.text(12, .medium)).foregroundStyle(Prism.textSecondary)
+                // Shorts on the left get the card's full height; the settings sit in a column beside them.
+                HStack(alignment: .top, spacing: 20) {
+                VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 14) {
+                    Text(clips.isEmpty ? "Shorts" : "Shorts · \(choice.shortIDs.count) of \(clips.count) selected")
+                        .font(Prism.text(12, .medium)).foregroundStyle(Prism.textSecondary)
                     Spacer()
                     if !clips.isEmpty {
+                        Button(allOpen ? "Close all" : "Open all") {
+                            openExportShorts = allOpen ? [] : Set(clips.map(\.id))
+                        }.buttonStyle(.prismLink).foregroundStyle(EditorStyle.accent)
                         let all = choice.shortIDs.count == clips.count
                         Button(all ? "Select none" : "Select all") {
                             binding.wrappedValue.shortIDs = all ? [] : Set(clips.map(\.id))
@@ -123,54 +148,118 @@ extension ContentView {
                 } else {
                     let rows = VStack(alignment: .leading, spacing: 6) {
                             ForEach(Array(clips.enumerated()), id: \.element.id) { index, clip in
-                                Toggle(isOn: Binding(get: { binding.wrappedValue.shortIDs.contains(clip.id) },
-                                                     set: { on in if on { binding.wrappedValue.shortIDs.insert(clip.id) } else { binding.wrappedValue.shortIDs.remove(clip.id) } })) {
-                                    HStack {
-                                        Text("Short \(index + 1)").font(Prism.text(12, .medium))
-                                        Text(clip.suggestedTitle ?? "").font(Prism.text(12)).foregroundStyle(Prism.textSecondary).lineLimit(1)
-                                        Spacer()
-                                        Text(editorTime(clip.duration)).font(Prism.mono(11)).foregroundStyle(Prism.textSecondary)
+                                let isOpen = openExportShorts.contains(clip.id)
+                                let title = binding.wrappedValue.titles[clip.id] ?? ""
+                                VStack(alignment: .leading, spacing: 12) {
+                                    HStack(spacing: 10) {
+                                        Toggle("Export Short \(index + 1)", isOn: Binding(get: { binding.wrappedValue.shortIDs.contains(clip.id) },
+                                                         set: { on in if on { binding.wrappedValue.shortIDs.insert(clip.id) } else { binding.wrappedValue.shortIDs.remove(clip.id) } }))
+                                            .toggleStyle(.checkbox).labelsHidden()
+                                        // The row opens to show the title and description for editing; any number can be open.
+                                        Button {
+                                            if isOpen { openExportShorts.remove(clip.id) } else { openExportShorts.insert(clip.id) }
+                                        } label: {
+                                            HStack(spacing: 8) {
+                                                Text("Short \(index + 1)").font(Prism.text(13, .medium)).fixedSize()
+                                                // The open row shows the title in its field, so the header doesn't repeat it.
+                                                if !isOpen {
+                                                    Text(title.isEmpty ? "No title" : title).font(Prism.text(13))
+                                                        .foregroundStyle(Prism.textSecondary).lineLimit(1).truncationMode(.tail)
+                                                }
+                                                Spacer(minLength: 8)
+                                                if !isOpen && (binding.wrappedValue.descriptions[clip.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                                    Text("No description").font(Prism.text(11)).foregroundStyle(Prism.amber).fixedSize()
+                                                }
+                                                Text(editorTime(clip.duration)).font(Prism.mono(11)).foregroundStyle(Prism.textSecondary)
+                                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                                    .background(EditorStyle.panel, in: Capsule())
+                                                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(Prism.textSecondary)
+                                                    .rotationEffect(.degrees(isOpen ? 90 : 0))
+                                            }
+                                            .contentShape(Rectangle())
+                                        }
+                                        .buttonStyle(.plain)
+                                        .accessibilityLabel("Short \(index + 1), \(title)")
+                                        .accessibilityHint(isOpen ? "Hides the title and description" : "Shows the title and description")
+                                    }
+                                    if isOpen {
+                                        VStack(alignment: .leading, spacing: 10) {
+                                            field("Title", "Name this Short", Binding(get: { binding.wrappedValue.titles[clip.id] ?? "" },
+                                                                                      set: { binding.wrappedValue.titles[clip.id] = $0 }),
+                                                  multiline: false, accessibility: "Short \(index + 1) title")
+                                            field("Description", "What viewers read under the Short, with hashtags",
+                                                  Binding(get: { binding.wrappedValue.descriptions[clip.id] ?? "" },
+                                                          set: { binding.wrappedValue.descriptions[clip.id] = $0 }),
+                                                  multiline: true, accessibility: "Short \(index + 1) description")
+                                        }
+                                        .padding(.leading, 26)
                                     }
                                 }
-                                .toggleStyle(.checkbox)
+                                .padding(.horizontal, 12).padding(.vertical, 10)
+                                .background(EditorStyle.inset, in: RoundedRectangle(cornerRadius: 10))
+                                .overlay(RoundedRectangle(cornerRadius: 10).stroke(isOpen ? EditorStyle.accent.opacity(0.5) : .clear))
+                                .animation(.easeOut(duration: 0.15), value: isOpen)
                             }
                         }
-                    // The list takes the room its Shorts need, and scrolls past 220 points.
+                    // The list takes the room its Shorts need; when the card reaches the window's height, it gets what is left and scrolls.
                     ScrollView {
                         rows.background(GeometryReader { Color.clear.preference(key: ExportListHeight.self, value: $0.size.height) })
                     }
-                    .frame(height: min(220, max(22, exportListHeight)))
+                    .frame(minHeight: min(160, max(22, exportListHeight)), maxHeight: max(22, exportListHeight))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
                     .onPreferenceChange(ExportListHeight.self) { height in Task { @MainActor in exportListHeight = height } }
-                }
-                Divider()
-                Toggle(isOn: binding.includeSource) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(videos > 1 ? "Main videos (\(videos))" : "Main video").font(Prism.text(12, .medium))
-                        Text("The original long video, copied as is.").font(Prism.text(11)).foregroundStyle(Prism.textSecondary)
-                    }
-                }.toggleStyle(.checkbox)
-                Divider()
-                Text("Quality").font(Prism.text(12, .medium)).foregroundStyle(Prism.textSecondary)
-                Picker("Quality", selection: binding.quality) {
-                    ForEach(ShortMaker.ExportQuality.allCases) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.segmented).labelsHidden().frame(maxWidth: .infinity)
-                Text(choice.quality.detail + " Applies to Shorts; the main video keeps its original quality.")
-                    .font(Prism.text(11)).foregroundStyle(Prism.textSecondary).fixedSize(horizontal: false, vertical: true)
-                Divider()
-                Text("Save to").font(Prism.text(12, .medium)).foregroundStyle(Prism.textSecondary)
-                HStack {
-                    Image(systemName: "folder").foregroundStyle(Prism.textSecondary)
-                    Text(AppModel.displayPath(choice.folder)).font(Prism.text(12)).lineLimit(1).truncationMode(.middle)
-                    Spacer()
-                    Button("Change…") {
-                        let panel = NSOpenPanel()
-                        panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.canCreateDirectories = true
-                        panel.prompt = "Export here"
-                        if panel.runModal() == .OK, let url = panel.url { binding.wrappedValue.folder = url }
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text("Each Short's title and description are saved in its MP4 and in a .txt file beside it.")
+                            .font(Prism.text(11)).foregroundStyle(Prism.textSecondary).fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                        let missing = clips.filter { (choice.descriptions[$0.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
+                        if model.isWritingDescriptions {
+                            ProgressView().controlSize(.small)
+                            Text("Writing…").font(Prism.text(12)).foregroundStyle(Prism.textSecondary)
+                        } else if missing > 0 {
+                            Button(missing == 1 ? "Write 1 missing description" : "Write \(missing) missing descriptions") {
+                                Task { await model.writeMissingDescriptions() }
+                            }
+                            .buttonStyle(.prismLink).foregroundStyle(EditorStyle.accent).fixedSize()
+                            .help("One Prism AI request writes a description for every Short that has none")
+                        }
                     }
                 }
-                .padding(10).background(EditorStyle.inset, in: RoundedRectangle(cornerRadius: 8))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Divider()
+                VStack(alignment: .leading, spacing: 14) {
+                    Toggle(isOn: binding.includeSource) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(videos > 1 ? "Main videos (\(videos))" : "Main video").font(Prism.text(12, .medium))
+                            Text("The original long video, copied as is.").font(Prism.text(11)).foregroundStyle(Prism.textSecondary)
+                        }
+                    }.toggleStyle(.checkbox)
+                    Divider()
+                    Text("Quality").font(Prism.text(12, .medium)).foregroundStyle(Prism.textSecondary)
+                    Picker("Quality", selection: binding.quality) {
+                        ForEach(ShortMaker.ExportQuality.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.menu).labelsHidden().fixedSize()
+                    Text(choice.quality.detail + " Applies to Shorts; the main video keeps its original quality.")
+                        .font(Prism.text(11)).foregroundStyle(Prism.textSecondary).fixedSize(horizontal: false, vertical: true)
+                    Divider()
+                    Text("Save to").font(Prism.text(12, .medium)).foregroundStyle(Prism.textSecondary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label(AppModel.displayPath(choice.folder), systemImage: "folder").font(Prism.text(12))
+                            .lineLimit(3).truncationMode(.middle).fixedSize(horizontal: false, vertical: true)
+                        Button("Change…") {
+                            let panel = NSOpenPanel()
+                            panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.canCreateDirectories = true
+                            panel.prompt = "Export here"
+                            if panel.runModal() == .OK, let url = panel.url { binding.wrappedValue.folder = url }
+                        }
+                    }
+                    .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(EditorStyle.inset, in: RoundedRectangle(cornerRadius: 8))
+                }
+                .frame(width: 250)
+                }
                 if let error = choice.error {
                     Label(error, systemImage: "exclamationmark.triangle").font(Prism.text(12)).foregroundStyle(Prism.amber)
                         .fixedSize(horizontal: false, vertical: true)
@@ -183,11 +272,13 @@ extension ContentView {
                 }
             }
             .padding(24)
-            .frame(width: 480)
+            .frame(width: min(940, window.size.width - 48))
+            .frame(maxHeight: window.size.height - 48)
             .background(EditorStyle.panel, in: RoundedRectangle(cornerRadius: 16))
             .overlay(RoundedRectangle(cornerRadius: 16).stroke(EditorStyle.line))
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Export")
+        }
         }
     }
 
@@ -492,7 +583,7 @@ struct EditorCaptionsPanel: View {
                 }
                 .font(Prism.text(11)).foregroundStyle(Prism.textSecondary)
             } else if current.usesWordTiming && clip.speechWords?.isEmpty != false && hasAudio {
-                Text("Word timing is estimated for this Short. Transcribe it for exact timing.")
+                Text("Word timing is estimated for this Short. Transcribing may improve it.")
                     .font(Prism.text(11)).foregroundStyle(Prism.textSecondary).fixedSize(horizontal: false, vertical: true)
             }
             Text("Position").font(Prism.text(12, .medium)).padding(.top, 6)
@@ -1040,7 +1131,7 @@ private struct EditorTimeline: View {
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: 4).fill(EditorStyle.accent.opacity(0.06))
                 if model.activeSegment?.splitScreen == true {
-                    Text("Split screen · each half stays on its speaker").font(Prism.text(11)).foregroundStyle(Prism.textSecondary).padding(.leading, 8)
+                    Text("Split screen · review the framing for each speaker").font(Prism.text(11)).foregroundStyle(Prism.textSecondary).padding(.leading, 8)
                 } else if points.count > 1, let clip = model.activeSegment {
                     Path { path in
                         for (index, point) in points.enumerated() {

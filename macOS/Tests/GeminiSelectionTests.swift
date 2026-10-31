@@ -11,6 +11,7 @@ final class GeminiMockProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var payloads: [String] = []
     /// Every request body sent, so tests can check what the prompts contain.
     nonisolated(unsafe) static var bodies: [String] = []
+    nonisolated(unsafe) static var runs: [String?] = []
     /// Sent instead of a Gemini answer when the status isn't 200, like a real quota error body.
     nonisolated(unsafe) static var errorBody: String?
     /// The model each request was sent to, from the URL.
@@ -31,6 +32,7 @@ final class GeminiMockProtocol: URLProtocol, @unchecked Sendable {
             stream.close()
         }
         Self.bodies.append(String(decoding: body, as: UTF8.self))
+        Self.runs.append(request.value(forHTTPHeaderField: "x-prism-run"))
         Self.models.append(String(request.url!.lastPathComponent.split(separator: ":")[0]))
         precondition(request.url?.query == nil, "Credentials must not be put in the URL")
         precondition(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-token")
@@ -155,6 +157,14 @@ final class NoteBox: @unchecked Sendable {
         } catch GeminiSelection.Failure.noDistinctClips { }
         let result: Check = try await GeminiSelection.generate(parts: [["text": "check"]], schema: [:], configuration: configuration, session: session)
         precondition(result.ok)
+        // A request inside an analysis run names the run; one outside a run sends no run header.
+        GeminiMockProtocol.runs = []
+        var runConfiguration = configuration
+        runConfiguration.usage?.run = "0F8B6A52-3C1D-4E2F-9A7B-1C2D3E4F5A6B"
+        let inRun: Check = try await GeminiSelection.generate(parts: [["text": "check"]], schema: [:], configuration: runConfiguration, session: session)
+        let outsideRun: Check = try await GeminiSelection.generate(parts: [["text": "check"]], schema: [:], configuration: configuration, session: session)
+        precondition(inRun.ok && outsideRun.ok && GeminiMockProtocol.runs == ["0F8B6A52-3C1D-4E2F-9A7B-1C2D3E4F5A6B", nil],
+                     "Only analysis runs carry x-prism-run: \(GeminiMockProtocol.runs)")
         // An overloaded model gets several growing waits (shortened here), each announced; one that stays busy still fails.
         GeminiSelection.retryWaits = [0.01, 0.01, 0.01, 0.01, 0.01]
         let notes = NoteBox()
@@ -206,6 +216,10 @@ final class NoteBox: @unchecked Sendable {
         let sentences = try await GeminiSelection.transcribeSentences(url: audioURL, interval: (0, 60), configuration: configuration, session: session)
         precondition(sentences.count == 1 && sentences[0].text == "One complete sentence." && sentences[0].start == 0.1,
                      "Coarse narration analysis must retain complete sentence text without word-level output")
+        // Descriptions come back by id; an id the request didn't send is dropped.
+        GeminiMockProtocol.payloads = ["{\"items\":[{\"id\":1,\"description\":\"Second. #b\"},{\"id\":0,\"description\":\"First. #a\"},{\"id\":7,\"description\":\"Stray\"}]}"]
+        let described = try await GeminiSelection.describe([("One", "First words."), ("Two", "Second words.")], configuration: configuration, session: session)
+        precondition(described == [0: "First. #a", 1: "Second. #b"] && GeminiMockProtocol.payloads.isEmpty, "Descriptions must map back to their Shorts: \(described)")
         GeminiMockProtocol.finish = "MAX_TOKENS"
         do {
             let _: Check = try await GeminiSelection.generate(parts: [], schema: [:], configuration: configuration, session: session)
@@ -248,6 +262,34 @@ final class NoteBox: @unchecked Sendable {
         GeminiMockProtocol.payloads = ["not json"]
         let failedCut = await GeminiSelection.finalCut(finalists, cues: [], count: 1, guidance: "", configuration: configuration, session: session)
         precondition(failedCut == nil, "A failed final cut must fall back to score order")
+        // Exercise the whole selection path, not just the final editor helper. Two moments
+        // can be time-distinct while still telling the same story.
+        let storyCues = [TimedCaption(text: "A clear first story.", start: 0, duration: 20),
+                         TimedCaption(text: "The same point again.", start: 20, duration: 20),
+                         TimedCaption(text: "A third version of it.", start: 40, duration: 20)]
+        func editorialPayloads(ids: String) -> [String] {
+            ["{\"windows\":[{\"id\":0,\"score\":90}]}",
+             "{\"clips\":[{\"start\":0,\"end\":18,\"score\":9,\"layout\":\"fit\"},{\"start\":20,\"end\":38,\"score\":8,\"layout\":\"fit\"},{\"start\":40,\"end\":58,\"score\":7,\"layout\":\"fit\"}]}",
+             "{\"ids\":\(ids)}"]
+        }
+        GeminiMockProtocol.payloads = editorialPayloads(ids: "[0]")
+        let distinct = try await GeminiSelection.select(url: URL(fileURLWithPath: "/tmp/relio-mock-missing.mov"), cues: storyCues,
+            interval: (0, 60), targetDuration: 20, count: 2, configuration: configuration, detailConcurrency: 1, session: session)
+        precondition(distinct.count == 1 && distinct[0].start == 0 && GeminiMockProtocol.payloads.isEmpty,
+                     "The pipeline must not restore rejected stories just to fill the requested count")
+        GeminiMockProtocol.payloads = ["{\"windows\":[{\"id\":0,\"score\":90}]}",
+            "{\"clips\":[{\"start\":0,\"end\":18,\"score\":9,\"layout\":\"fit\"},{\"start\":20,\"end\":38,\"score\":8,\"layout\":\"fit\"}]}",
+            "{\"ids\":[0]}"]
+        let smallPool = try await GeminiSelection.select(url: URL(fileURLWithPath: "/tmp/relio-mock-missing.mov"), cues: storyCues,
+            interval: (0, 60), targetDuration: 20, count: 2, configuration: configuration, detailConcurrency: 1, session: session)
+        precondition(smallPool.count == 1 && GeminiMockProtocol.payloads.isEmpty,
+                     "Even a pool that only fills the request must be checked for repeated stories")
+        GeminiMockProtocol.payloads = editorialPayloads(ids: "[]")
+        do {
+            _ = try await GeminiSelection.select(url: URL(fileURLWithPath: "/tmp/relio-mock-missing.mov"), cues: storyCues,
+                interval: (0, 60), targetDuration: 20, count: 2, configuration: configuration, detailConcurrency: 1, session: session)
+            preconditionFailure("An editorial decision rejecting every candidate must not return unapproved clips")
+        } catch GeminiSelection.Failure.noStrongClips { }
         // A per-minute quota error with a short retryDelay is waited out; without one it still fails.
         for invalid in ["-1", "-Infinity", "NaN", "Infinity"] {
             let http = HTTPURLResponse(url: URL(string: "https://example.invalid")!, statusCode: 429, httpVersion: nil, headerFields: ["Retry-After": invalid])!
@@ -397,5 +439,14 @@ final class NoteBox: @unchecked Sendable {
         precondition(GeminiMockProtocol.statuses.isEmpty && GeminiMockProtocol.payloads.isEmpty)
         print("PASS cloud pipeline keeps complete sentence captions when optional word alignment hits quota; no local AI or paid requests used")
         print("PASS Gemini range validation, duplicates, transcript offsets, invalid timing, credential transport, structured output, truncation and quota errors")
+        let lines = GeminiSelection.transcriptAnswer("0.03-4.90 | SPEAKER_00: I'm a classifier.\n4.90-7 | Note: this matters.\n")
+        precondition(lines?.map(\.text) == ["I'm a classifier.", "Note: this matters."] && lines?.first?.start == 0.03 && lines?.last?.end == 7,
+                     "Subtitle-style answers must be read, dropping only speaker labels")
+        precondition(GeminiSelection.transcriptAnswer("{\"segments\":[{\"text\":\"Hi\",\"start\":0.5,\"end\":1}]}")?.first?.text == "Hi")
+        precondition(GeminiSelection.transcriptAnswer("Sorry, I can't help with that.") == nil)
+        let split = GeminiSelection.splitSentences([.init(text: "One two three. Four five six seven eight nine? Ten.", start: 0, end: 10), .init(text: "Short. Piece.", start: 10, end: 14)])
+        precondition(split.map(\.text) == ["One two three.", "Four five six seven eight nine?", "Ten.", "Short. Piece."] && split[0].start == 0 && split[2].end == 10
+                     && split[1].end - split[1].start > split[0].end - split[0].start, "Long pieces must split at sentences, timed by length")
+        print("PASS transcription answers are read from JSON or subtitle-style lines")
     }
 }

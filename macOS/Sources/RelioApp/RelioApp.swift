@@ -564,6 +564,7 @@ final class AppModel {
                     return
                 }
                 selection = item.id
+                startHashing(item, in: projectURL)
                 resetSourceRange(for: item)
                 player?.pause()
                 player = AVPlayer(url: copiedURL)
@@ -669,28 +670,106 @@ final class AppModel {
         }
     }
 
+    /// Content hashes being worked out and saved, by media id. A run waits for its video's hash before it starts.
+    var hashTasks: [UUID: Task<Void, Never>] = [:]
+
+    /// Hashes a video's bytes in the background, then saves the hash into its project, even if another project is open by then.
+    func startHashing(_ item: MediaItem, in projectFolder: URL) {
+        let url = URL(fileURLWithPath: item.path)
+        hashTasks[item.id] = Task {
+            let hash = await Task.detached(priority: .utility) { try? MediaEngine.contentHash(of: url) }.value
+            defer { hashTasks[item.id] = nil }
+            // Without a hash (unreadable file, failed save) the video keeps its name-based usage key.
+            guard let hash else { return }
+            if projectURL == projectFolder, let index = project?.media.firstIndex(where: { $0.id == item.id }) {
+                project?.media[index].contentHash = hash
+                do { try save() } catch { project?.media[index].contentHash = nil }
+            } else if let store = try? ProjectStore(root: projectFolder, create: false),
+                      var stored = try? store.load(ProjectData.self, key: "project"),
+                      let index = stored.media.firstIndex(where: { $0.id == item.id }) {
+                stored.media[index].contentHash = hash
+                try? store.save(stored, key: "project")
+            }
+        }
+    }
+
+    /// A re-analysis, which charges part of the video's minutes, waiting for the person to confirm it.
+    struct PaidRun { let videoID: UUID; let minutes: Double; let count: Int; let duration: Double; let sourceRegion: ShortMaker.SourceRegion }
+    var pendingPaidRun: PaidRun?
+
     func makeConfiguredShorts() {
-        guard let video = project?.media.first(where: { $0.id == selection }) ?? project?.media.first(where: { $0.kind == "video" }) else { return }
-        makeShorts(for: video, count: isShortCountAuto ? 0 : shortCount, duration: shortDuration, sourceRegion: shortSourceRegion)
+        guard !isBusy, let video = project?.media.first(where: { $0.id == selection }) ?? project?.media.first(where: { $0.kind == "video" }) else { return }
+        let count = isShortCountAuto ? 0 : shortCount, duration = shortDuration, region = shortSourceRegion
+        // Problems Prism can see at once are reported at once, without a "Preparing" step first.
+        if region == .custom, let error = customRangeError { message = error; return }
+        guard account.isSignedIn else { makeShorts(for: video, count: count, duration: duration, sourceRegion: region); return }
+        isBusy = true; generationProgress = 0; generationError = nil; generationStage = "Preparing video…"; message = "Preparing video…"
+        generationTask = Task {
+            let run = await prepareRun(for: video.id)
+            isBusy = false; generationProgress = nil; generationTask = nil
+            switch run {
+            case .start(let video): makeShorts(for: video, count: count, duration: duration, sourceRegion: region)
+            case .confirm(let video, let charge):
+                pendingPaidRun = .init(videoID: video.id, minutes: charge, count: count, duration: duration, sourceRegion: region)
+                message = ""
+            case .stop(let failure):
+                if let failure { message = failure.message; generationError = failure } else { message = "" }
+            }
+        }
+    }
+
+    enum PreparedRun { case start(MediaItem), confirm(MediaItem, charge: Double), stop(GenerationFailure?) }
+
+    /// Waits for the video's content hash, then asks the server whether this is a re-analysis and what it costs.
+    private func prepareRun(for videoID: UUID) async -> PreparedRun {
+        // A video imported before hashing existed, never analyzed, is hashed now; one already analyzed keeps its old key.
+        if hashTasks[videoID] == nil, let projectURL, let video = project?.media.first(where: { $0.id == videoID }),
+           video.contentHash == nil, project?.transcripts?[videoID.uuidString] == nil,
+           project?.segments.contains(where: { $0.mediaID == videoID }) != true {
+            startHashing(video, in: projectURL)
+        }
+        // Polled rather than awaited, so Cancel answers at once; the hash itself keeps going and is saved for next time.
+        while hashTasks[videoID] != nil, !Task.isCancelled { try? await Task.sleep(for: .milliseconds(100)) }
+        guard !Task.isCancelled else { return .stop(nil) }
+        guard let video = project?.media.first(where: { $0.id == videoID }) else { return .stop(nil) }
+        let unavailable = PreparedRun.stop(.init(message: "Prism couldn't check your usage right now. Try again in a moment.", kind: .temporary))
+        // Without the count Prism can't warn before a re-analysis, so it doesn't start one blind.
+        guard let reanalysis = await account.reanalysis(UsageLimit.serverKey(video)) else { return unavailable }
+        guard !Task.isCancelled else { return .stop(nil) }
+        guard reanalysis.runs > 0 else { return .start(video) }
+        guard let usage = await account.usageStatus() else { return unavailable }
+        guard !Task.isCancelled else { return .stop(nil) }
+        let left = max(0, usage.allowance - usage.used)
+        // The server refuses it too; saying so here spares a confirmation that can't succeed.
+        guard reanalysis.charge <= left else {
+            return .stop(.init(message: "This re-analysis needs \(Int(reanalysis.charge)) min, but you have \(Int(left.rounded(.down))) min left. Ask for a promo code to get more, then enter it in Settings › Usage.", kind: .limit))
+        }
+        return .confirm(video, charge: reanalysis.charge)
+    }
+
+    /// Starts the re-analysis the person confirmed.
+    func confirmPaidRun() {
+        guard let run = pendingPaidRun else { return }
+        pendingPaidRun = nil
+        guard let video = project?.media.first(where: { $0.id == run.videoID }) else { return }
+        makeShorts(for: video, count: run.count, duration: run.duration, sourceRegion: run.sourceRegion)
     }
     private func makeShorts(for video: MediaItem, count: Int, duration: Double, sourceRegion: ShortMaker.SourceRegion) {
         guard !isBusy else { return }
         if sourceRegion == .custom, let error = customRangeError { message = error; return }
         let customStart = sourceRegion == .custom ? minuteSeconds(customStartMinutes) : nil
         let customEnd = sourceRegion == .custom ? minuteSeconds(customEndMinutes) : nil
-        guard let configuration = geminiConfiguration(for: video) else {
+        guard var runConfiguration = geminiConfiguration(for: video) else {
             message = "Sign in to your Prism account to make Shorts."
             generationError = .init(message: "Sign in to your Prism account to make Shorts.", kind: .settings)
             return
         }
+        // Every request of this run carries the same id, so the server counts it as one analysis.
+        runConfiguration.usage?.run = UUID().uuidString
+        let configuration = runConfiguration
         let usageKey = UsageLimit.videoKey(video)
         let serverUsageKey = UsageLimit.serverKey(video)
         let usageMinutes = UsageLimit.minutes(of: video)
-        if let refusal = UsageLimit.refusal(for: usageKey, minutes: usageMinutes, entries: UsageLimit.load()) {
-            message = refusal
-            generationError = .init(message: refusal, kind: .limit)
-            return
-        }
         modelFallbackNote = nil
         isBusy = true; generationProgress = 0; generationError = nil; generationStage = "Preparing video"; message = "Preparing video analysis…"
         let sourceURL = URL(fileURLWithPath: video.path)
@@ -701,9 +780,10 @@ final class AppModel {
         Notifier.requestPermission()
         generationTask = Task {
             do {
-                // Signed in, Supabase decides; signed out or offline, only the limit kept on this Mac applies.
+                // The account's server allowance includes promo minutes; local usage is only an estimate.
+                try Task.checkCancellation()
                 if await account.usageAllowed(video: serverUsageKey, minutes: usageMinutes, on: .now) == false {
-                    throw GenerationFailure.Refusal(message: "You've used your \(Int(UsageLimit.allowance)) beta minutes. Ask for a promo code to get more, then enter it in Settings › Usage.")
+                    throw GenerationFailure.Refusal(message: "You've used your beta allowance. Ask for a promo code to get more, then enter it in Settings › Usage.")
                 }
                 var cachedTranscript = savedTranscript
                 if cachedTranscript == nil,
@@ -740,6 +820,7 @@ final class AppModel {
                           speechWords: $0.speechWords, suggestedTitle: $0.suggestedTitle, selectionReason: $0.selectionReason,
                           captionNotice: $0.analysisWarning, captionStyle: shortCaptionStyle)
                     segment.score = $0.score
+                    segment.suggestedDescription = $0.suggestedDescription
                     segment.videoType = $0.videoType
                     // Only an explicit Podcast pick splits the frame; an auto-detected podcast may have one person on camera.
                     if videoType == .podcast { segment.splitScreen = true; segment.captionPosition = .middle }
@@ -767,8 +848,6 @@ final class AppModel {
                 // Only a run that made Shorts uses up the video limit.
                 UsageLimit.record(usageKey, minutes: usageMinutes)
                 usageRevision += 1
-                let usedOn = Date.now
-                Task { await account.recordUsage(video: serverUsageKey, minutes: usageMinutes, on: usedOn) }
                 message = "Prism AI selected \(fresh.count) complete clip ranges and layouts. Review framing and captions before export."
                 let warning = results.compactMap(\.analysisWarning).first
                 if let warning { message += " " + warning }
@@ -831,7 +910,8 @@ final class AppModel {
     static func reserveExportDestination(name: String, folder: URL, reserved: inout Set<String>) -> URL {
         var destination = folder.appendingPathComponent("\(name).mp4")
         var copy = 2
-        while FileManager.default.fileExists(atPath: destination.path) || reserved.contains(destination.lastPathComponent.lowercased()) {
+        while FileManager.default.fileExists(atPath: destination.path) || FileManager.default.fileExists(atPath: ShortMaker.notesURL(for: destination).path)
+                || reserved.contains(destination.lastPathComponent.lowercased()) {
             destination = folder.appendingPathComponent("\(name) \(copy).mp4")
             copy += 1
         }
@@ -845,6 +925,9 @@ final class AppModel {
         var includeSource: Bool
         var quality: ShortMaker.ExportQuality
         var folder: URL
+        /// Titles and descriptions as edited on the card, by Short.
+        var titles: [UUID: String] = [:]
+        var descriptions: [UUID: String] = [:]
         /// Why the last export attempt couldn't start, shown on the card.
         var error: String? = nil
     }
@@ -859,7 +942,38 @@ final class AppModel {
         guard !isBusy, let project, !project.media.isEmpty else { return }
         let quality = ShortMaker.ExportQuality(rawValue: UserDefaults.standard.string(forKey: "export.quality") ?? "") ?? .full
         exportChoice = .init(shortIDs: Set(project.segments.filter { id == nil || $0.id == id }.map(\.id)),
-                             includeSource: false, quality: quality, folder: defaultExportFolder())
+                             includeSource: false, quality: quality, folder: defaultExportFolder(),
+                             titles: Dictionary(uniqueKeysWithValues: project.segments.map { ($0.id, $0.suggestedTitle ?? "") }),
+                             descriptions: Dictionary(uniqueKeysWithValues: project.segments.map { ($0.id, $0.suggestedDescription ?? "") }))
+    }
+
+    /// True while the export card asks Prism AI for missing descriptions.
+    var isWritingDescriptions = false
+
+    /// Fills the export card's empty descriptions with one Prism AI request; titles and typed text are kept.
+    func writeMissingDescriptions() async {
+        guard var choice = exportChoice, let project, !isWritingDescriptions else { return }
+        let missing = project.segments.filter { (choice.descriptions[$0.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard let first = missing.first, let video = project.media.first(where: { $0.id == first.mediaID }),
+              let configuration = geminiConfiguration(for: video) else {
+            exportChoice?.error = "Sign in to your Prism account to write descriptions."
+            return
+        }
+        isWritingDescriptions = true
+        defer { isWritingDescriptions = false }
+        do {
+            let written = try await GeminiSelection.describe(missing.map { segment in
+                (choice.titles[segment.id] ?? segment.suggestedTitle ?? "", (segment.captions ?? []).map(\.text).joined(separator: " "))
+            }, configuration: configuration)
+            // The card may have changed while the request ran; only still-empty fields are filled.
+            guard let current = exportChoice else { return }
+            choice = current
+            for (index, text) in written where (choice.descriptions[missing[index].id] ?? "").isEmpty { choice.descriptions[missing[index].id] = text }
+            choice.error = written.count < missing.count ? "Prism AI wrote \(written.count) of \(missing.count) descriptions. Write the rest yourself or try again." : nil
+            exportChoice = choice
+        } catch {
+            exportChoice?.error = "Couldn't write descriptions: \(error.localizedDescription)"
+        }
     }
 
     /// Downloads › Prism › the project's name.
@@ -870,7 +984,24 @@ final class AppModel {
 
     /// Renders the ticked Shorts and copies the main video if asked, into `choice.folder`.
     func export(_ choice: ExportChoice) {
-        guard !isBusy, let project else { return }
+        guard !isBusy, let current = project else { return }
+        // Titles and descriptions edited on the card stay on the Shorts, and go into the files below.
+        var edited = current
+        for index in edited.segments.indices {
+            let id = edited.segments[index].id
+            if let title = choice.titles[id] { edited.segments[index].suggestedTitle = title }
+            if let description = choice.descriptions[id] { edited.segments[index].suggestedDescription = description }
+        }
+        if edited.segments != current.segments {
+            project = edited
+            do { try save() } catch {
+                project = current
+                exportChoice = choice
+                exportChoice?.error = "Could not save the titles: \(error.localizedDescription)"
+                return
+            }
+        }
+        let project = edited
         let segments = project.segments.enumerated().filter { choice.shortIDs.contains($0.element.id) }
         let sources = choice.includeSource ? project.media.filter { $0.kind == "video" } : []
         guard !segments.isEmpty || !sources.isEmpty else { return }
@@ -1598,6 +1729,10 @@ struct ContentView: View {
     @State private var statsProject: ProjectPath?
     /// The export card's Shorts list height, measured so a short list leaves no empty space.
     @State var exportListHeight: CGFloat = 0
+    /// Shorts opened on the export card to show their title and description.
+    @State var openExportShorts: Set<UUID> = []
+    /// The sidebar logo turns into the open or close sidebar control while the pointer is on it.
+    @State var hoveringLogo = false
     @FocusState private var keyFieldFocused: Bool
     @AppStorage(PrismAppearance.storageKey) var appearance = PrismAppearance.system
     @AppStorage("editor.leftSidebarWidth") var leftSidebarWidth = 248.0
@@ -1605,8 +1740,10 @@ struct ContentView: View {
     @AppStorage("editor.timelineHeight") var timelineHeight = 278.0
     @AppStorage("system.resourceRefreshSeconds") private var resourceRefreshSeconds = 60.0
     @State private var selectedSettingsCategory: SettingsCategory = .account
-    /// This account's video counts from Supabase, when signed in; nil shows the count kept on this Mac.
+    /// The signed-in account's video counts from Supabase; local history cannot represent an account's allowance.
     @State private var serverUsage: (used: Double, allowance: Double)?
+    @State private var usageAccount: String?
+    @State private var usageLoading = false
     @State private var promoCode = ""
     @State private var promoStatus = ""
     private let resourceRefreshOptions: [ResourceRefreshOption] = [
@@ -1677,6 +1814,7 @@ struct ContentView: View {
             else if model.screen == .editor, let summary = model.exportSummary { exportDoneOverlay(summary) }
             else if model.screen == .editor, let choice = model.exportChoice { exportChoiceOverlay(choice) }
         }
+        .overlay { if let run = model.pendingPaidRun { paidRunOverlay(run) } }
         .overlay(alignment: .bottom) {
             if updater.updatedVersion != nil { updatedBanner }
             else if updater.readyVersion != nil, !updater.isBannerDismissed { updateBanner }
@@ -1746,24 +1884,18 @@ struct ContentView: View {
     var sidebar: some View {
         VStack(alignment: .leading, spacing: 17) {
             if model.isSidebarCollapsed {
-                PrismMark().frame(height: 24).frame(maxWidth: .infinity).accessibilityHidden(true)
-                Button { model.isSidebarCollapsed = false } label: {
-                    Image(systemName: "sidebar.right").font(Prism.text(16)).frame(maxWidth: .infinity)
-                }.buttonStyle(.prismLink).pointerFeedback().foregroundStyle(Prism.textSecondary)
-                    .help("Expand sidebar · ⌃⌘S").accessibilityLabel("Expand sidebar")
+                logoToggle.frame(maxWidth: .infinity)
             } else {
                 HStack(spacing: 10) {
-                    PrismMark().frame(height: 24)
+                    logoToggle
                     Text("Prism").font(Prism.display(24)).tracking(-0.5)
                     Spacer()
-                    Button { model.isSidebarCollapsed = true } label: { Image(systemName: "sidebar.left") }.buttonStyle(.prismIcon)
-                        .pointerFeedback().foregroundStyle(Prism.textSecondary).help("Collapse sidebar · ⌃⌘S").accessibilityLabel("Collapse sidebar")
                 }
         Text("Your video editor · Cloud AI").font(Prism.text(12)).foregroundStyle(Prism.textSecondary)
             }
             Divider().padding(.vertical, 8)
             sidebarButton("Home", icon: "house.fill", selected: model.screen == .home) { model.screen = .home }
-            sidebarButton("Create Shorts", icon: "plus.square.fill", selected: model.screen == .importSource, prominent: true) { model.startLongVideoToShort() }
+            sidebarButton("Create Shorts", icon: "plus.square.fill", selected: model.screen == .importSource, prominent: true, shortTitle: "Create") { model.startLongVideoToShort() }
             if model.project != nil {
                 sidebarButton("Editor", icon: "film.stack.fill", selected: model.screen == .editor) { model.screen = .editor }
             }
@@ -1772,8 +1904,12 @@ struct ContentView: View {
             TimelineView(.periodic(from: .now, by: min(3_600, max(1, resourceRefreshSeconds)))) { _ in
                 let machine = MachineProfile.detect()
                 if model.isSidebarCollapsed {
-                    resourceRing(memory: machine.memoryUsage, storage: machine.freeStorageRatio, freeGB: machine.freeGB)
-                        .frame(maxWidth: .infinity)
+                    VStack(spacing: 6) {
+                        resourceRing(memory: machine.memoryUsage, storage: machine.freeStorageRatio)
+                        Text("\(machine.freeGB) GB free").font(Prism.text(9, .medium)).foregroundStyle(Prism.accent)
+                            .lineLimit(1).minimumScaleFactor(0.7)
+                    }
+                    .frame(maxWidth: .infinity)
                     .help("RAM used: \(String(format: "%.1f", machine.memoryUsedGB)) of \(machine.memoryGB) GB · Storage free: \(machine.freeGB) of \(machine.storageGB) GB")
                     .accessibilityLabel("RAM \(Int(machine.memoryUsage * 100)) percent used; \(machine.freeGB) gigabytes of storage free")
                 } else {
@@ -1811,14 +1947,58 @@ struct ContentView: View {
         .background(Prism.surface1)
     }
 
-    /// One ring for the collapsed sidebar: RAM used on the outer arc, free storage on the inner blue arc, both numbers inside.
-    private func resourceRing(memory: Double, storage: Double, freeGB: Int) -> some View {
+    /// Asks before every re-analysis, which charges part of the video's minutes.
+    func paidRunOverlay(_ run: AppModel.PaidRun) -> some View {
+        let minutes = max(1, Int(run.minutes.rounded(.up)))
+        return ZStack {
+            Color.black.opacity(0.55).contentShape(Rectangle()).onTapGesture {}
+            VStack(alignment: .leading, spacing: 14) {
+                Label("Use your minutes?", systemImage: "gauge.with.dots.needle.33percent").font(Prism.text(16, .medium))
+                Text("This re-analysis will use \(minutes) \(minutes == 1 ? "minute" : "minutes") of your plan.").font(Prism.text(13))
+                Text("Re-analyzing a video uses part of its length: half on Trial, a third on Creator and Studio.")
+                    .font(Prism.text(12)).foregroundStyle(Prism.textSecondary).fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Button("Cancel") { model.pendingPaidRun = nil }.controlSize(.large).keyboardShortcut(.cancelAction)
+                    Spacer()
+                    Button("Re-analyze") { model.confirmPaidRun() }.buttonStyle(.prismPrimary).keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding(24)
+            .frame(width: 440)
+            .background(Prism.surface1, in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Prism.border))
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Confirm a charged re-analysis")
+        }
+    }
+
+    /// The logo, which shows the sidebar icon on hover and opens or closes the sidebar when clicked.
+    var logoToggle: some View {
+        let collapsed = model.isSidebarCollapsed
+        return Button { model.isSidebarCollapsed.toggle() } label: {
+            ZStack {
+                PrismMark().frame(height: 24).opacity(hoveringLogo ? 0 : 1)
+                Image(systemName: collapsed ? "sidebar.right" : "sidebar.left").font(Prism.text(17))
+                    .foregroundStyle(Prism.textSecondary).opacity(hoveringLogo ? 1 : 0)
+            }
+            .frame(width: 36, height: 32)
+            .background(hoveringLogo ? Prism.surface2 : .clear, in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).pointerFeedback()
+        .onHover { hovering in withAnimation(.easeOut(duration: 0.12)) { hoveringLogo = hovering } }
+        .help(collapsed ? "Expand sidebar · ⌃⌘S" : "Collapse sidebar · ⌃⌘S")
+        .accessibilityLabel(collapsed ? "Expand sidebar" : "Collapse sidebar")
+    }
+
+    /// One ring for the collapsed sidebar: RAM used on the outer arc and inside, free storage on the inner blue arc.
+    private func resourceRing(memory: Double, storage: Double) -> some View {
         ZStack {
             arc(memory, color: Prism.text, width: 4)
             arc(storage, color: Prism.accent, width: 3).padding(6)
             VStack(spacing: 0) {
-                Text("\(Int(memory * 100))%").font(Prism.display(9))
-                Text("\(freeGB)G").font(Prism.text(7, .medium)).foregroundStyle(Prism.accent)
+                Text("RAM").font(Prism.text(7, .medium)).foregroundStyle(Prism.textSecondary)
+                Text("\(Int(memory * 100))%").font(Prism.display(10))
             }
             .lineLimit(1).minimumScaleFactor(0.6)
             .padding(.horizontal, 11)
@@ -1835,23 +2015,33 @@ struct ContentView: View {
                 .rotationEffect(.degrees(-90))
         }
     }
-    func sidebarButton(_ title: String, icon: String, selected: Bool = false, prominent: Bool = false, action: @escaping () -> Void) -> some View {
+    func sidebarButton(_ title: String, icon: String, selected: Bool = false, prominent: Bool = false, shortTitle: String? = nil, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            // The padding and fill sit inside the button, so the whole highlighted pill takes the click, not only the label.
-            Group {
-                if model.isSidebarCollapsed {
-                    Image(systemName: icon).font(Prism.text(17, .medium)).frame(maxWidth: .infinity)
-                } else {
-                    Label(title, systemImage: icon)
-                        .font(prominent || selected ? Prism.text(14, .medium) : Prism.text(14))
-                        .frame(maxWidth: .infinity, alignment: .leading)
+            if model.isSidebarCollapsed {
+                // Only the icon gets a small pill, with its name below, so the narrow sidebar stays light.
+                VStack(spacing: 5) {
+                    // The filled plus square would draw a square inside the pill, so Create uses a plain plus here.
+                    Image(systemName: prominent ? "plus" : icon).font(Prism.text(17, .medium))
+                        .frame(width: 44, height: 30)
+                        .foregroundStyle(prominent ? Prism.ink : (selected ? Prism.text : Prism.textSecondary))
+                        .background(prominent ? Prism.action : (selected ? Prism.surface2 : .clear), in: Capsule())
+                    Text(shortTitle ?? title).font(Prism.text(10, .medium)).lineLimit(1).minimumScaleFactor(0.8)
+                        .foregroundStyle(selected || prominent ? Prism.text : Prism.textSecondary)
                 }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 2)
+                .contentShape(Rectangle())
+            } else {
+                // The padding and fill sit inside the button, so the whole highlighted pill takes the click, not only the label.
+                Label(title, systemImage: icon)
+                    .font(prominent || selected ? Prism.text(14, .medium) : Prism.text(14))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, prominent ? 13 : 10)
+                    .foregroundStyle(prominent ? Prism.ink : Prism.text)
+                    .background(prominent ? Prism.action : (selected ? Prism.surface2 : .clear), in: RoundedRectangle(cornerRadius: 8))
+                    .contentShape(RoundedRectangle(cornerRadius: 8))
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, prominent ? 13 : 10)
-            .foregroundStyle(prominent ? Prism.ink : Prism.text)
-            .background(prominent ? Prism.action : (selected ? Prism.surface2 : .clear), in: RoundedRectangle(cornerRadius: 8))
-            .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain).pointerFeedback()
         .help(title)
@@ -1931,25 +2121,29 @@ struct ContentView: View {
     }
 
     var usageTileDetail: String {
-        _ = model.usageRevision
-        let used = serverUsage?.used ?? UsageLimit.used(entries: UsageLimit.load())
-        let allowance = serverUsage?.allowance ?? UsageLimit.allowance
-        return "\(minutesText(used)) of \(Int(allowance)) min used"
+        guard model.account.isSignedIn else { return "Sign in to see usage" }
+        guard usageAccount == model.account.email, let usage = serverUsage else { return usageLoading ? "Checking usage…" : "Usage unavailable" }
+        return "\(minutesText(usage.used)) of \(Int(usage.allowance)) min used"
     }
 
     func minutesText(_ value: Double) -> String { "\(Int(value.rounded(.down))) min" }
 
     /// The beta allowance: minutes used so far, what is left, and where a promo code goes.
     var usageSettings: some View {
-        let _ = model.usageRevision
-        let used = serverUsage?.used ?? UsageLimit.used(entries: UsageLimit.load())
-        let allowance = serverUsage?.allowance ?? UsageLimit.allowance
         return VStack(alignment: .leading, spacing: 18) {
             Label("Usage", systemImage: "gauge.with.dots.needle.33percent").font(Prism.display(20))
             Text("Beta accounts get \(Int(UsageLimit.allowance)) minutes of video to make Shorts from. A video you already used doesn't count again. Need more? Ask me for a promo code, then enter it below.")
                 .font(Prism.text(13)).foregroundStyle(Prism.textSecondary).fixedSize(horizontal: false, vertical: true)
             Divider()
-            usageRow(used: used, limit: allowance)
+            if let usage = serverUsage, model.account.isSignedIn, usageAccount == model.account.email {
+                usageRow(used: usage.used, limit: usage.allowance)
+            } else {
+                Text(!model.account.isSignedIn ? "Sign in to see usage." : usageLoading ? "Checking usage…" : "Usage is unavailable. Check your connection and try again.")
+                    .font(Prism.text(12)).foregroundStyle(Prism.textSecondary)
+                if model.account.isSignedIn && !usageLoading {
+                    Button("Retry") { Task { await refreshUsage() } }.buttonStyle(PrismButtonStyle(kind: .secondary))
+                }
+            }
             VStack(alignment: .leading, spacing: 8) {
                 Text("Promo code").font(Prism.text(14, .medium))
                 HStack(spacing: 10) {
@@ -1967,7 +2161,6 @@ struct ContentView: View {
         }
         .padding(24)
         .background(Prism.surface1, in: RoundedRectangle(cornerRadius: 16))
-        .task { serverUsage = await model.account.usageStatus() }
     }
 
     func redeemPromo() {
@@ -1975,8 +2168,21 @@ struct ContentView: View {
         Task {
             promoStatus = await model.account.redeemPromo(code)
             promoCode = ""
-            serverUsage = await model.account.usageStatus()
+            await refreshUsage()
         }
+    }
+
+    @MainActor func refreshUsage() async {
+        let accountEmail = model.account.email
+        serverUsage = nil
+        usageAccount = nil
+        guard accountEmail != nil else { usageLoading = false; return }
+        usageLoading = true
+        let result = await model.account.usageStatus()
+        guard !Task.isCancelled, model.account.email == accountEmail else { return }
+        serverUsage = result
+        usageAccount = accountEmail
+        usageLoading = false
     }
 
     func usageRow(used: Double, limit: Double) -> some View {
@@ -2183,6 +2389,7 @@ struct ContentView: View {
             if model.opensUsageSettings { selectedSettingsCategory = .usage; model.opensUsageSettings = false }
             if model.opensAccountSettings { selectedSettingsCategory = .account; model.opensAccountSettings = false }
         }
+        .task(id: "\(model.account.email ?? "")|\(model.usageRevision)") { await refreshUsage() }
     }
 
     private func resourceSummary(title: String, value: String, fraction: Double, tint: Color) -> some View {
@@ -2388,7 +2595,7 @@ struct ContentView: View {
     }
     func beginRename(_ path: String) {
         let stored = try? ProjectStore(root: URL(fileURLWithPath: path), create: false).load(ProjectData.self, key: "project")
-        renameText = stored?.displayTitle ?? URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+        renameText = stored?.displayTitle ?? ProjectData.folderTitle(URL(fileURLWithPath: path))
         renameProjectPath = path
     }
     func projectGrid(_ paths: [String]) -> some View {
@@ -2597,7 +2804,22 @@ struct ContentView: View {
                 }
                 Text("Prism analyzes the speech and frames of the \(model.shortSourceRegion.title.lowercased()) and suggests \(model.isShortCountAuto ? "every strong moment it finds, up to \(ShortMaker.maxShorts)" : model.shortCount == 1 ? "1 moment" : "up to \(model.shortCount) moments"), \(model.shortDuration > 0 ? "about \(Int(model.shortDuration)) seconds each" : "each 15–60 seconds, as long as its story needs"). Shorts never overlap. Review every pick before exporting.")
                     .font(Prism.text(12)).foregroundStyle(Prism.textSecondary)
+                // A vertical crop enlarges a small source several times, so a 360p video looks blurry however it is exported.
+                if let video = model.shortsSource, video.width > 0, video.height > 0, min(video.width, video.height) < 720 {
+                    Label("This video is \(min(video.width, video.height))p, so Shorts made from it will look blurry. For sharp Shorts, use a 1080p copy of the video.",
+                          systemImage: "exclamationmark.triangle")
+                        .font(Prism.text(12)).foregroundStyle(Prism.amber).fixedSize(horizontal: false, vertical: true)
+                }
+                // What this run costs, before it starts: a video counts once, the first time Shorts are made from it.
+                if let video = model.shortsSource, let usage = serverUsage {
+                    let left = max(0, usage.allowance - usage.used)
+                    Label("This video counts as \(minutesText(UsageLimit.minutes(of: video))) of your beta minutes the first time you use it. \(minutesText(left)) left of \(Int(usage.allowance)).",
+                          systemImage: "gauge.with.dots.needle.33percent")
+                        .font(Prism.text(12)).foregroundStyle(UsageLimit.minutes(of: video) > left ? Prism.amber : Prism.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
+            .task(id: model.account.email) { await refreshUsage() }
             .padding(18)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Prism.surface1, in: RoundedRectangle(cornerRadius: 16))
@@ -2868,9 +3090,7 @@ private struct RecentProjectCard: View {
     let action: () -> Void
     @State private var summary: RecentProjectSummary?
 
-    private var fallbackTitle: String {
-        URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
-    }
+    private var fallbackTitle: String { ProjectData.folderTitle(URL(fileURLWithPath: path)) }
 
     private var details: String {
         guard let summary else { return " " }
@@ -2936,7 +3156,7 @@ private struct RecentProjectCard: View {
             let root = URL(fileURLWithPath: projectPath)
             guard let store = try? ProjectStore(root: root, create: false),
                   let project = try? store.load(ProjectData.self, key: "project") else {
-                return RecentProjectSummary(title: root.deletingPathExtension().lastPathComponent, duration: nil, shortCount: 0, created: nil, poster: nil)
+                return RecentProjectSummary(title: ProjectData.folderTitle(root), duration: nil, shortCount: 0, created: nil, poster: nil)
             }
             let video = project.media.first(where: { $0.kind == "video" })
             let firstShort = project.segments.first
@@ -2950,7 +3170,7 @@ private struct RecentProjectCard: View {
                 // Home reloads its cards on every visit; the poster only changes with the video or the first Short.
                 let key = "\(source.path)|\(time)" as NSString
                 if let cached = Self.posterCache.object(forKey: key) {
-                    poster = (cached as! CGImage)
+                    poster = CFGetTypeID(cached) == CGImage.typeID ? (cached as! CGImage) : nil
                 } else {
                     let generator = AVAssetImageGenerator(asset: AVURLAsset(url: source))
                     generator.appliesPreferredTrackTransform = true
