@@ -315,6 +315,43 @@ public class SessionTests
         }
     }
 
+    /// Holds the re-analysis answer back until the test releases it.
+    sealed class SlowAccount : HttpMessageHandler
+    {
+        public readonly TaskCompletionSource Asked = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public readonly TaskCompletionSource Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path == "/auth/v1/token") return new(System.Net.HttpStatusCode.OK) { Content = new StringContent("""{"refresh_token":"new","access_token":"access","expires_in":3600}""") };
+            Assert.Equal("/rest/v1/rpc/my_reanalysis", path);
+            Asked.TrySetResult();
+            await Release.Task;
+            return new(System.Net.HttpStatusCode.OK) { Content = new StringContent("""[{"runs":2,"charge":3}]""") };
+        }
+    }
+
+    [Fact]
+    public async Task CancellingWhileTheVideoIsCheckedStartsNothing()
+    {
+        using var fixture = new Fixture();
+        fixture.Platform.AccountStore.Save("""{"Email":"me@example.com","RefreshToken":"old"}""");
+        using var server = new SlowAccount();
+        using var session = new AppSession(fixture.Platform, new AppSettings(), server);
+        fixture.Open();
+        session.Open(fixture.Path);
+        var run = session.MakeShorts(session.Project!.Media[0], 1, 30, SourceRegion.EntireVideo);
+        await server.Asked.Task;
+        Assert.Equal(0, session.GenerationProgress);
+        session.CancelGeneration();
+        server.Release.SetResult();
+        await run;
+        Assert.Null(session.GenerationProgress);
+        Assert.Null(session.PendingPaidRun);
+        Assert.Null(session.GenerationError);
+        Assert.False(session.IsBusy);
+    }
+
     [Fact]
     public async Task AServerWithoutReanalysisChargingStartsTheRun()
     {
