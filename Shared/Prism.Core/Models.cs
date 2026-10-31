@@ -133,16 +133,20 @@ public static class CaptionStyles
 
     /// <summary>Styles that follow each spoken word need word timing; without it they fall back to whole phrases.</summary>
     public static bool UsesWordTiming(this CaptionStyle style) =>
-        style is CaptionStyle.Viral or CaptionStyle.HighlightBox or CaptionStyle.OneWord or CaptionStyle.Podcast;
+        style is CaptionStyle.Auto or CaptionStyle.Viral or CaptionStyle.HighlightBox or CaptionStyle.BoldCaps or CaptionStyle.OneWord or CaptionStyle.Podcast;
+
+    /// <summary>Styles that color the word being spoken.</summary>
+    public static bool HighlightsWords(this CaptionStyle style) => style is CaptionStyle.Viral or CaptionStyle.HighlightBox or CaptionStyle.Podcast;
 
     public static string Title(this CaptionPosition position) => position.ToString();
 
     /// <summary>Bottom edge of the subtitle layer in the 1080×1920 frame, measured from the bottom.</summary>
-    public static double Y(this CaptionPosition position) => position switch
+    /// <summary>The line a caption is centred on, in video pixels from the bottom of the 1080×1920 frame, as on the Mac.</summary>
+    public static double CenterY(this CaptionPosition position) => position switch
     {
-        CaptionPosition.Top => 1460,
-        CaptionPosition.Middle => 855,
-        _ => 330,
+        CaptionPosition.Top => 1520,
+        CaptionPosition.Middle => 960,
+        _ => 620,
     };
 
     public static string Title(this CaptionSize size) => size.ToString();

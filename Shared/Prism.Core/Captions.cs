@@ -5,7 +5,8 @@ using SkiaSharp;
 namespace Prism.Core;
 
 /// Subtitles and the text overlay, drawn the way the macOS app draws them, in 1080×1920 video pixels.
-/// Each caption is a layer 940 px wide; its bottom edge sits at <see cref="Element.Y"/> measured from the bottom of the frame.
+/// Each caption is a layer 940 px wide; its bottom edge sits at <see cref="Element.Y"/> measured from the bottom of the frame,
+/// placed so the layer is centred on the position's line (<see cref="CaptionPositions.CenterY"/>).
 public static class CaptionRenderer
 {
     public sealed record Element(string Text, double Start, double Duration, double Y, CaptionStyle Style, double Scale, int? HighlightedWord, bool Pops);
@@ -32,60 +33,117 @@ public static class CaptionRenderer
         if (captions.Count == 0 && string.IsNullOrEmpty(segment.Caption)) return result;
         var total = segment.Duration;
         var position = segment.CaptionPosition ?? CaptionPosition.Bottom;
-        var y = position.Y();
+        var center = position.CenterY();
         var scale = (segment.CaptionSize ?? CaptionSize.Medium).Scale();
         var pops = segment.CaptionAnimated == true;
         // The on-screen text overlay moves out of the subtitles' way.
-        var overlayY = captions.Count == 0 ? 220 : position == CaptionPosition.Top ? 330 : 1450;
+        var overlayCenter = captions.Count == 0 ? 330 : position == CaptionPosition.Top ? 470 : 1560;
         var style = (segment.CaptionStyle ?? CaptionStyle.Classic).Resolved(segment.VideoType, segment.SplitScreen == true);
-        // Word-following styles need real word timings; estimated timings would mark the wrong word.
-        var timedWords = style.UsesWordTiming() || style == CaptionStyle.BoldCaps ? segment.SpeechWords ?? [] : [];
-        void Add(string text, double start, double duration, double layerY, CaptionStyle layerStyle, double layerScale, int? highlighted, bool pop)
+        void Add(string text, double start, double duration, double centerY, CaptionStyle layerStyle, double layerScale, int? highlighted, bool pop)
         {
             if (!double.IsFinite(start) || !double.IsFinite(duration) || !double.IsFinite(total) || total <= 0 || start >= total || duration <= 0) return;
             var overlayStart = Math.Clamp(start, 0, total);
             var overlayEnd = Math.Min(total, start + duration);
             if (overlayEnd <= overlayStart) return;
-            result.Add(new Element(text, overlayStart, overlayEnd - overlayStart, layerY, layerStyle, layerScale, highlighted, pop));
+            // Centred on the position line, and kept inside the frame.
+            var height = LayerHeight(layerStyle, layerScale);
+            result.Add(new Element(text, overlayStart, overlayEnd - overlayStart, Math.Clamp(centerY - height / 2, 0, 1920 - height), layerStyle, layerScale, highlighted, pop));
         }
-        foreach (var cue in captions)
+        foreach (var page in Pages(captions, segment.SpeechWords ?? [], style))
         {
-            var cueWords = timedWords.Where(w => w.Start >= cue.Start - 0.02 && w.Start + w.Duration <= cue.Start + cue.Duration + 0.02).OrderBy(w => w.Start).ToList();
-            if (cueWords.Count == 0 || !Normalized(cueWords.Select(w => w.Text)).SequenceEqual(Normalized([cue.Text])))
+            if (!style.HighlightsWords() || page.Words.Count < 2)
             {
-                Add(cue.Text, cue.Start, cue.Duration, y, style, scale, null, pops);
+                Add(page.Text, page.Start, page.End - page.Start, center, style, scale, null, pops);
                 continue;
             }
-            double End(int index) => index + 1 < cueWords.Count ? cueWords[index + 1].Start : cue.Start + cue.Duration;
-            switch (style)
+            for (var index = 0; index < page.Words.Count; index++)
             {
-                case CaptionStyle.BoldCaps:
-                    for (var first = 0; first < cueWords.Count; first += 3)
-                    {
-                        var group = cueWords.Skip(first).Take(3).ToList();
-                        Add(string.Join(" ", group.Select(w => w.Text)), group[0].Start, Math.Max(0.01, End(first + group.Count - 1) - group[0].Start), y, style, scale, null, pops);
-                    }
-                    break;
-                case CaptionStyle.OneWord:
-                    for (var index = 0; index < cueWords.Count; index++)
-                        Add(cueWords[index].Text, cueWords[index].Start, Math.Max(0.01, End(index) - cueWords[index].Start), y, style, scale, null, pops);
-                    break;
-                case CaptionStyle.Viral or CaptionStyle.HighlightBox or CaptionStyle.Podcast:
-                    // Only a new line pops; a moving highlight inside the same line must not bounce on every word.
-                    for (var index = 0; index < cueWords.Count; index++)
-                        Add(cue.Text, cueWords[index].Start, Math.Max(0.01, End(index) - cueWords[index].Start), y, style, scale, index, pops && index == 0);
-                    break;
-                default:
-                    Add(cue.Text, cue.Start, cue.Duration, y, style, scale, null, pops);
-                    break;
+                var from = index == 0 ? page.Start : page.Words[index].Start;
+                var to = index + 1 < page.Words.Count ? page.Words[index + 1].Start : page.End;
+                // Only a new page pops; the moving highlight inside it must not bounce on every word.
+                Add(page.Text, from, Math.Max(0.01, to - from), center, style, scale, index, pops && index == 0);
             }
         }
         if (!string.IsNullOrEmpty(segment.Caption))
-            Add(segment.Caption, segment.CaptionStart ?? 0, segment.CaptionDuration ?? segment.Duration, overlayY, CaptionStyle.Classic, 1, null, false);
+            Add(segment.Caption, segment.CaptionStart ?? 0, segment.CaptionDuration ?? segment.Duration, overlayCenter, CaptionStyle.Classic, 1, null, false);
         return result;
     }
 
-    static double LayerHeight(Element element) => Math.Round((element.Style == CaptionStyle.BoldCaps ? 300 : 210) * element.Scale);
+    static double LayerHeight(Element element) => LayerHeight(element.Style, element.Scale);
+    static double LayerHeight(CaptionStyle style, double scale) => Math.Round((style == CaptionStyle.BoldCaps ? 300 : 210) * scale);
+
+    /// <summary>What one caption shows at a time: a few words, their timing, and how long the page stays up.</summary>
+    public sealed record CaptionPage(List<TimedSpeechWord> Words, double Start, double End, string Text);
+
+    /// <summary>Splits captions into short pages the way Shorts are captioned: a few words at a time, breaking at sentence ends,
+    /// commas and pauses. Exact word timings are used where they match a line's text; otherwise each word's timing is
+    /// estimated from the line, so every style still moves with the speech. A port of the Mac's captionPages.</summary>
+    public static List<CaptionPage> Pages(IReadOnlyList<TimedCaption> cues, IReadOnlyList<TimedSpeechWord> words, CaptionStyle style)
+    {
+        var (maxWords, maxCharacters) = style switch
+        {
+            CaptionStyle.OneWord => (1, 16), CaptionStyle.BoldCaps => (2, 16), CaptionStyle.Viral or CaptionStyle.HighlightBox => (3, 20),
+            CaptionStyle.Podcast => (4, 26), CaptionStyle.Minimal => (7, 40), _ => (5, 26),
+        };
+        var pages = new List<CaptionPage>();
+        foreach (var cue in cues)
+        {
+            var exact = words.Where(w => w.Start >= cue.Start - 0.02 && w.Start + w.Duration <= cue.Start + cue.Duration + 0.02).OrderBy(w => w.Start).ToList();
+            var cueWords = exact.Count > 0 && Normalized(exact.Select(w => w.Text)).SequenceEqual(Normalized([cue.Text])) ? exact : EstimatedWords(cue);
+            var group = new List<TimedSpeechWord>();
+            void Flush()
+            {
+                if (group.Count == 0) return;
+                pages.Add(new CaptionPage([.. group], group[0].Start, group[^1].Start + group[^1].Duration, PageText(group.Select(w => w.Text), style)));
+                group.Clear();
+            }
+            foreach (var word in cueWords)
+            {
+                if (group.Count > 0)
+                {
+                    var characters = string.Join(" ", group.Select(w => w.Text).Append(word.Text)).Length;
+                    var pause = word.Start - (group[^1].Start + group[^1].Duration);
+                    if (group.Count >= maxWords || characters > maxCharacters || pause > 0.45) Flush();
+                }
+                group.Add(word);
+                if (word.Text.Length > 0 && (".!?".Contains(word.Text[^1]) || (",;:".Contains(word.Text[^1]) && group.Count >= 2))) Flush();
+            }
+            Flush();
+        }
+        // A page stays up until the next one starts, or briefly after its last word when a pause follows.
+        for (var index = 0; index < pages.Count; index++)
+        {
+            var hold = pages[index].End + 0.35;
+            var next = index + 1 < pages.Count ? pages[index + 1].Start : double.PositiveInfinity;
+            pages[index] = pages[index] with { End = Math.Max(pages[index].Start + 0.05, Math.Min(hold, next)) };
+        }
+        return pages;
+    }
+
+    /// <summary>Word timings spread across a line by length, for lines without exact timings.</summary>
+    public static List<TimedSpeechWord> EstimatedWords(TimedCaption cue)
+    {
+        var texts = cue.Text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        var weights = texts.Select(t => t.Length + 2.0).ToList();
+        var total = weights.Sum();
+        if (total <= 0 || cue.Duration <= 0) return [];
+        var start = cue.Start;
+        var result = new List<TimedSpeechWord>();
+        for (var index = 0; index < texts.Length; index++)
+        {
+            var duration = cue.Duration * weights[index] / total;
+            result.Add(new TimedSpeechWord(texts[index], start, duration));
+            start += duration;
+        }
+        return result;
+    }
+
+    /// Short punchy pages drop trailing commas and periods; questions and exclamations keep their mark.
+    static string PageText(IEnumerable<string> words, CaptionStyle style)
+    {
+        var text = string.Join(" ", words);
+        return style is CaptionStyle.Classic or CaptionStyle.Minimal ? text : text.Trim('.', ',', ';', ':');
+    }
 
     /// <summary>A caption layer, 940 px wide, drawn into <paramref name="canvas"/> with its top-left at the canvas origin.</summary>
     static void DrawLayer(SKCanvas canvas, string text, CaptionStyle style, double k, int? highlightedWord)

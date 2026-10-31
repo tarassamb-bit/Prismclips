@@ -48,13 +48,36 @@ public class SelectionTests
         var segment = new EditSegment
         {
             Duration = 4,
-            Captions = [new("Clipped", -1, 2), new("Already over", -3, 1)],
+            Captions = [new("Already over", -3, 1), new("Clipped", -1, 2)],
         };
         var caption = Assert.Single(CaptionRenderer.Elements(segment));
-        Assert.Equal((0d, 1d), (caption.Start, caption.Duration));
+        // The page stays up 0.35 s after its last word, as on the Mac.
+        Assert.Equal((0d, 1.35d), (caption.Start, Math.Round(caption.Duration, 6)));
         segment.Captions = null;
         segment.Caption = "Overlay"; segment.CaptionStart = -1; segment.CaptionDuration = 2;
         Assert.Equal(1, Assert.Single(CaptionRenderer.Elements(segment)).Duration);
+    }
+
+    [Fact]
+    public void EveryStyleShowsShortPagesLikeTheMac()
+    {
+        var cue = new TimedCaption("This is the viral caption", 0.5, 1.5);
+        List<TimedSpeechWord> words = [new("This", 0.5, 0.2), new("is", 0.7, 0.2), new("the", 0.9, 0.2), new("viral", 1.1, 0.4), new("caption", 1.5, 0.5)];
+        // Three-word pages for Viral, two words for Bold caps, one for One word, one short line for Simple and Minimal;
+        // highlighting styles add a layer per word. The same with exact or estimated word timing.
+        var counts = new Dictionary<CaptionStyle, int> { [CaptionStyle.Auto] = 5, [CaptionStyle.Viral] = 5, [CaptionStyle.HighlightBox] = 5, [CaptionStyle.Podcast] = 5,
+                                                         [CaptionStyle.BoldCaps] = 3, [CaptionStyle.OneWord] = 5, [CaptionStyle.Classic] = 1, [CaptionStyle.Minimal] = 1 };
+        foreach (var (style, expected) in counts)
+        {
+            Assert.Equal(expected, CaptionRenderer.Elements(new EditSegment { Duration = 3, Captions = [cue], SpeechWords = words, CaptionStyle = style }).Count);
+            Assert.Equal(expected, CaptionRenderer.Elements(new EditSegment { Duration = 3, Captions = [cue], CaptionStyle = style }).Count);
+        }
+        var pages = CaptionRenderer.Pages([cue], words, CaptionStyle.Viral);
+        Assert.Equal(["This is the", "viral caption"], pages.Select(p => p.Text));
+        Assert.Equal(pages[0].End, pages[1].Start);
+        // Bottom captions are centred 620 px above the bottom edge, like the Mac's.
+        var bottom = CaptionRenderer.Elements(new EditSegment { Duration = 3, Captions = [cue], CaptionStyle = CaptionStyle.Classic })[0];
+        Assert.Equal(620 - 105, bottom.Y);
     }
 
     [Fact]
