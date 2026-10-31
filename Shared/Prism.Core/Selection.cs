@@ -533,7 +533,7 @@ public static class GeminiSelection
         var parsed = new List<(string, double, double)>();
         foreach (var line in lines)
         {
-            var match = System.Text.RegularExpressions.Regex.Match(line, @"^\[?(\d+(?:\.\d+)?)\s*[-–]\s*(\d+(?:\.\d+)?)\]?\s*\|?\s*(?:[A-Za-z_]+[ _]?\d*:\s*)?(.+)$");
+            var match = System.Text.RegularExpressions.Regex.Match(line, @"^\[?(\d+(?:\.\d+)?)\s*[-–]\s*(\d+(?:\.\d+)?)\]?\s*\|?\s*(?:SPEAKER[ _]?\d+:\s*)?(.+)$");
             if (!match.Success) return null;
             parsed.Add((match.Groups[3].Value.Trim(), double.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture), double.Parse(match.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture)));
         }

@@ -123,8 +123,15 @@ public sealed partial class PrismWindow
         var fields = new UIElement[] { IconField("\uE8FD", "How many", howMany), IconField("\uE916", "Approx. length", length), IconField("\uE8B2", "Take clips from", region) };
         for (var index = 0; index < 3; index++) { Grid.SetColumn(fields[index], index); ((FrameworkElement)fields[index]).Margin = new Thickness(0, 0, 18, 0); columns.Children.Add(fields[index]); }
         var explanation = Text("", 12, muted: true);
+        // A vertical crop enlarges a small source several times, so a 360p video looks blurry however it is exported.
+        var blurry = Text(video.Width > 0 && video.Height > 0 && Math.Min(video.Width, video.Height) < 720
+            ? $"⚠ This video is {Math.Min(video.Width, video.Height)}p, so Shorts made from it will look blurry. For sharp Shorts, use a 1080p copy of the video." : "", 12);
+        blurry.SetResourceReference(TextBlock.ForegroundProperty, "Amber"); blurry.Visibility = blurry.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        // What this run costs, before it starts: a video counts once, the first time Shorts are made from it.
+        var cost = Text("", 12, muted: true);
+        if (session.Account.Email is { } email && usageAccount != email && !usageLoading) { usageLoading = true; Dispatcher.BeginInvoke(new Action(() => _ = RefreshUsage())); }
         var heading = Text("Shorts settings", 12, muted: true); heading.FontWeight = FontWeights.Medium;
-        var settings = Surface(Column(heading, columns, custom, explanation)); settings.Margin = new Thickness(0, 0, 0, 20);
+        var settings = Surface(Column(heading, columns, custom, explanation, blurry, cost)); settings.Margin = new Thickness(0, 0, 0, 20);
         page.Children.Add(settings);
         var next = Button("Next: Choose captions", () => { createStep = 1; InvalidateScreen(); }, true, icon: "\uE76C");
         next.HorizontalAlignment = HorizontalAlignment.Center; page.Children.Add(next);
@@ -149,6 +156,13 @@ public sealed partial class PrismWindow
             var each = session.ShortDuration > 0 ? $"about {session.ShortDuration:0} seconds each" : "each 15–60 seconds, as long as its story needs";
             explanation.Text = $"Prism analyzes the speech and frames of the {session.ShortSourceRegion.Title().ToLowerInvariant()} and suggests {moments}, {each}. Shorts never overlap. Review every pick before exporting.";
             next.IsEnabled = !session.IsBusy && session.CustomRangeError is null;
+            if (serverUsage is { } usage && usageAccount == session.Account.Email)
+            {
+                var left = Math.Max(0, usage.Allowance - usage.Used);
+                cost.Text = $"This video counts as {MinutesText(UsageLimit.Minutes(video))} of your beta minutes the first time you use it. {MinutesText(left)} left of {(int)usage.Allowance}.";
+                cost.SetResourceReference(TextBlock.ForegroundProperty, UsageLimit.Minutes(video) > left ? "Amber" : "Muted");
+            }
+            cost.Visibility = cost.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         };
     }
 

@@ -117,7 +117,8 @@ public sealed partial class PrismWindow
         var result = await session.Account.UsageStatus();
         if (disposed || session.Account.Email != email) return;
         serverUsage = result; usageAccount = email; usageLoading = false;
-        if (session.Screen == Screen.Settings) InvalidateScreen();
+        // Settings rebuilds its tiles; the setup page only updates its minutes note.
+        if (session.Screen == Screen.Settings) InvalidateScreen(); else Refresh();
     }
 
     /// The beta allowance: minutes used so far, what is left, and where a promo code goes.

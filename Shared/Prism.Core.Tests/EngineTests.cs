@@ -226,6 +226,8 @@ public class GeminiTests
         Assert.Equal([("I'm a classifier.", 0.03, 4.9), ("That's Jev.", 4.9, 7)],
             GeminiSelection.TranscriptAnswer("0.03-4.90 | SPEAKER_00: I'm a classifier.\n4.90-7 | SPEAKER_01: That's Jev.\n"));
         Assert.Null(GeminiSelection.TranscriptAnswer("Sorry, I can't help with that."));
+        // Only speaker labels are dropped; a line that starts with "Note:" keeps its words.
+        Assert.Equal([("Note: this matters.", 1, 2)], GeminiSelection.TranscriptAnswer("1-2 | Note: this matters."));
     }
 
     [Fact]
