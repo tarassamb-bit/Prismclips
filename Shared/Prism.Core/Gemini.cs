@@ -47,6 +47,15 @@ public static class Gemini
     public static async Task<T> Generate<T>(IEnumerable<JsonNode> parts, JsonNode schema, GeminiConfiguration configuration,
                                             CancellationToken cancellation = default)
     {
+        var text = await GenerateText(parts, schema, configuration, cancellation);
+        try { return JsonSerializer.Deserialize<T>(text, ResponseOptions) ?? throw new GeminiException(GeminiFailure.InvalidResponse); }
+        catch (Exception error) when (error is not GeminiException) { throw new GeminiException(GeminiFailure.InvalidResponse); }
+    }
+
+    /// <summary>Sends one request and returns the answer's text as the model wrote it, for callers that can read more than JSON.</summary>
+    public static async Task<string> GenerateText(IEnumerable<JsonNode> parts, JsonNode schema, GeminiConfiguration configuration,
+                                                  CancellationToken cancellation = default)
+    {
         // Every request names its video, so the server can count it against the limit. No video, no request.
         if (configuration.Usage.Video.Length == 0) throw new GeminiException(GeminiFailure.SignIn);
         if (await configuration.AccessToken() is not { Length: > 0 } token) throw new GeminiException(GeminiFailure.SignIn);
@@ -79,8 +88,7 @@ public static class Gemini
                 .Select(part => part.TryGetProperty("text", out var value) ? value.GetString() : ""));
         }
         catch (Exception error) when (error is not GeminiException) { throw new GeminiException(GeminiFailure.InvalidResponse); }
-        try { return JsonSerializer.Deserialize<T>(text, ResponseOptions) ?? throw new GeminiException(GeminiFailure.InvalidResponse); }
-        catch (Exception error) when (error is not GeminiException) { throw new GeminiException(GeminiFailure.InvalidResponse); }
+        return text;
     }
 
     /// Server errors and short rate-limit waits are retried; the last response is returned as is.

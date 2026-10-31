@@ -220,6 +220,15 @@ public class GeminiTests
     }
 
     [Fact]
+    public void TranscriptsAreReadFromJsonOrSubtitleStyleLines()
+    {
+        Assert.Equal([("Hi there.", 0.5, 1.25)], GeminiSelection.TranscriptAnswer("""{"segments":[{"text":"Hi there.","start":0.5,"end":1.25}]}"""));
+        Assert.Equal([("I'm a classifier.", 0.03, 4.9), ("That's Jev.", 4.9, 7)],
+            GeminiSelection.TranscriptAnswer("0.03-4.90 | SPEAKER_00: I'm a classifier.\n4.90-7 | SPEAKER_01: That's Jev.\n"));
+        Assert.Null(GeminiSelection.TranscriptAnswer("Sorry, I can't help with that."));
+    }
+
+    [Fact]
     public async Task DescriptionsAreMatchedToTheirShortsAndBadIdsIgnored()
     {
         var gemini = new FakeGemini();
