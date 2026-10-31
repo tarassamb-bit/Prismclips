@@ -117,9 +117,21 @@ public sealed partial class PrismWindow : Window
         Closed += (_, _) => DisposeSession();
         PreviewKeyDown += (_, args) =>
         {
-            if (args.Key == Key.N && Keyboard.Modifiers == ModifierKeys.Control && session.Screen == Screen.Home && !session.IsBusy && modalKind.Length == 0)
-            { args.Handled = true; StartCreate(); }
-            else if (args.Key == Key.Escape && Dismiss()) args.Handled = true;
+            if (args.Key == Key.Escape && Dismiss()) { args.Handled = true; return; }
+            // The Mac's menu shortcuts, with Ctrl for ⌘; like its menus, only while Prism is free to change screens.
+            var canUseMenus = !session.IsBusy && session.Account.IsSignedIn && !session.Tutorial.IsActive && modalKind.Length == 0;
+            var control = Keyboard.Modifiers == ModifierKeys.Control; var controlShift = Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift);
+            if (!canUseMenus || !(control || controlShift)) return;
+            switch (args.Key)
+            {
+                case Key.N when control: StartCreate(); break;
+                case Key.OemComma when control: Navigate(Screen.Settings); break;
+                case Key.O when control: StartCreate(); _ = ChooseVideo(); break;
+                case Key.O when controlShift: if (ChooseFolder("Open a Prism project (.relio)") is { } path) session.Open(path); break;
+                case Key.E when control && session.Screen == Screen.Editor && session.Project?.Media.Count > 0: session.ChooseExport(); break;
+                default: return;
+            }
+            args.Handled = true;
         };
         SizeChanged += (_, _) => { if (overlayHost.Children.Count > 0 && overlayHost.Children[0] is Border { Child: ScrollViewer scroll }) scroll.MaxHeight = Math.Max(300, ActualHeight - 90); };
         resourceTimer.Tick += (_, _) => RefreshResources();

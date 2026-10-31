@@ -71,7 +71,7 @@ public sealed class WindowsEditor : IDisposable
         engine.Margin = new Thickness(0, 0, 12, 0); actions.Children.Add(engine);
         var appearance = ((PrismWindow)window).AppearanceSwitch(); appearance.Margin = new Thickness(8, 0, 6, 0); actions.Children.Add(appearance);
         export = Button("Export", () => session.ChooseExport(), primary: true); export.Padding = new Thickness(18, 8, 18, 8); export.Margin = new Thickness(6, 0, 0, 0);
-        export.ToolTip = "Choose which Shorts, the main video and the quality to export"; actions.Children.Add(export); header.Children.Add(actions);
+        export.ToolTip = "Choose which Shorts, the main video and the quality to export · Ctrl+E"; actions.Children.Add(export); header.Children.Add(actions);
         title.FontWeight = FontWeights.Medium; title.TextWrapping = TextWrapping.NoWrap; title.TextTrimming = TextTrimming.CharacterEllipsis; title.Margin = new Thickness(0, 0, 0, 2);
         var heading = new StackPanel { VerticalAlignment = VerticalAlignment.Center }; heading.Children.Add(title); heading.Children.Add(detail); header.Children.Add(heading);
         var bar = new Border { Child = header, BorderThickness = new Thickness(0, 0, 0, 1) }; bar.SetResourceReference(Border.BackgroundProperty, "Surface1"); bar.SetResourceReference(Border.BorderBrushProperty, "Line");
