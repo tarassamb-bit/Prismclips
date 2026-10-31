@@ -94,7 +94,11 @@ public sealed class Account : INotifyPropertyChanged
     /// re-analysis would charge (0 before the first run); null when it can't be checked.</summary>
     public async Task<(int Runs, double Charge)?> Reanalysis(string video)
     {
-        if (await Rpc("my_reanalysis", new JsonObject { ["p_video"] = video }) is not JsonArray { Count: > 0 } rows || rows[0] is not JsonObject row) return null;
+        if (await CurrentAccessToken() is not { } token) return null;
+        var (ok, reply, _, code) = await Send("rest/v1/rpc/my_reanalysis", new JsonObject { ["p_video"] = video }, token);
+        // A server without re-analysis charging doesn't have the function yet (HTTP 404), so every run is a first run there.
+        if (!ok) return code == 404 ? (0, 0) : null;
+        if (reply is not JsonArray { Count: > 0 } rows || rows[0] is not JsonObject row) return null;
         return Number(row["runs"]) is { } runs && Number(row["charge"]) is { } charge ? ((int)runs, charge) : null;
     }
 

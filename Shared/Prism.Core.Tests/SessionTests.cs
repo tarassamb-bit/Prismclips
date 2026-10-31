@@ -301,15 +301,33 @@ public class SessionTests
         {
             var path = request.RequestUri!.AbsolutePath;
             Paths.Add(path);
-            var reply = path switch
+            string? reply = path switch
             {
                 "/auth/v1/token" => """{"refresh_token":"new","access_token":"access","expires_in":3600}""",
+                "/rest/v1/rpc/my_reanalysis" when runs < 0 => null,
                 "/rest/v1/rpc/my_reanalysis" => $$"""[{"runs":{{runs}},"charge":{{charge}}}]""",
                 "/rest/v1/rpc/my_usage" => $$"""[{"used":{{used}},"allowance":60}]""",
+                "/rest/v1/rpc/usage_allowed" => "true",
                 _ => throw new InvalidOperationException("Unexpected request " + path),
             };
+            if (reply is null) return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.NotFound) { Content = new StringContent("""{"code":"PGRST202"}""") });
             return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(reply) });
         }
+    }
+
+    [Fact]
+    public async Task AServerWithoutReanalysisChargingStartsTheRun()
+    {
+        using var fixture = new Fixture();
+        fixture.Platform.AccountStore.Save("""{"Email":"me@example.com","RefreshToken":"old"}""");
+        using var server = new FakeAccount(runs: -1, charge: 0, used: 0);
+        using var session = new AppSession(fixture.Platform, new AppSettings(), server);
+        fixture.Open();
+        session.Open(fixture.Path);
+        await session.MakeShorts(session.Project!.Media[0], 1, 30, SourceRegion.EntireVideo);
+        Assert.Null(session.PendingPaidRun);
+        Assert.NotEqual("Prism couldn't check your usage right now. Try again in a moment.", session.GenerationError?.Message);
+        Assert.Contains("/rest/v1/rpc/usage_allowed", server.Paths);
     }
 
     [Theory]
