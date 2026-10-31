@@ -262,14 +262,20 @@ public static class GeminiSelection
         if (allClips.Count == 0) throw new GeminiException(excluding.Count == 0 ? GeminiFailure.NoStrongClips : GeminiFailure.NoDistinctClips);
         // A wider pool of time-distinct finalists, then one editor pass compares them side by side.
         var pool = StrongestOrBest(allClips, interval, targetDuration, Math.Min(20, count * 2 + 2), excluding);
-        if (pool.Count <= count) return pool;
+        // Even when the pool is smaller than the requested count, two different
+        // time ranges may repeat the same story and need an editorial comparison.
+        if (pool.Count <= 1) return pool;
         progress(0.95, "Prism AI · final edit: picking the best distinct stories");
-        var chosen = await FinalCut(pool, cues, count, guidance, configuration, cancellation) ?? pool.Take(count).ToList();
-        return chosen.Concat(pool.Where(clip => !chosen.Any(c => c.Start == clip.Start && c.End == clip.End))).ToList();
+        // The final pass failed, so no editorial decision was made; score-ranked backups remain.
+        if (await FinalCut(pool, cues, count, guidance, configuration, cancellation) is not { } chosen) return pool;
+        // A valid final decision can contain fewer than requested: stories the editor rejected as repetitive or
+        // incomplete are not brought back just to fill the count.
+        if (chosen.Count == 0) throw new GeminiException(excluding.Count == 0 ? GeminiFailure.NoStrongClips : GeminiFailure.NoDistinctClips);
+        return chosen;
     }
 
     /// <summary>Compares finalists from different batches on one scale and drops repeats of the same story. Null on any failure,
-    /// so the score order stays the fallback.</summary>
+    /// so the score order stays the fallback; empty when the editor kept none.</summary>
     public static async Task<List<Clip>?> FinalCut(IReadOnlyList<Clip> pool, IReadOnlyList<TimedCaption> cues, int count, string guidance,
                                                     GeminiConfiguration configuration, CancellationToken cancellation = default)
     {
@@ -301,6 +307,7 @@ public static class GeminiSelection
         {
             var response = await Gemini.Generate<JsonElement>([Gemini.Text(prompt)],
                 Schema("""{"type":"OBJECT","properties":{"ids":{"type":"ARRAY","items":{"type":"INTEGER"}}},"required":["ids"]}"""), configuration, cancellation);
+            if (response.GetProperty("ids").GetArrayLength() == 0) return [];
             var seen = new HashSet<int>();
             var picked = response.GetProperty("ids").EnumerateArray().Select(e => e.GetInt32())
                 .Where(id => id >= 0 && id < pool.Count && seen.Add(id)).Take(count).Select(id => pool[id]).ToList();

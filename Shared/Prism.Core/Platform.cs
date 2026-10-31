@@ -97,10 +97,18 @@ public sealed record ProjectStats(string Title, DateTime Created, int ShortCount
 
 public static class ProjectInfo
 {
+    /// <summary>A project folder's name without the id that keeps folders unique, for when the project itself can't be read.</summary>
+    public static string FolderTitle(string path)
+    {
+        var name = Path.GetFileNameWithoutExtension(MediaItem.FileName(path.TrimEnd('/', '\\')));
+        var parts = name.Split(' ');
+        return parts.Length > 1 && Guid.TryParse(parts[^1], out _) ? string.Join(" ", parts[..^1]) : name;
+    }
+
     public static async Task<ProjectSummary> Summary(string path, CancellationToken cancellation = default)
     {
         var project = ProjectStore.ReadProject(path);
-        if (project is null) return new ProjectSummary(Path.GetFileNameWithoutExtension(path), null, 0, null, null);
+        if (project is null) return new ProjectSummary(FolderTitle(path), null, 0, null, null);
         var video = project.Media.FirstOrDefault(m => m.Kind == "video");
         byte[]? poster = null;
         if (video is not null)

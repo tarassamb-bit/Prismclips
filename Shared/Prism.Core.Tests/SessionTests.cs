@@ -380,6 +380,13 @@ public class SessionTests
     }
 
     [Fact]
+    public void UnreadableProjectsShowTheirFolderNameWithoutItsId()
+    {
+        Assert.Equal("My trip", ProjectInfo.FolderTitle($"/Library/Projects/My trip {Guid.NewGuid()}.relio"));
+        Assert.Equal("Plain name", ProjectInfo.FolderTitle(@"C:\Prism\Plain name.relio\"));
+    }
+
+    [Fact]
     public async Task UsageKeysMatchTheMacApp()
     {
         var media = new MediaItem { Path = "/Users/me/Movies/clip.mp4", Duration = 59.5 };

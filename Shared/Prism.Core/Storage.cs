@@ -74,6 +74,8 @@ public sealed class ProjectStore : IDisposable
         try
         {
             connection.Open();
+            // Home reads projects while the open one is being saved; wait for the writer instead of failing at once.
+            Execute("PRAGMA busy_timeout=3000");
             Execute("PRAGMA journal_mode=WAL");
             if (create) Execute("CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value BLOB NOT NULL)");
         }
