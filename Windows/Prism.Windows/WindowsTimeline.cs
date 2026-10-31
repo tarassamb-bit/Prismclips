@@ -328,7 +328,7 @@ public sealed class WindowsTimeline : IDisposable
     {
         dc.DrawRoundedRectangle(Brush("3FA9F5", "0B6CB5", 0.07), null, Rect(Left, FocusY, plotWidth, FocusHeight), 4, 4);
         var clip = session.ActiveSegment;
-        if (clip?.SplitScreen == true) { Text(dc, "Split screen · each half stays on its speaker", Left + 8, FocusY + 7, plotWidth - 16, true); return; }
+        if (clip?.SplitScreen == true) { Text(dc, "Split screen · review the framing for each speaker", Left + 8, FocusY + 7, plotWidth - 16, true); return; }
         var points = clip?.CropKeyframes?.OrderBy(p => p.Time).ToList() ?? [];
         var offset = (clip?.CropPosition ?? 0.5) - 0.5;
         Point Position(CropKeyframe point) => new(Left + plotWidth * Math.Clamp(point.Time / length, 0, 1), FocusY + 3 + (1 - Math.Clamp(point.Position + offset, 0, 1)) * (FocusHeight - 6));

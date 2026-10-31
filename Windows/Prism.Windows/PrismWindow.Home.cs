@@ -11,6 +11,40 @@ namespace Prism.Windows;
 
 public sealed partial class PrismWindow
 {
+    /// A video dropped from Explorer anywhere on Home starts a new Shorts project with it, as on the Mac.
+    UIElement HomeDropTarget(UIElement page)
+    {
+        var home = new Grid { AllowDrop = true, Background = Brushes.Transparent };
+        home.Children.Add(page);
+        var outline = new System.Windows.Shapes.Rectangle { RadiusX = 16, RadiusY = 16, StrokeThickness = 2, StrokeDashArray = [5, 4] };
+        outline.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "Accent"); outline.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, "AccentWash");
+        var title = Text("Drop to create Shorts", 22, display: true); var formats = Text("MOV, MP4, M4V, AVI, MKV or WebM", 12, muted: true);
+        var arrow = Glyph("\uE74B", 44, "Accent"); arrow.Margin = new Thickness(0, 0, 0, 12);
+        foreach (var line in new FrameworkElement[] { arrow, title, formats }) line.HorizontalAlignment = HorizontalAlignment.Center;
+        var words = Column(arrow, title, formats); words.VerticalAlignment = VerticalAlignment.Center;
+        var target = new Grid { Margin = new Thickness(16), IsHitTestVisible = false, Visibility = Visibility.Collapsed };
+        target.Children.Add(outline); target.Children.Add(words);
+        home.Children.Add(target);
+        string? Video(DragEventArgs args) => !session.IsBusy && args.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } files
+            && AppSession.VideoExtensions.Contains(Path.GetExtension(files[0]).TrimStart('.').ToLowerInvariant()) ? files[0] : null;
+        void Over(object sender, DragEventArgs args)
+        {
+            if (Video(args) is null) return;
+            args.Effects = DragDropEffects.Copy; args.Handled = true; target.Visibility = Visibility.Visible;
+        }
+        home.DragEnter += Over; home.DragOver += Over;
+        home.DragLeave += (_, _) => target.Visibility = Visibility.Collapsed;
+        home.Drop += async (_, args) =>
+        {
+            target.Visibility = Visibility.Collapsed;
+            if (Video(args) is not { } path) return;
+            args.Handled = true;
+            StartCreate();
+            try { await ImportTyped(path); } catch (Exception error) { ShowNotice("Could not import video", error.Message); }
+        };
+        return home;
+    }
+
     UIElement Home()
     {
         var page = Column(); page.Margin = new Thickness(24); page.MaxWidth = 1800;
@@ -78,7 +112,7 @@ public sealed partial class PrismWindow
                 page.Children.Add(grid);
             }
         }
-        return Scroll(page);
+        return HomeDropTarget(Scroll(page));
     }
 
     Button StartCreatingButton()

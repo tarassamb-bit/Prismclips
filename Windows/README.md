@@ -41,6 +41,10 @@ Use `win-arm64` for Windows on ARM. Keep the complete output folder, including l
 
 The project uses `EnableWindowsTargeting` and can compile on macOS/Linux. WPF can only run on Windows.
 
+## Matches the Mac app
+
+Sign-in card, Prism AI through the server, Settings (Account, Usage with promo codes, System resources, Updates), the "Use your minutes?" re-analysis check, the first-video tutorial (replay it from Settings › Account), post titles and descriptions on the export card (saved in each MP4 and a .txt beside it), and dropping a video on Home to start. Updates come from the GitHub release: Prism checks on launch and every 6 hours, verifies the installer against `SHA256SUMS.txt`, then offers **Restart to update**. Only an installed copy (with `unins000.exe` beside `Prism.exe`) updates; there is no beta channel on Windows.
+
 ## Preview from a Mac
 
 `zsh Windows/preview.sh` runs the last commit on a GitHub Windows machine and opens its screen in your browser (`.github/workflows/windows-preview.yml`). The first run creates the `PREVIEW_PASSWORD` secret and keeps it in the Mac Keychain. Needs `gh` signed in with write access to the repo. Ctrl+C ends the session; it stops by itself after 3 hours. The screen has no GPU, so animations are slower than on a real PC.

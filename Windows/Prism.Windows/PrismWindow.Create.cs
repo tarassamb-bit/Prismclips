@@ -31,7 +31,7 @@ public sealed partial class PrismWindow
         {
             1 => "Upload a video first. Then choose clip lengths and which part to analyze.", 2 => "Your video is ready. Choose how to turn it into Shorts.",
             3 => "Pick how speech appears on your Shorts. You can change it for each Short in the editor.",
-            _ => "This tells Prism what to look for and how to lay out each Short. You can change the layout for each Short in the editor.",
+            _ => "This tells Prism what to look for, how to lay out each Short and which captions Auto picks.",
         }, 16, muted: true);
         foreach (var line in new[] { eyebrow, title, subtitle }) { line.TextAlignment = TextAlignment.Center; line.HorizontalAlignment = HorizontalAlignment.Center; }
         page.Children.Add(eyebrow); page.Children.Add(title); page.Children.Add(subtitle);

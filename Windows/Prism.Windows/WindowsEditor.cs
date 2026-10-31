@@ -106,7 +106,7 @@ public sealed class WindowsEditor : IDisposable
         ratio.Margin = new Thickness(10, 0, 6, 0); DockPanel.SetDock(ratio, Dock.Right); viewerHead.Children.Add(ratio);
         sourceName.FontWeight = FontWeights.Medium; sourceName.TextWrapping = TextWrapping.NoWrap; sourceName.TextTrimming = TextTrimming.CharacterEllipsis; sourceName.SetResourceReference(TextBlock.ForegroundProperty, "Ink");
         viewerHead.Children.Add(sourceName); Add(viewer, viewerHead, 0);
-        var picture = new Grid { Background = Brushes.Black, MinHeight = 140, ClipToBounds = true, Margin = new Thickness(16, 0, 16, 0), Cursor = Cursors.Hand, ToolTip = "Click to play or pause · double-click to expand" };
+        var picture = new Grid { Background = Brushes.Black, MinHeight = 140, ClipToBounds = true, Margin = new Thickness(16, 0, 16, 0), Cursor = Cursors.Hand, ToolTip = "Click to play or pause · double-click to fill the window" };
         picture.Children.Add(video);
         picture.MouseLeftButtonDown += (_, args) => { if (session.PreviewPath is null) return; if (args.ClickCount == 2) session.IsPlayerExpanded = !session.IsPlayerExpanded; else session.TogglePlayback(); };
         noticeIcon.Foreground = Brushes.Gray; noticeIcon.Margin = new Thickness(0, 0, 0, 10);
@@ -122,7 +122,7 @@ public sealed class WindowsEditor : IDisposable
         play = IconButton("", "Play or pause · Space", session.TogglePlayback); playGlyph = (TextBlock)play.Content; Add(controls, play, 0, 2);
         seek.Margin = new Thickness(10, 0, 10, 0); seek.ValueChanged += (_, _) => { if (!updatingSeek) session.SeekPreview(seek.Value); }; Add(controls, seek, 0, 3);
         var fps = Text("30 fps", 11, true); fps.SetResourceReference(TextBlock.FontFamilyProperty, "MonoFont"); fps.Margin = new Thickness(0, 0, 8, 0); Add(controls, fps, 0, 4);
-        expand = IconButton("", "Expand preview · Esc to exit", () => session.IsPlayerExpanded = !session.IsPlayerExpanded); expandGlyph = (TextBlock)expand.Content; Add(controls, expand, 0, 5);
+        expand = IconButton("", "Fill the window · press Esc to exit", () => session.IsPlayerExpanded = !session.IsPlayerExpanded); expandGlyph = (TextBlock)expand.Content; Add(controls, expand, 0, 5);
         Add(viewer, controls, 2);
         Add(panes, viewer, 0, 2); rightSplitter = Splitter(); Add(panes, rightSplitter, 0, 3);
 
@@ -174,6 +174,7 @@ public sealed class WindowsEditor : IDisposable
         if (session.Screen != Screen.Editor) { player.Pause(); return; }
         if (!ReferenceEquals(session.Player, player)) session.Player = player;
         title.Text = session.Project?.DisplayTitle ?? "Editor"; saved.Text = session.LastSavedAt is { } time ? "✓ Saved " + time.ToString("t", CultureInfo.CurrentCulture) : "";
+        saved.ToolTip = "Prism saves every change to this project automatically";
         status.Text = session.Message;
         var count = session.Project?.Segments.Count ?? 0;
         detail.Text = count == 0 ? "No Shorts yet" : count == 1 ? "1 Short" : $"{count} Shorts";
@@ -527,6 +528,7 @@ public sealed class WindowsEditor : IDisposable
         styles.Children.Add(Rule());
         var transcribe = Link("Transcribe", "", () => _ = Safe(session.RegenerateSelectedSubtitles));
         transcribe.IsEnabled = !session.IsBusy && hasAudio;
+        System.Windows.Automation.AutomationProperties.SetName(transcribe, "Transcribe speech into captions");
         transcribe.ToolTip = hasAudio ? "Transcribe with Prism AI in the cloud." : "This source video has no audio track.";
         var lines = Column();
         captions.Children.Add(FoldingSection(Heading(SectionLabel("Caption text"), transcribe), lines, !session.Settings.CaptionTextCollapsed, value => session.Settings.CaptionTextCollapsed = !value));
