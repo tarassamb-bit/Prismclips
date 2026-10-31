@@ -33,7 +33,7 @@ public static class Gemini
     /// <summary>Prism's server: it takes Gemini-format requests, forwards them to the AI model and answers in the same shape.</summary>
     public static readonly Uri GatewayUrl = new(Account.ProjectUrl, "functions/v1/gemini");
 
-    /// <summary>Seconds to wait before each retry of a server error (500–504). An overloaded model often stays busy for tens of
+    /// <summary>Seconds to wait before each retry of a server error (500–504, or Supabase's 546 when a worker runs out of memory). An overloaded model often stays busy for tens of
     /// seconds, so the waits grow to about a minute in all. Tests shorten these.</summary>
     public static double[] RetryWaits { get; set; } = [2, 4, 8, 15, 30];
 
@@ -120,7 +120,7 @@ public static class Gemini
                 using var response = await client.SendAsync(request, timeout.Token);
                 var text = await response.Content.ReadAsStringAsync(timeout.Token);
                 var status = (int)response.StatusCode;
-                if (canRetry && status is 500 or 502 or 503 or 504)
+                if (canRetry && status is 500 or 502 or 503 or 504 or 546)
                 {
                     var pause = Math.Min(60, Math.Max(wait, RetryDelay(response, text) ?? 0));
                     configuration.OnRetry?.Invoke($"Prism AI is busy (HTTP {status}) · retrying in {Math.Round(pause)} s");
