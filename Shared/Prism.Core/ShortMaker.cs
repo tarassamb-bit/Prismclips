@@ -4,6 +4,8 @@ namespace Prism.Core;
 public static class ShortMaker
 {
     public const int MaxShorts = 20;
+    /// <summary>Prism AI requests that run side by side, as on the Mac. Rate limits are retried, so this trades quota bursts for speed.</summary>
+    public const int ParallelRequests = 6;
     /// <summary>How many Shorts Auto makes room for: one per minute of the analyzed part, 1 to 20.</summary>
     public static int AutoCount(double seconds) => Math.Min(MaxShorts, Math.Max(1, (int)(seconds / 60)));
 

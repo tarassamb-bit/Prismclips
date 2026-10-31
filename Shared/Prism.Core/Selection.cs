@@ -10,7 +10,7 @@ public static class Concurrency
     /// <summary>Runs <paramref name="transform"/> on every item, at most <paramref name="limit"/> at a time, and returns results in
     /// the items' order. The first failure cancels the rest and is the one rethrown.</summary>
     public static async Task<List<TResult>> Map<T, TResult>(IReadOnlyList<T> items, Func<T, CancellationToken, Task<TResult>> transform,
-                                                             CancellationToken cancellation, int limit = 3, Action<int, TResult>? onEach = null)
+                                                             CancellationToken cancellation, int limit = ShortMaker.ParallelRequests, Action<int, TResult>? onEach = null)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         var results = new TResult[items.Count];
@@ -156,7 +156,7 @@ public static class GeminiSelection
     /// <paramref name="count"/> picks first, then distinct runner-ups as backups for picks that later snap into an overlap.</summary>
     public static async Task<List<Clip>> Select(string path, IReadOnlyList<TimedCaption> cues, (double Start, double End) interval, double targetDuration,
                                                 int count, GeminiConfiguration configuration, IReadOnlyList<SourceInterval>? excluding = null,
-                                                string guidance = "", Action<double, string>? progress = null, int concurrency = 3,
+                                                string guidance = "", Action<double, string>? progress = null, int concurrency = ShortMaker.ParallelRequests,
                                                 CancellationToken cancellation = default)
     {
         excluding ??= [];
@@ -442,7 +442,7 @@ public static class GeminiSelection
     }
 
     public static async Task<List<TimedCaption>> TranscribeSentences(string path, (double Start, double End) interval, GeminiConfiguration configuration,
-                                                                     Action<double>? progress = null, int concurrency = 3,
+                                                                     Action<double>? progress = null, int concurrency = ShortMaker.ParallelRequests,
                                                                      Action<List<TimedCaption>, double>? finished = null, CancellationToken cancellation = default)
     {
         var sentences = await Transcribe(path, interval, configuration, progress, SpeechGranularity.Sentences, [], concurrency,
@@ -454,7 +454,7 @@ public static class GeminiSelection
     /// the start of the interval each time it grows, so a run that fails later can resume instead of paying for it again.</summary>
     public static async Task<List<TimedSpeechWord>> Transcribe(string path, (double Start, double End) interval, GeminiConfiguration configuration,
                                                                Action<double>? progress = null, SpeechGranularity granularity = SpeechGranularity.Words,
-                                                               IReadOnlyList<TimedCaption>? reference = null, int concurrency = 3,
+                                                               IReadOnlyList<TimedCaption>? reference = null, int concurrency = ShortMaker.ParallelRequests,
                                                                Action<List<TimedSpeechWord>, double>? finished = null, CancellationToken cancellation = default)
     {
         reference ??= [];

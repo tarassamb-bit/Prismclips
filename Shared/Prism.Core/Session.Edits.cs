@@ -310,7 +310,7 @@ public sealed partial class AppSession
                 if (cloud is not null && project?.Id == projectId) ApplyWordTiming(cloud, job.Segment);
             });
             return 0;
-        }, CancellationToken.None, limit: 6);
+        }, CancellationToken.None, ShortMaker.ParallelRequests);
     }
 
     /// Stores timing for the Short it was made for, as long as its range hasn't moved meanwhile. Caption lines the
