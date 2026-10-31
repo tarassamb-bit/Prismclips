@@ -45,6 +45,7 @@ public sealed class WindowsEditor : IDisposable
     int chatCount = -1;
     double pendingSeek;
     bool resumePlayback, previewSuspended, updatingSeek, disposed, expanded, noticeRetry;
+    Button? saveCaptions;
 
     public UIElement Widget => root;
     /// <summary>What each step of the editor tour highlights.</summary>
@@ -488,7 +489,7 @@ public sealed class WindowsEditor : IDisposable
 
     void BuildCaptions()
     {
-        captions.Children.Clear(); captions.Margin = new Thickness(6);
+        captions.Children.Clear(); captions.Margin = new Thickness(6); saveCaptions = null;
         if (session.ActiveSegment is not { } clip) { var empty = Text("Select a Short to change its captions.", 12, true); empty.Margin = new Thickness(0, 28, 0, 28); captions.Children.Add(empty); return; }
         var chosen = clip.CaptionStyle ?? CaptionStyle.Classic;
         var current = chosen.Resolved(clip.VideoType, clip.SplitScreen == true);
@@ -544,6 +545,7 @@ public sealed class WindowsEditor : IDisposable
         }
         lines.Children.Add(Text("Clear a line to remove it. Changing a line's words turns off its yellow highlight.", 11, true));
         var save = Button("Save captions", () => session.UpdateSelectedCaptionTexts(editors.Select(e => e.Text).ToArray()), primary: true);
+        save.ToolTip = "Save captions · Ctrl+S"; saveCaptions = save;
         save.HorizontalAlignment = HorizontalAlignment.Stretch; save.Padding = new Thickness(0, 9, 0, 9); save.Margin = new Thickness(0, 6, 0, 0); save.IsEnabled = false;
         foreach (var entry in editors) entry.TextChanged += (_, _) => save.IsEnabled = !session.IsBusy && !editors.Select(e => e.Text).SequenceEqual(cues.Select(c => c.Text));
         lines.Children.Add(save);
@@ -570,6 +572,14 @@ public sealed class WindowsEditor : IDisposable
     }
     void OnKeyDown(object sender, KeyEventArgs args)
     {
+        // Ctrl+S saves edited caption lines, also while one of them is being typed in, as ⌘S does on the Mac.
+        if (args.Key == Key.S && Keyboard.Modifiers == ModifierKeys.Control && session.Screen == Screen.Editor && !disposed
+            && saveCaptions is { IsEnabled: true, IsVisible: true } save)
+        {
+            args.Handled = true;
+            save.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            return;
+        }
         if (disposed || session.Screen != Screen.Editor || !root.IsEnabled || !session.Account.IsSignedIn || session.IsBusy
             || session.ExportChoice is not null || session.ExportSummary is not null || session.GenerationError is not null || session.PendingPaidRun is not null || session.Tutorial.IsActive || Typing()) return;
         try
