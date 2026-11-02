@@ -9,7 +9,7 @@ const apiDir = path.join(root, 'api');
 const port = Number(process.env.PORT) || 4173;
 const types = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json', '.png': 'image/png', '.ttf': 'font/ttf', '.txt': 'text/plain; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.ttf': 'font/ttf', '.txt': 'text/plain; charset=utf-8',
   '.xml': 'application/xml', '.webmanifest': 'application/manifest+json', '.ico': 'image/x-icon',
 };
 
@@ -56,6 +56,8 @@ const server = http.createServer(async (req, res) => {
 
   // Mirrors vercel.json: clean URLs, plus /dashboard_<user id> served by dashboard.html.
   let file = pathname === '/' ? '/index' : /^\/dashboard_[^/]+$/.test(pathname) ? '/dashboard' : pathname;
+  // Like Vercel, a folder serves its index.html (/app/ → app/index.html).
+  if (!path.extname(file) && fs.existsSync(path.join(root, file)) && fs.statSync(path.join(root, file)).isDirectory()) file = path.join(file, 'index');
   if (!path.extname(file)) file += '.html';
   const full = path.join(root, file);
   if (!full.startsWith(root + path.sep)) return notFound(res);
