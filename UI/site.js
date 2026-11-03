@@ -113,7 +113,7 @@
       title: ['More than a clip.', 'A complete thought.'],
       description: 'Prism looks for a hook, the context, and a payoff. Cuts land on whole sentences, so your best ideas get the room they need.',
       points: ['Moments from across your selected range', 'Review and refine every suggested Short'],
-      image: 'assets/create.png', width: 1200, height: 750,
+      image: 'assets/create.webp', width: 1200, height: 750,
       alt: "Prism's create screen with controls for number of Shorts, clip length, source range, and caption style.",
       caption: 'Your footage. Your brief. Your call.'
     },
@@ -122,7 +122,7 @@
       title: ['The right frame.', 'For every story.'],
       description: 'Give a widescreen story a vertical point of view. Follow the subject with Fill, keep the full picture with Fit, or stack two views with Split.',
       points: ['AI subject framing with a smoothed camera path', 'Fine-tune the crop yourself in the editor'],
-      image: 'assets/layouts.png', width: 1600, height: 999,
+      image: 'assets/layouts.webp', width: 1600, height: 999,
       alt: 'Prism layout examples showing Fill with a tracked crop, Fit with a blurred background, and Split with two stacked speakers.',
       caption: 'Fill. Fit. Split. Find your angle.'
     },
@@ -131,7 +131,7 @@
       title: ['Sound off.', 'Story still on.'],
       description: 'Make your words part of the picture. Choose from seven caption styles, then adjust the size and position to match your voice.',
       points: ['Word highlighting when verified timing is available', 'Caption styles you can change before export'],
-      image: 'assets/captions.png', width: 1600, height: 846,
+      image: 'assets/captions.webp', width: 1600, height: 846,
       alt: 'Seven Prism caption styles including Simple, Viral highlight, Highlight box, Bold caps, Minimal, One word, and Podcast treatments.',
       caption: 'Different styles. Still your voice.'
     }

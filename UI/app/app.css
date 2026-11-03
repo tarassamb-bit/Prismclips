@@ -1,7 +1,7 @@
-@font-face { font-family: "Space Grotesk"; src: url("../fonts/SpaceGrotesk-Medium.ttf") format("truetype"); font-weight: 500; font-display: swap; }
-@font-face { font-family: Sora; src: url("../fonts/Sora-Regular.ttf") format("truetype"); font-weight: 400; font-display: swap; }
-@font-face { font-family: Sora; src: url("../fonts/Sora-Medium.ttf") format("truetype"); font-weight: 500 700; font-display: swap; }
-@font-face { font-family: "JetBrains Mono"; src: url("../fonts/JetBrainsMono-Regular.ttf") format("truetype"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Space Grotesk"; src: url("../fonts/SpaceGrotesk-Medium.woff2") format("woff2"); font-weight: 500; font-display: swap; }
+@font-face { font-family: Sora; src: url("../fonts/Sora-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: Sora; src: url("../fonts/Sora-Medium.woff2") format("woff2"); font-weight: 500 700; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url("../fonts/JetBrainsMono-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
 
 :root {
   --surface0: #1a1c22; --surface1: #23262e; --surface2: #2e323c; --border: #3a3f4b;
