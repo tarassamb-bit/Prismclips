@@ -1,13 +1,16 @@
 // Prism in the browser: projects, Shorts, the editor and export. The screens follow the macOS app's flows; the engine is in ./engine.
 import { GeminiError, StageFailure, ShortMakerError } from './engine/gemini.js';
-import { openSource, thumbnail } from './engine/media.js';
+import { openSource, thumbnail, frameImage } from './engine/media.js';
 import * as Shorts from './engine/shortmaker.js';
 import * as Framing from './engine/framing.js';
 import * as Selection from './engine/selection.js';
 import { render, preview, exportSettings } from './engine/render.js';
 import { STYLE_TITLES, STYLE_DETAILS, VIDEO_TYPE_TITLES, VIDEO_TYPE_DETAILS, REGION_TITLES, EXPORT_QUALITIES, CAPTION_STYLES, VIDEO_TYPES } from './engine/models.js';
 import { stylePreview } from './engine/captions.js';
+import { mountPlayer, unmountPlayer } from './player.js';
 import * as store from './store.js';
+import { configureSync, requestSync, sync, syncStatus, onSyncStatus } from './sync.js';
+import { uploadVideo, downloadVideo, removeVideos, removeAllVideos, cloudUsage, CloudVideoError } from './cloudvideo.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -17,6 +20,9 @@ const clock = (seconds) => {
   return `${m}:${String(s).padStart(2, '0')}`;
 };
 const db = () => window.prismDb;
+const userId = () => state.session?.user?.id ?? null;
+/** This browser can hold several accounts' projects; only the signed-in account's (and ones saved before accounts, which the first sync claims) show. */
+const isMine = (item) => userId() !== null && (!item.owner || item.owner === userId());
 
 const state = {
   session: null,
@@ -47,7 +53,7 @@ async function refreshUsage() {
 function renderUsage() {
   const badge = $('#usage-badge');
   if (!badge) return;
-  badge.textContent = state.usage ? `${Math.floor(state.usage.used)} of ${Math.floor(state.usage.allowance)} min used` : '';
+  badge.textContent = state.usage ? `${Math.ceil(state.usage.used)} of ${Math.floor(state.usage.allowance)} min used` : '';
 }
 
 async function signIn(email, password) {
@@ -61,7 +67,50 @@ async function signUp(email, password) {
   return { message: data.session ? null : 'Check your inbox to confirm your email, then sign in.' };
 }
 
-// MARK: Boot and routing
+// MARK: Routes: every screen has its own address, so reload, Back and shared links all work
+
+const slug = (name) => name.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'untitled';
+/** Projects and folders are named by their title plus the start of their id, so two with the same name still have different addresses. */
+const projectPath = (project) => `/app/project/${encodeURIComponent(slug(project.title))}-${project.id.slice(0, 8)}`;
+const folderPath = (folder) => `/app/folder/${encodeURIComponent(slug(folder.name))}-${folder.id.slice(0, 8)}`;
+const CREATE_STEPS = ['choose-video', 'settings', 'captions', 'content-type'];
+
+let routing = false;
+/** Puts the screen's address in the browser's bar. Moving between screens adds a history entry; `replace` rewrites the current one. */
+function setUrl(path, replace = false) {
+  state.path = path;
+  if (routing || location.pathname === path) return;
+  history[replace ? 'replaceState' : 'pushState'](null, '', path);
+}
+
+/** Shows whatever the address names; an address that names nothing shows Home. */
+async function route() {
+  routing = true;
+  try {
+    const [first, second, third] = location.pathname.replace(/^\/app\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
+    const idOf = (part) => part?.split('-').at(-1) ?? '';
+    if (first === 'create') {
+      const step = Math.max(1, CREATE_STEPS.indexOf(second) + 1);
+      // With a video already chosen the steps can be walked with Back and Forward; otherwise start at the first.
+      if (state.create?.project) { state.create.step = step; setScreen('create'); renderCreate(); }
+      else startCreate();
+    } else if (first === 'settings') await showSettings(second);
+    else if (first === 'folder' && second) {
+      const folder = (await store.listFolders()).filter(isMine).find((f) => f.id.startsWith(idOf(second)));
+      await showHome(folder ? { folderId: folder.id } : null);
+    } else if (first === 'project' && second) {
+      const project = (await store.listProjects()).filter(isMine).find((p) => p.id.startsWith(idOf(second)));
+      if (project) await openProject(project.id, third); else await showHome();
+    } else await showHome();
+  } finally { routing = false; }
+  // The address as the screen itself spells it (a short link or an old name becomes the proper one).
+  if (state.path && location.pathname !== state.path) history.replaceState(null, '', state.path);
+}
+window.addEventListener('popstate', () => route());
+
+// MARK: Boot and the app shell (sidebar, title bar and sign-in card, as in the macOS app)
+
+const SCREEN_TITLES = { home: 'Home', create: 'Create Shorts', settings: 'Settings' };
 
 async function boot() {
   if (!('VideoDecoder' in window && 'VideoEncoder' in window && 'OffscreenCanvas' in window)) {
@@ -69,93 +118,663 @@ async function boot() {
       <p class="muted">Prism reads and renders video in your browser with WebCodecs, which this browser doesn’t have. Use a current Chrome, Edge, Safari or Firefox.</p></section>`;
     return;
   }
-  if (!db()) return showSignedOut('Sign-in is unavailable right now. Check your connection and reload.');
+  configureSync({
+    db, userId,
+    ensureHashes,
+    // Something arrived from another device: Home shows it at once.
+    onUpdated: () => { if (state.screen === 'home') showHome(state.homeView); },
+    // With the projects in step, deleted projects' videos are removed from storage and new videos go up.
+    afterSync: () => { removePendingVideos(); uploadPending(); },
+  });
+  applyTheme(savedTheme());
+  applyCollapsed(savedSidebar() === '1');
+  updateStorage();
+  setInterval(updateStorage, 60_000);
+  if (!db()) {
+    await route();
+    return renderGate('Sign-in is unavailable right now. Check your connection and reload.');
+  }
   state.session = (await db().auth.getSession()).data.session;
-  db().auth.onAuthStateChange((event, session) => {
+  db().auth.onAuthStateChange((_event, session) => {
     state.session = session;
-    if (event === 'SIGNED_OUT') showSignedOut();
-    else refreshUsage();
+    renderGate();
+    if (session) { refreshUsage(); requestSync(0); }
   });
-  await document.fonts.load('700 66px Sora');
-  if (!state.session) return showSignedOut();
-  await showHome();
-}
-
-function showSignedOut(message = '') {
-  state.project = null;
-  $('#app').innerHTML = `
-    <section class="card auth">
-      <h1>Sign in to Prism</h1>
-      <p class="muted">Prism AI makes Shorts from your videos. Sign in to use it; each account gets a beta allowance of minutes.</p>
-      <form id="auth-form" class="stack">
-        <label>Email <input name="email" type="email" autocomplete="email" required></label>
-        <label>Password <input name="password" type="password" autocomplete="current-password" minlength="6" required></label>
-        <div class="row">
-          <button class="button primary" name="mode" value="in">Sign in</button>
-          <button class="button ghost" name="mode" value="up" formnovalidate>Create account</button>
-        </div>
-        <p id="auth-status" class="muted" role="status">${esc(message)}</p>
-      </form>
-      <p class="muted small"><a href="../pricing.html">Pricing</a> · <a href="../login.html">Account help</a></p>
-    </section>`;
-  $('#auth-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const { email, password } = Object.fromEntries(new FormData(form));
-    const mode = event.submitter?.value ?? 'in';
-    const status = $('#auth-status');
-    status.textContent = mode === 'up' ? 'Creating account…' : 'Signing in…';
-    if (mode === 'up') {
-      const { message } = await signUp(email, password);
-      status.textContent = message ?? 'Signed in.';
-      if (!message) await showHome();
-      return;
-    }
-    const error = await signIn(email, password);
-    if (error) status.textContent = error;
-    else await showHome();
-  });
-}
-
-async function showHome() {
-  state.project = null;
-  state.projects = await store.listProjects();
-  const cards = state.projects.map((p) => {
-    const poster = p.media.find((m) => m.thumbnail)?.thumbnail;
-    const shorts = p.segments.length;
-    return `<div class="project-card">
-        <button class="open" data-action="open" data-id="${esc(p.id)}">
-          <div class="poster">${poster ? `<img alt="" src="${poster}">` : ''}</div>
-          <strong>${esc(p.title)}</strong>
-          <span class="muted small">${shorts} ${shorts === 1 ? 'Short' : 'Shorts'} · ${new Date(p.updated ?? p.created).toLocaleDateString()}</span>
-        </button>
-        <button class="link danger" data-action="delete-project" data-id="${esc(p.id)}">Delete</button>
-      </div>`;
-  }).join('');
-  $('#app').innerHTML = `
-    <section class="home">
-      <div class="row between">
-        <h1>Projects</h1>
-        <span class="row">
-          <span id="usage-badge" class="muted small"></span>
-          <button class="button ghost" data-action="usage">Usage</button>
-          <label class="button primary">Import a video<input id="import" type="file" accept="video/*" hidden></label>
-        </span>
-      </div>
-      <div id="drop" class="dropzone">Drop a video here to start a project</div>
-      <div class="grid">${cards || '<p class="muted">No projects yet. Import a video to make your first Shorts.</p>'}</div>
-      <p id="notice" class="muted" role="status"></p>
-    </section>`;
-  wireDropzone($('#drop'), (file) => createProject(file));
-  $('#import').addEventListener('change', (event) => event.target.files[0] && createProject(event.target.files[0]));
-  renderUsage();
+  await Promise.all([document.fonts.load('700 66px Sora'), document.fonts.load('500 46px Sora')]);
+  renderGate();
+  await route();
   refreshUsage();
+  if (state.session) requestSync(0);
 }
 
-function wireDropzone(zone, onFile) {
-  ['dragenter', 'dragover'].forEach((type) => zone.addEventListener(type, (e) => { e.preventDefault(); zone.classList.add('over'); }));
-  ['dragleave', 'drop'].forEach((type) => zone.addEventListener(type, (e) => { e.preventDefault(); zone.classList.remove('over'); }));
-  zone.addEventListener('drop', (e) => { const file = e.dataTransfer.files[0]; if (file) onFile(file); });
+function setScreen(screen) {
+  state.screen = screen;
+  const title = screen === 'editor' ? (state.project?.title ?? 'Editor') : SCREEN_TITLES[screen];
+  const heading = $('#screen-title');
+  if (screen === 'editor') {
+    // The project's name is the title: edit it in place.
+    if (!heading.querySelector('input')) heading.innerHTML = '<input id="title" class="title-input" aria-label="Project name">';
+    heading.querySelector('input').value = state.project?.title ?? '';
+  } else heading.textContent = title;
+  $('#export-button').hidden = screen !== 'editor';
+  document.title = `${title} · Prism`;
+  // The editor keeps only what editing needs, so the theme switch lives on the other screens.
+  $('.theme-toggle').hidden = screen === 'editor';
+  for (const button of document.querySelectorAll('.side-button')) {
+    button.classList.toggle('selected', button.dataset.screen === screen);
+  }
+}
+
+function savedSidebar() {
+  try { return localStorage.getItem('prism-sidebar'); } catch { return null; }
+}
+function applyCollapsed(collapsed) {
+  $('.shell').classList.toggle('collapsed', collapsed);
+  const button = $('.collapse-button');
+  button.setAttribute('aria-expanded', String(!collapsed));
+  button.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+  button.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+  try { localStorage.setItem('prism-sidebar', collapsed ? '1' : '0'); } catch { /* the choice just isn't remembered */ }
+}
+
+function savedTheme() {
+  try { return localStorage.getItem('prism-theme'); } catch { return null; }
+}
+/** Switches theme as one short crossfade of a snapshot, so the page never repaints piece by piece; plain switch where that isn't supported. */
+function switchTheme(theme) {
+  const change = () => applyTheme(theme);
+  if (document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) document.startViewTransition(change);
+  else change();
+}
+
+function applyTheme(theme) {
+  if (theme) document.documentElement.dataset.theme = theme;
+  else delete document.documentElement.dataset.theme;
+  try { if (theme) localStorage.setItem('prism-theme', theme); } catch { /* the choice just isn't remembered */ }
+  const dark = (theme ?? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')) === 'dark';
+  $('#theme-dark')?.setAttribute('aria-pressed', String(dark));
+  $('#theme-light')?.setAttribute('aria-pressed', String(!dark));
+}
+
+const bytes = (value) => (value >= 1e9 ? `${Number((value / 1e9).toFixed(1))} GB` : value >= 1e6 ? `${Math.round(value / 1e6)} MB`
+  : value > 0 ? `${Math.max(1, Math.round(value / 1e3))} KB` : '0 MB');
+
+/** What this browser keeps for Prism (projects and videos), the web counterpart of the Mac's "System resources". */
+async function storageEstimate() {
+  try { const { usage, quota } = await navigator.storage.estimate(); return quota ? { usage, quota } : null; } catch { return null; }
+}
+async function updateStorage() {
+  const estimate = await storageEstimate();
+  const label = $('#storage-label'), bar = $('#storage-bar');
+  if (!label || !bar) return;
+  label.textContent = estimate ? `${bytes(estimate.usage)} / ${bytes(estimate.quota)}` : '—';
+  bar.style.width = estimate ? `${Math.min(100, Math.max(2, estimate.usage / estimate.quota * 100))}%` : '0';
+}
+
+/** While nobody is signed in, this card covers the whole app, like the Mac's sign-in card. */
+function renderGate(message = '') {
+  const gate = $('#gate');
+  const open = !state.session;
+  $('.shell').inert = open;
+  gate.hidden = !open;
+  if (!open) { gate.innerHTML = ''; return; }
+  if (gate.querySelector('form') && !message) return;
+  gate.innerHTML = `
+    <div class="gate-card" role="dialog" aria-modal="true" aria-labelledby="gate-title">
+      <div class="row"><img src="/icon.png" width="28" height="28" alt=""><h2 id="gate-title">Sign in to Prism</h2></div>
+      <p class="muted">Sign in or create a free account to start. Prism's AI runs on our server, so you don't need an API key.</p>
+      <form id="auth-form" class="stack">
+        <input name="email" type="email" placeholder="Email" autocomplete="username" aria-label="Email">
+        <input name="password" type="password" placeholder="Password (at least 6 characters)" autocomplete="current-password" aria-label="Password">
+        <p id="auth-status" class="muted small" role="status">${esc(message)}</p>
+        <div class="row between">
+          <button type="button" class="button ghost" id="auth-up">Create account</button>
+          <button class="button primary" id="auth-in">Sign in</button>
+        </div>
+      </form>
+    </div>`;
+  const form = $('#auth-form');
+  const buttons = [$('#auth-up'), $('#auth-in')];
+  const refresh = (working = false) => { for (const b of buttons) b.disabled = working || !form.email.value || !form.password.value; };
+  form.addEventListener('input', () => refresh());
+  refresh();
+  const run = async (mode) => {
+    refresh(true);
+    const status = $('#auth-status');
+    const { email, password } = form;
+    status.textContent = mode === 'up' ? 'Creating account…' : 'Signing in…';
+    const failure = mode === 'up' ? (await signUp(email.value, password.value)).message : await signIn(email.value, password.value);
+    refresh();
+    if (failure) { status.textContent = failure; return; }
+    state.session = (await db().auth.getSession()).data.session;
+    renderGate();
+    refreshUsage();
+  };
+  form.addEventListener('submit', (event) => { event.preventDefault(); run('in'); });
+  $('#auth-up').addEventListener('click', () => run('up'));
+  form.email.focus();
+}
+
+// MARK: Home (projects and folders), as in the macOS app
+
+const dateText = (iso) => {
+  const d = new Date(iso);
+  return `${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} at ${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
+};
+const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+const folderIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>';
+
+/** `view` is null for Home, or { folderId } inside a folder. */
+async function showHome(view = null) {
+  state.project = null;
+  state.create = null;
+  state.homeView = view;
+  setScreen('home');
+  const [everything, allFolders] = await Promise.all([store.listProjects(), store.listFolders()]);
+  const all = everything.filter(isMine), folders = allFolders.filter(isMine);
+  state.projects = all;
+  state.folders = folders;
+  // A project that came from another device has no video here until it is added again.
+  const noVideo = new Map(); // project id -> every missing video is in the cloud
+  for (const p of all) {
+    const missing = [];
+    for (const m of p.media) if (!(await store.hasFile(m.id))) missing.push(m);
+    if (missing.length) noVideo.set(p.id, missing.every((m) => m.cloud?.uploaded));
+  }
+  // There is no Trash anymore: projects still in it were meant to go, so they are deleted, here and in the cloud.
+  const trashed = all.filter((p) => p.trashed);
+  if (trashed.length) {
+    for (const project of trashed) { await store.deleteProject(project); for (const media of project.media) state.sources.delete(media.id); }
+    requestSync(0);
+  }
+  const live = all.filter((p) => !p.trashed);
+  const folder = view?.folderId ? folders.find((f) => f.id === view.folderId) : null;
+  if (view?.folderId && !folder) return showHome();
+  setUrl(folder ? folderPath(folder) : '/app');
+  const inFolder = (id) => live.filter((p) => p.folderId === id);
+
+  const card = (p) => {
+    const poster = p.media.find((m) => m.thumbnail)?.thumbnail;
+    const info = `${plural(p.segments.length, 'Short')} · ${dateText(p.updated ?? p.created)}`;
+    const away = noVideo.has(p.id) ? `<span class="missing small">${noVideo.get(p.id) ? 'Video downloads when you open it' : 'Video not on this device'}</span>` : '';
+    const body = `<div class="poster">${poster ? `<img alt="" src="${poster}">` : ''}<span class="badge">${clock(p.media[0]?.duration ?? 0)}</span></div>
+          <strong class="p-title">${esc(p.title)}</strong><span class="muted small">${info}</span>${away}`;
+    return `<div class="project-card" draggable="true" data-project="${esc(p.id)}">
+          <button class="open" data-action="open" data-id="${esc(p.id)}">${body}</button>
+          <button class="card-menu" data-action="project-menu" data-id="${esc(p.id)}" aria-label="Options for ${esc(p.title)}" aria-haspopup="menu">⋯</button></div>`;
+  };
+  const grid = (list) => (list.length ? `<div class="grid">${list.map(card).join('')}</div>` : '');
+  const back = '<button class="link back-home" data-action="home">← Home</button>';
+
+  let html;
+  if (folder) {
+    const list = inFolder(folder.id);
+    html = `${back}<div class="row between"><h2>${esc(folder.name)}</h2>
+        <button class="card-menu shown" data-action="folder-menu" data-id="${esc(folder.id)}" aria-label="Folder options" aria-haspopup="menu">⋯</button></div>
+      ${grid(list) || `<div class="empty"><strong>This folder is empty</strong><span class="muted">Go back to Projects and drag a project onto this folder, or open a project’s ⋯ menu › Move to folder.</span></div>`}`;
+  } else {
+    const tiles = folders.map((f) => `<div class="folder-tile" data-folder="${esc(f.id)}">
+        <button class="open" data-action="open-folder" data-id="${esc(f.id)}">${folderIcon}<span><strong>${esc(f.name)}</strong><span class="muted small">${plural(inFolder(f.id).length, 'project')}</span></span></button>
+        <button class="card-menu" data-action="folder-menu" data-id="${esc(f.id)}" aria-label="Options for ${esc(f.name)}" aria-haspopup="menu">⋯</button></div>`).join('');
+    const loose = live.filter((p) => !folders.some((f) => f.id === p.folderId));
+    html = `<button class="start-card" data-action="create">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/></svg>
+        <span class="start-text"><strong>Start creating</strong><span>One in. Many out. Choose a video and Prism finds the moments worth sharing.</span></span>
+        <span class="start-arrow" aria-hidden="true">→</span></button>
+      <div class="row between"><h2>Projects</h2><button class="link new-folder" data-action="new-folder">${folderIcon}New folder</button></div>
+      ${tiles ? `<div class="folders">${tiles}</div>` : ''}
+      ${grid(loose) || (live.length === 0 ? '<div class="empty"><strong>Your projects will appear here</strong><span class="muted">Create a Short to start your first project.</span></div>' : '')}`;
+  }
+  $('#app').innerHTML = `<section class="dashboard">${html}</section>`;
+}
+
+// MARK: Menus and the small dialogs behind them
+
+function closeMenu() {
+  $('#menu')?.remove();
+}
+
+/** A pop-up menu next to `anchor` (or at the pointer for a right-click). Items are { label, run, danger } or '-' for a divider. */
+function openMenu(items, anchor, point = null) {
+  closeMenu();
+  const menu = document.createElement('div');
+  menu.id = 'menu';
+  menu.className = 'menu';
+  menu.setAttribute('role', 'menu');
+  for (const item of items) {
+    if (item === '-') { menu.append(document.createElement('hr')); continue; }
+    const button = Object.assign(document.createElement('button'), { textContent: item.label, className: item.danger ? 'danger' : '' });
+    button.setAttribute('role', 'menuitem');
+    button.addEventListener('click', () => { closeMenu(); item.run(); });
+    menu.append(button);
+  }
+  document.body.append(menu);
+  const box = menu.getBoundingClientRect();
+  const rect = anchor?.getBoundingClientRect();
+  const x = point ? point.x : rect.right - box.width, y = point ? point.y : rect.bottom + 4;
+  menu.style.left = `${Math.max(8, Math.min(x, innerWidth - box.width - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(y, innerHeight - box.height - 8))}px`;
+  menu.querySelector('button')?.focus();
+}
+
+/** Changes a project in storage without counting as an edit of its content. */
+async function changeProject(id, change) {
+  const project = await store.loadProject(id);
+  if (!project) return;
+  change(project);
+  await store.saveProject(project, { touch: false });
+  showHome(state.homeView);
+}
+
+/** Deletes a project for good in one step: here, in the cloud copy of the account, and its stored video (unless another project
+ * uses the same video). Opening the ⋯ menu first is what guards against a slip. */
+/** Deletes the account for good: every cloud video first, then the account with all its rows, then this browser's copy. */
+async function deleteAccount() {
+  const user = state.session?.user;
+  if (!user || !confirm(`Are you sure you want to delete your account ${user.email}? Your projects, Shorts, stats and every video in the cloud are deleted for good. This can't be undone.`)) return;
+  const note = (text) => { if ($('#delete-account-note')) $('#delete-account-note').textContent = text; };
+  note('Deleting…');
+  try {
+    await removeAllVideos({ token: accessToken });
+  } catch (error) {
+    // Stop here, so no video is left behind in the cloud without an account; with no cloud storage set up there is nothing to remove.
+    if (error.kind !== 'unavailable') return note(`Your account wasn't deleted: ${error.message}`);
+  }
+  const { error } = await db().rpc('delete_my_account');
+  if (error) return note(`Your account wasn't deleted: ${error.message}`);
+  await store.deleteOwner(user.id);
+  await db().auth.signOut().catch(() => {});
+  state.session = null;
+  renderGate();
+}
+
+async function deleteProjectNow(id) {
+  const project = await store.loadProject(id);
+  if (!project || !confirm(`Are you sure you want to delete “${project.title}”? It is deleted for good, including its video in the cloud.`)) return;
+  await store.deleteProject(project);
+  for (const media of project.media) state.sources.delete(media.id);
+  requestSync(0);
+  showHome(state.homeView);
+}
+
+function projectMenu(id, anchor, point) {
+  const project = state.projects.find((p) => p.id === id);
+  if (!project) return;
+  openMenu([
+    { label: 'Rename', run: () => askName('Rename project', project.title, 'Rename', (name) => changeProject(id, (p) => { p.title = name; })) },
+    { label: 'Move to folder…', run: () => moveDialog(project) },
+    ...(project.folderId ? [{ label: 'Remove from folder', run: () => changeProject(id, (p) => { delete p.folderId; }) }] : []),
+    { label: 'Show stats', run: () => statsDialog(project) },
+    '-',
+    { label: 'Delete', danger: true, run: () => deleteProjectNow(id) },
+  ], anchor, point);
+}
+
+function folderMenu(id, anchor, point) {
+  const folder = state.folders.find((f) => f.id === id);
+  if (!folder) return;
+  openMenu([
+    { label: 'Rename folder', run: () => askName('Rename folder', folder.name, 'Rename', async (name) => { await store.saveFolder({ ...folder, name }); showHome(state.homeView); }) },
+    { label: 'Delete folder', danger: true, run: () => deleteFolder(folder) },
+  ], anchor, point);
+}
+
+/** A one-field dialog: used to name or rename projects and folders. */
+function askName(title, value, action, done) {
+  openDialog(`<form id="name-form" class="stack"><h2>${esc(title)}</h2>
+    <input name="name" value="${esc(value)}" maxlength="100" aria-label="Name" autocomplete="off">
+    <div class="row end"><button type="button" class="button ghost" data-action="close">Cancel</button><button class="button primary">${esc(action)}</button></div></form>`);
+  const input = $('#name-form input');
+  input.select();
+  $('#name-form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const name = input.value.trim();
+    if (!name) return;
+    closeDialog();
+    done(name);
+  });
+}
+
+function newFolder(then = null) {
+  askName('New folder', '', 'Create', async (name) => {
+    const folder = { id: uuid(), owner: userId(), name, created: new Date().toISOString() };
+    await store.saveFolder(folder);
+    if (then) await then(folder);
+    else showHome(state.homeView);
+  });
+}
+
+function moveDialog(project) {
+  const rows = state.folders.map((f) => `<button class="choice-row ${f.id === project.folderId ? 'on' : ''}" data-move="${esc(f.id)}">${folderIcon}<span>${esc(f.name)}</span>${f.id === project.folderId ? '<span class="muted small">current</span>' : ''}</button>`).join('');
+  openDialog(`<div class="stack"><h2>Move to folder</h2><p class="muted small">${esc(project.title)}</p>
+    <div class="stack">${rows || '<p class="muted small">No folders yet.</p>'}</div>
+    <button class="button ghost" data-move="new">New folder…</button>
+    <div class="row end"><button class="button ghost" data-action="close">Cancel</button></div></div>`);
+  $('#dialog').querySelectorAll('[data-move]').forEach((button) => button.addEventListener('click', () => {
+    closeDialog();
+    if (button.dataset.move === 'new') newFolder((folder) => changeProject(project.id, (p) => { p.folderId = folder.id; }));
+    else changeProject(project.id, (p) => { p.folderId = button.dataset.move; });
+  }));
+}
+
+async function deleteFolder(folder) {
+  if (!confirm(`Delete the folder “${folder.name}”? Its projects go back to Projects.`)) return;
+  for (const project of state.projects.filter((p) => p.folderId === folder.id)) {
+    delete project.folderId;
+    await store.saveProject(project, { touch: false });
+  }
+  await store.deleteFolder(folder.id);
+  showHome();
+}
+
+function statsDialog(project) {
+  const total = (list, key) => list.reduce((sum, item) => sum + (item[key] ?? 0), 0);
+  const sizes = [...new Set(project.media.map((m) => `${m.width} × ${m.height}`))];
+  const rows = [
+    ['Shorts', project.segments.length],
+    ['Total length of Shorts', clock(total(project.segments, 'duration'))],
+    ['Exported videos', project.exported ?? 0],
+    ['Source videos', project.media.length],
+    ['Source length', clock(total(project.media, 'duration'))],
+    ['Resolution', sizes.join(', ') || '—'],
+    ['Created', dateText(project.created)],
+    ['Size on disk', bytes(total(project.media, 'size'))],
+  ];
+  openDialog(`<div class="stack"><h2>${esc(project.title)}</h2><dl class="stats">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
+    <div class="row end"><button class="button primary" data-action="close">OK</button></div></div>`);
+}
+
+// Right-click on a card or folder opens the same menu as its ⋯ button.
+document.addEventListener('contextmenu', (event) => {
+  const project = event.target.closest('[data-project]'), folder = event.target.closest('[data-folder]');
+  if (!project && !folder) return;
+  event.preventDefault();
+  const point = { x: event.clientX, y: event.clientY };
+  if (project) projectMenu(project.dataset.project, null, point);
+  else folderMenu(folder.dataset.folder, null, point);
+});
+document.addEventListener('mousedown', (event) => { if (!event.target.closest('#menu')) closeMenu(); });
+
+// Dragging a project onto a folder moves it there.
+let dragged = null;
+document.addEventListener('dragstart', (event) => {
+  const card = event.target.closest?.('[data-project]');
+  if (!card) return;
+  dragged = card.dataset.project;
+  event.dataTransfer.setData('text/plain', dragged);
+  event.dataTransfer.effectAllowed = 'move';
+});
+document.addEventListener('dragend', () => { dragged = null; for (const tile of document.querySelectorAll('.folder-tile.over')) tile.classList.remove('over'); });
+document.addEventListener('dragover', (event) => {
+  const tile = event.target.closest?.('[data-folder]');
+  if (dragged && tile) { event.preventDefault(); tile.classList.add('over'); }
+});
+document.addEventListener('dragleave', (event) => event.target.closest?.('[data-folder]')?.classList.remove('over'));
+document.addEventListener('drop', (event) => {
+  const tile = event.target.closest?.('[data-folder]');
+  if (!dragged || !tile) return;
+  event.preventDefault();
+  const id = dragged;
+  dragged = null;
+  changeProject(id, (p) => { p.folderId = tile.dataset.folder; });
+});
+
+// Dropping a video anywhere on Home or on the first Create step starts Shorts from it.
+let dragDepth = 0;
+const dropAllowed = () => state.session && (state.screen === 'home' || (state.screen === 'create' && state.create?.step === 1));
+const hasFiles = (event) => [...(event.dataTransfer?.types ?? [])].includes('Files');
+document.addEventListener('dragenter', (event) => {
+  if (!hasFiles(event) || !dropAllowed()) return;
+  event.preventDefault();
+  dragDepth++;
+  $('#drop-overlay').hidden = false;
+});
+document.addEventListener('dragover', (event) => { if (hasFiles(event)) event.preventDefault(); });
+document.addEventListener('dragleave', () => {
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) $('#drop-overlay').hidden = true;
+});
+document.addEventListener('drop', (event) => {
+  if (!hasFiles(event)) return;
+  event.preventDefault();
+  dragDepth = 0;
+  $('#drop-overlay').hidden = true;
+  const file = [...event.dataTransfer.files].find((f) => f.type.startsWith('video/') || !f.type);
+  if (file && dropAllowed()) startCreate({ file });
+});
+
+// MARK: Create Shorts (five steps: video, settings, captions, content type, then the run)
+
+const LENGTHS = [[0, 'Auto'], [15, '15 seconds'], [30, '30 seconds'], [45, '45 seconds'], [60, '60 seconds'], [90, '90 seconds']];
+
+function startCreate({ project = null, media = null, file = null } = {}) {
+  setScreen('create');
+  state.create = {
+    step: media ? 2 : 1, project, media, count: 4, duration: 45, region: 'entireVideo', customStart: 0,
+    customEnd: media ? Math.round(media.duration / 6) / 10 : 0, style: 'auto', videoType: 'auto', busy: false, error: '',
+  };
+  if (file) chooseVideo(file);
+  else renderCreate();
+}
+
+async function chooseVideo(file) {
+  const c = state.create;
+  c.error = '';
+  c.busy = true;
+  renderCreate();
+  try {
+    // A video chosen before and never used for Shorts leaves nothing behind.
+    if (c.project && c.project.segments.length === 0) await store.deleteProject(c.project);
+    const project = { id: uuid(), owner: userId(), title: file.name.replace(/\.[^.]+$/, ''), created: new Date().toISOString(), media: [], segments: [], transcripts: {} };
+    const media = await importMedia(project, file);
+    await store.saveProject(project);
+    Object.assign(c, { project, media, customEnd: Math.round(media.duration / 6) / 10, step: 2 });
+  } catch (error) {
+    c.error = error.message || 'That file is not a video this browser can read.';
+  }
+  c.busy = false;
+  renderCreate();
+}
+
+/** Why the custom range can't be used, or null when it can. */
+function rangeProblem(c) {
+  if (c.region !== 'custom') return null;
+  const total = c.media.duration / 60;
+  return c.customStart >= 0 && c.customEnd > c.customStart && c.customEnd <= total + 0.01 ? null : `Choose a range inside the video: from 0 to ${total.toFixed(2)} minutes, with the end after the start.`;
+}
+
+function renderCreate() {
+  const c = state.create;
+  setUrl(`/app/create/${CREATE_STEPS[c.step - 1]}`);
+  const eyebrow = (n, label) => `<p class="eyebrow">Step ${n} of 5 · ${label}</p>`;
+  const back = `<button class="link back" data-action="home">← Back to Home</button>`;
+  let html;
+  if (c.step === 1) {
+    html = `${eyebrow(1, 'Choose video')}<h2 class="big">Choose a video</h2>
+      <p class="muted">Prism keeps the video in this browser and saves it to your account, so the project opens on any device you sign in on. Prism AI reads its audio and some frames.</p>
+      <label class="drop-card ${c.busy ? 'busy' : ''}"><input id="pick" type="file" accept="video/*" hidden ${c.busy ? 'disabled' : ''}>
+        <span class="drop-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 16V4m-5 5 5-5 5 5M5 20h14"/></svg></span>
+        <strong>${c.busy ? 'Reading the video…' : 'Drop a video here'}</strong>
+        ${c.busy ? '' : '<span class="muted small">or</span><span class="button primary">Choose a video</span>'}</label>
+      ${c.error ? `<p class="error" role="alert">${esc(c.error)}</p>` : ''}${back}`;
+  } else if (c.step === 2) {
+    const m = c.media;
+    const problem = rangeProblem(c);
+    const where = { entireVideo: 'the entire video', firstHalf: 'the first half', lastHalf: 'the last half', custom: 'the chosen range' }[c.region];
+    const many = c.count > 0 ? `up to ${c.count} distinct moments` : 'as many distinct moments as are strong (about one per minute)';
+    const long = c.duration > 0 ? `of about ${c.duration} seconds` : 'as long as each story needs';
+    html = `${eyebrow(2, 'Set up Shorts')}<h2 class="big">Choose your Short settings</h2><p class="muted">Your video is ready. Choose how to turn it into Shorts.</p>
+      <div class="panel"><p class="file-line"><span class="tick">✓</span> ${esc(m.name)}</p>
+        <p class="muted">Video duration: ${clock(m.duration)} · ${(m.duration / 60).toFixed(2)} minutes</p>
+        <button class="button ghost" data-create="different">Choose a different video</button></div>
+      <div class="panel"><p class="muted small">Shorts settings</p>
+        <div class="settings-row">
+          <div><span class="muted small">How many</span>
+            <span class="stepper"><button class="button ghost" data-create="less" aria-label="Fewer Shorts">−</button><strong>${c.count > 0 ? `${c.count} ${c.count === 1 ? 'Short' : 'Shorts'}` : 'Auto'}</strong><button class="button ghost" data-create="more" aria-label="More Shorts">+</button></span></div>
+          <label>Approx. length <select id="length">${LENGTHS.map(([v, t]) => `<option value="${v}" ${v === c.duration ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+          <label>Take clips from <select id="region">${Object.entries(REGION_TITLES).map(([k, t]) => `<option value="${k}" ${k === c.region ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+        </div>
+        ${c.region === 'custom' ? `<div class="settings-row"><label>Start (minutes) <input id="from" type="number" min="0" step="0.1" value="${c.customStart}"></label>
+          <label>End (minutes) <input id="to" type="number" min="0" step="0.1" value="${c.customEnd}"></label></div>
+          <p class="muted small">${problem ? esc(problem) : `Analyze ${clock(c.customStart * 60)} to ${clock(c.customEnd * 60)} · ${clock((c.customEnd - c.customStart) * 60)} selected`}</p>` : ''}
+        <p class="muted small">Prism will analyze frames and available speech, then suggest ${many} ${long} in ${where}. Review every pick before exporting.</p></div>
+      <button class="button primary" data-create="next" ${problem ? 'disabled' : ''}>Next: Choose captions →</button>${back}`;
+  } else if (c.step === 3) {
+    html = `${eyebrow(3, 'Choose captions')}<h2 class="big">Choose your captions</h2><p class="muted">Pick how spoken words appear. You can change this for each Short later.</p>
+      <div class="cards">${CAPTION_STYLES.map((s) => `<button class="choice ${s === c.style ? 'on' : ''}" data-style="${s}"><canvas class="style-preview" data-preview="${s}" aria-hidden="true"></canvas><strong>${STYLE_TITLES[s]}</strong><span class="muted small">${STYLE_DETAILS[s]}</span></button>`).join('')}</div>
+      <div class="row"><button class="button primary" data-create="next">Next: Choose content type →</button><button class="link" data-create="prev">← Back</button></div>`;
+  } else {
+    html = `${eyebrow(4, 'Choose content type')}<h2 class="big">What kind of video is it?</h2><p class="muted">This tunes how Prism picks moments and frames them.</p>
+      <div class="cards">${VIDEO_TYPES.map((t) => `<button class="choice ${t === c.videoType ? 'on' : ''}" data-type="${t}"><strong>${VIDEO_TYPE_TITLES[t]}</strong><span class="muted small">${VIDEO_TYPE_DETAILS[t]}</span></button>`).join('')}</div>
+      <div class="row"><button class="button primary" data-create="make">Make Shorts</button><button class="link" data-create="prev">← Back</button></div>`;
+  }
+  $('#app').innerHTML = `<section class="create">${html}</section>`;
+  for (const canvas of document.querySelectorAll('[data-preview]')) stylePreview(canvas, canvas.dataset.preview);
+  $('#pick')?.addEventListener('change', (event) => event.target.files[0] && chooseVideo(event.target.files[0]));
+  $('#length')?.addEventListener('change', (event) => { c.duration = Number(event.target.value); renderCreate(); });
+  $('#region')?.addEventListener('change', (event) => { c.region = event.target.value; renderCreate(); });
+  for (const [id, key] of [['#from', 'customStart'], ['#to', 'customEnd']]) {
+    $(id)?.addEventListener('change', (event) => { c[key] = Number(event.target.value) || 0; renderCreate(); });
+  }
+}
+
+async function createAction(action) {
+  const c = state.create;
+  if (!c) return;
+  if (action === 'less') c.count = Math.max(0, c.count - 1);
+  else if (action === 'more') c.count = Math.min(Shorts.MAX_SHORTS, c.count + 1);
+  else if (action === 'prev') c.step -= 1;
+  else if (action === 'next') c.step += 1;
+  else if (action === 'different') {
+    // An import that never made Shorts leaves nothing behind.
+    if (c.project && c.project.segments.length === 0) await store.deleteProject(c.project);
+    Object.assign(c, { step: 1, project: null, media: null, error: '' });
+  } else if (action === 'make') {
+    state.project = c.project;
+    makeShorts(c.media, {
+      count: c.count, duration: c.duration, region: c.region, videoType: c.videoType, captionStyle: c.style,
+      customStart: c.customStart * 60, customEnd: c.customEnd * 60,
+    });
+    return;
+  }
+  renderCreate();
+}
+
+// MARK: Settings (Account, Overview, Usage): the website's dashboard, now inside the app. No plans or prices for now.
+
+const SETTINGS_TABS = ['account', 'overview', 'usage'];
+const count = new Intl.NumberFormat();
+const lengthText = (seconds) => { const s = Math.round(seconds); return s >= 60 ? `${count.format(Math.floor(s / 60))}m ${s % 60}s` : `${s}s`; };
+
+/** Totals over the whole export history, and the latest 50 rows for the table. Row level security returns only this account's. */
+async function loadExports() {
+  const totals = { exports: 0, shorts: 0, seconds: 0, latest: [] };
+  for (let from = 0; from < 100_000; from += 1000) {
+    const { data, error } = await db().from('exports').select('id, created_at, short_count, seconds, quality')
+      .order('created_at', { ascending: false }).order('id', { ascending: false }).range(from, from + 999);
+    if (error) throw error;
+    for (const row of data) {
+      totals.exports += 1; totals.shorts += row.short_count; totals.seconds += row.seconds;
+      if (totals.latest.length < 50) totals.latest.push(row);
+    }
+    if (data.length < 1000) break;
+  }
+  return totals;
+}
+
+const syncText = (s) => ({
+  idle: 'Waiting to sync…', syncing: 'Syncing…', unavailable: s.message, error: `Sync failed: ${s.message}`,
+  ok: `Up to date${s.last ? ` · ${s.last.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}`,
+}[s.state]);
+onSyncStatus((s) => { const el = $('#sync-text'); if (el) el.textContent = syncText(s); });
+
+async function showSettings(tab = state.settingsTab ?? 'account') {
+  // Old addresses: the export history moved into Overview, and plans are switched off for now.
+  if (tab === 'exports' || tab === 'plans') tab = 'overview';
+  if (!SETTINGS_TABS.includes(tab)) tab = 'account';
+  state.settingsTab = tab;
+  setScreen('settings');
+  setUrl(`/app/settings/${tab}`);
+  if (state.session && tab === 'usage') await refreshUsage();
+  const u = state.usage;
+  const email = state.session?.user?.email;
+  const used = u ? `${Math.ceil(u.used)} of ${Math.floor(u.allowance)} min used` : 'Minutes used';
+  const NAV = [
+    ['account', 'Account', email ?? 'Sign in to track your stats', '<path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0"/>', 'Your Prism account.'],
+    ['overview', 'Overview', 'Stats and exports', '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>', 'What you have made with Prism, and your exports.'],
+    ['usage', 'Usage', used, '<path d="M5 18a8 8 0 1 1 14 0M12 18l4-6"/>', 'Minutes of video you can make Shorts from, and your space for videos in the cloud.'],
+  ];
+  const nav = NAV.map(([id, title, detail, icon]) => `<button class="settings-item" data-action="settings-tab" data-tab="${id}" ${tab === id ? 'aria-current="page"' : ''}>
+      <svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg><span><strong>${title}</strong><span class="muted small">${esc(detail)}</span></span></button>`).join('');
+  const [, title, , , blurb] = NAV.find(([id]) => id === tab);
+  let body;
+  if (tab === 'usage') {
+    const percent = u ? Math.min(100, u.used / u.allowance * 100) : 0;
+    body = `<div class="box">
+        <div class="big-number"><b>${u ? Math.ceil(u.used) : '—'}</b><span>${u ? `of ${Math.floor(u.allowance)} minutes used` : state.session ? 'Usage is unavailable. Check your connection and try again.' : 'Sign in to see usage.'}</span></div>
+        <div class="meter ${percent >= 85 ? 'warn' : ''}"><div style="width:${percent}%"></div></div>
+        ${u ? `<p class="muted small">${Math.max(0, Math.floor(u.allowance - u.used))} minutes left.</p>` : ''}
+        <p class="muted small">Every account gets 60 minutes of video to make Shorts from. A video you already used doesn't count again; making Shorts from it again uses half of its length.</p>
+      </div>
+      ${email ? `<div class="box"><strong>Videos in the cloud</strong><p id="cloud-video-text">Checking…</p><div class="meter"><div id="cloud-video-bar"></div></div>
+        <p class="muted small">Videos you add are saved to your account too, so a project opens on any device without choosing the file again. The same video is stored once, however many projects use it. When a new video doesn’t fit, Prism asks before deleting your oldest cloud videos. A video bigger than all your space stays on its device.</p>
+        <button class="button ghost" id="retry-upload" data-action="retry-upload" hidden>Try uploading again</button></div>` : ''}
+      <form id="promo-form" class="box">
+        <label for="promo-code"><strong>Promo code</strong><span class="muted small">Need more minutes? Ask for a promo code, then enter it here.</span></label>
+        <div class="row"><input id="promo-code" name="code" placeholder="Enter code" autocomplete="off"><button class="button primary">Redeem</button></div>
+        <p id="promo-status" class="muted small" role="status"></p>
+      </form>`;
+  } else if (tab === 'overview') {
+    body = `<div class="stat-row"><div class="stat"><b id="stat-exports">—</b><span>Exports</span></div><div class="stat"><b id="stat-shorts">—</b><span>Shorts made</span></div><div class="stat"><b id="stat-minutes">—</b><span>Minutes of Shorts</span></div></div>
+      <h3 class="section-title">Export history</h3>
+      <div class="box flush"><div class="table-wrap"><table><thead><tr><th scope="col">Date</th><th scope="col">Shorts</th><th scope="col">Length</th><th scope="col">Quality</th></tr></thead><tbody id="export-rows"></tbody></table></div></div>
+      <p id="stats-note" class="muted small" role="status">Loading your export history…</p>`;
+  } else {
+    body = `<div class="box">
+        <div class="who"><span class="avatar" aria-hidden="true">${esc((email ?? '?')[0].toUpperCase())}</span><div><strong>${email ? esc(email) : 'Not signed in'}</strong><span class="muted small">${email ? 'Signed in' : 'Sign in to track your stats'}</span></div></div>
+        <p class="muted small">Your projects, Shorts and videos are saved to your account, and each export adds its date, number of Shorts, length and quality to your stats under Overview.</p>
+        ${email ? '<div class="row"><button class="button ghost" data-action="signout">Sign out</button><button class="button ghost danger" data-action="delete-account">Delete account</button></div><p id="delete-account-note" class="error small" role="alert"></p>' : ''}
+      </div>
+      ${email ? `<div class="box"><strong>Cloud sync</strong><p id="sync-text">${esc(syncText(syncStatus()))}</p>
+        <p class="muted small">Your projects, folders, Shorts and edits are saved to your account, so you can open them on any device you sign in on. Their videos are kept in the cloud too: see Usage.</p>
+        <button class="button ghost" data-action="sync-now">Sync now</button></div>` : ''}`;
+  }
+  $('#app').innerHTML = `<section class="settings-layout">
+    <nav class="settings-nav" aria-label="Settings categories">${nav}</nav>
+    <div class="settings-content"><header class="set-head"><h2>${title}</h2><p class="muted">${blurb}</p></header>${body}</div></section>`;
+  $('#promo-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const code = new FormData(event.currentTarget).get('code').trim();
+    if (!code) return;
+    const { error } = await db().rpc('redeem_promo', { p_code: code });
+    $('#promo-status').textContent = error ? error.message : 'Promo code added. Your allowance is updated.';
+    if (!error) { await refreshUsage(); showSettings('usage'); }
+  });
+  if (state.session && tab === 'overview') fillAccountData(tab);
+  if (tab === 'usage' && email) fillCloudVideo();
+}
+
+/** Loads what the dashboard used to show. Each piece fills in when it arrives, and is dropped if the person has moved to another tab. */
+async function fillAccountData(tab) {
+  const current = () => state.screen === 'settings' && state.settingsTab === tab;
+  const text = (id, value) => { const el = $(id); if (el && current()) el.textContent = value; };
+  try {
+    const totals = await loadExports();
+    if (!current()) return;
+    text('#stat-exports', count.format(totals.exports));
+    text('#stat-shorts', count.format(totals.shorts));
+    text('#stat-minutes', (totals.seconds / 60).toLocaleString(undefined, { maximumFractionDigits: 1 }));
+    text('#stats-note', totals.exports === 0 ? 'Your exported Shorts will appear here.'
+      : totals.exports > 50 ? 'Showing your latest 50 exports. The numbers above include your full history.' : '');
+    const rows = $('#export-rows');
+    if (rows) {
+      const quality = { full: 'Full', compact: 'Compact', small: 'Small' };
+      rows.innerHTML = totals.latest.map((row) => `<tr><td title="${esc(new Date(row.created_at).toLocaleString())}">${esc(new Date(row.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }))}</td>
+        <td class="num">${count.format(row.short_count)}</td><td class="num">${lengthText(row.seconds)}</td><td>${esc(quality[row.quality] ?? row.quality)}</td></tr>`).join('');
+    }
+  } catch (error) {
+    text('#stats-note', `Couldn’t load your stats. ${error?.message || 'Try again in a moment.'}`);
+  }
 }
 
 // MARK: Projects and media
@@ -163,7 +782,7 @@ function wireDropzone(zone, onFile) {
 async function importMedia(project, file) {
   const source = await openSource(file);
   const media = {
-    id: uuid(), name: file.name, size: file.size, lastModified: file.lastModified, duration: source.duration,
+    id: uuid(), name: file.name, mime: file.type, size: file.size, lastModified: file.lastModified, duration: source.duration,
     width: source.width, height: source.height, hasAudio: source.hasAudio, contentHash: null, thumbnail: null,
     created: new Date().toISOString(),
   };
@@ -174,29 +793,251 @@ async function importMedia(project, file) {
   return media;
 }
 
-async function createProject(file) {
-  const notice = $('#notice');
-  if (notice) notice.textContent = 'Reading the video…';
-  try {
-    const project = { id: uuid(), title: file.name.replace(/\.[^.]+$/, ''), created: new Date().toISOString(), media: [], segments: [], transcripts: {} };
-    await importMedia(project, file);
-    await store.saveProject(project);
-    await openProject(project.id);
-  } catch (error) {
-    if (notice) notice.textContent = error.message || 'That file is not a video this browser can read.';
-    else alert(error.message);
-  }
-}
-
-async function openProject(id) {
+async function openProject(id, shortPart = null) {
   const project = await store.loadProject(id);
   if (!project) return showHome();
+  const missing = [];
+  for (const media of project.media) if (!(await store.hasFile(media.id))) missing.push(media);
+  if (missing.length) return attachVideo(project, missing[0], shortPart);
   state.project = project;
-  state.selectedId = project.segments[0]?.id ?? null;
+  // An address like .../short-3 opens that Short; otherwise the first one.
+  const wanted = /^short-(\d+)$/.exec(shortPart ?? '')?.[1];
+  state.selectedId = (wanted && project.segments[Number(wanted) - 1] ? project.segments[Number(wanted) - 1] : project.segments[0])?.id ?? null;
   state.undo = [];
   for (const media of project.media) await sourceFor(media).catch(() => null);
   renderEditor();
   if (state.selectedId) selectShort(state.selectedId);
+}
+
+/** A project made on another device has no video here yet: choose the same file again. It is checked against the fingerprint saved with the project. */
+async function attachVideo(project, media, shortPart, note = '') {
+  await showHome(state.homeView);
+  if (media.cloud?.uploaded && userId()) return fetchFromCloud(project, media, shortPart);
+  const minutes = Math.round(media.duration / 6) / 10;
+  openDialog(`<div class="stack"><h2>Add the video to this device</h2>
+    <p>“${esc(project.title)}” was made on another device, and its video isn’t here yet. Choose <strong>${esc(media.name)}</strong> (${minutes} min) again to open it. The video stays on this device only.</p>
+    <label class="button primary attach">Choose the video<input id="attach" type="file" accept="video/*" hidden></label>
+    <p id="attach-status" class="muted small" role="status">${esc(note)}</p>
+    <div class="row end"><button class="button ghost" data-action="close">Cancel</button></div></div>`);
+  $('#attach').addEventListener('change', async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    const status = $('#attach-status');
+    status.textContent = 'Checking the video…';
+    try {
+      const source = await openSource(file);
+      if (!(await sameVideo(media, file))) {
+        status.textContent = 'That isn’t the same video this project was made from. Choose the original file.';
+        event.target.value = '';
+        return;
+      }
+      await store.saveFile(media.id, file);
+      state.sources.set(media.id, source);
+      closeDialog();
+      openProject(project.id, shortPart);
+    } catch (error) {
+      status.textContent = 'That file can’t be read as a video. Choose the original file.';
+    }
+  });
+}
+
+let downloadAbort = null;
+/** The project's video is in the account's cloud storage: download it once, then it is kept on this device. */
+async function fetchFromCloud(project, media, shortPart) {
+  const controller = new AbortController();
+  downloadAbort = controller;
+  openDialog(`<div class="stack"><h2>Getting the video</h2>
+    <p>Downloading <strong>${esc(media.name)}</strong> from your account. It is kept on this device afterwards.</p>
+    <div class="bar"><div id="dl-bar" style="width:0%"></div></div><p id="dl-text" class="muted small" role="status">Starting…</p>
+    <div class="row end"><button class="button ghost" data-action="close">Cancel</button></div></div>`);
+  try {
+    const blob = await downloadVideo({
+      token: accessToken, mediaId: media.cloud.key ?? media.id, type: media.mime || 'video/mp4', signal: controller.signal,
+      onProgress: (fraction) => { const bar = $('#dl-bar'); if (bar) { bar.style.width = `${Math.round(fraction * 100)}%`; $('#dl-text').textContent = `${Math.round(fraction * 100)}% of ${bytes(media.size)}`; } },
+    });
+    const file = new File([blob], media.name, { type: blob.type, lastModified: media.lastModified });
+    const source = await openSource(file);
+    await store.saveFile(media.id, file);
+    state.sources.set(media.id, source);
+    downloadAbort = null;
+    closeDialog();
+    openProject(project.id, shortPart);
+  } catch (error) {
+    if (controller.signal.aborted) return;
+    downloadAbort = null;
+    // The cloud copy can't be had right now: choosing the file works as before.
+    attachVideo(project, { ...media, cloud: null }, shortPart, `It couldn’t be downloaded (${error.message}). Choose the file instead.`);
+  }
+}
+
+// MARK: Videos in the cloud (upload after sync, removal, and the sidebar progress)
+
+let uploading = false, videoBlock = null;
+function showUpload(text, fraction = 0) {
+  const box = $('#upload-status');
+  if (!box) return;
+  box.hidden = text === null;
+  if (text !== null) { $('#upload-text').textContent = `${text} · ${Math.round(fraction * 100)}%`; $('#upload-bar').style.width = `${Math.round(fraction * 100)}%`; }
+}
+
+/** Sends each video that is on this device and has never been sent, one at a time. A video is stored once under its fingerprint, so a
+ * second project with the same file just links to it. A video that was too big, that the person chose not to make room for, or that
+ * was later removed to make room stays on its devices and is not sent again. */
+async function uploadPending() {
+  if (uploading || videoBlock || !userId()) return;
+  uploading = true;
+  try {
+    await shareDuplicates();
+    for (const project of (await store.listProjects()).filter(isMine)) {
+      for (const media of project.media) {
+        if (media.cloud) continue;
+        const file = await store.loadFile(media.id);
+        if (!file) continue;
+        if (!media.contentHash) await ensureHashes(project);
+        const key = media.contentHash ?? media.id;
+        const twin = (await store.listProjects()).filter(isMine).flatMap((p) => p.media)
+          .find((m) => m.id !== media.id && m.contentHash && m.contentHash === media.contentHash && m.cloud?.uploaded);
+        if (twin) { await setCloud(project.id, media.id, { uploaded: true, bytes: file.size, key: twin.cloud.key ?? twin.id }); continue; }
+        const label = `Uploading “${media.name}”`;
+        showUpload(label, 0);
+        try {
+          const { evicted } = await uploadVideo({
+            token: accessToken, media: { ...media, id: key }, file, onProgress: (fraction) => showUpload(label, fraction),
+            askRoom: (evict, cap) => askRoom(media, file, evict, cap),
+          });
+          await markRemoved(evicted);
+          await setCloud(project.id, media.id, { uploaded: true, bytes: file.size, key });
+        } catch (error) {
+          if (!(error instanceof CloudVideoError)) throw error;
+          await markRemoved(error.evicted);
+          if (error.kind === 'too_big') await setCloud(project.id, media.id, { tooBig: true });
+          else if (error.kind === 'declined') await setCloud(project.id, media.id, { declined: true });
+          else throw error;
+        }
+      }
+    }
+  } catch (error) {
+    if (error instanceof CloudVideoError && error.kind === 'unavailable') videoBlock = error;
+    else { console.warn('Video upload paused:', error); setTimeout(uploadPending, 60_000); }
+  } finally {
+    uploading = false;
+    showUpload(null);
+    if ($('#cloud-video-text')) fillCloudVideo();
+  }
+}
+
+/** Earlier uploads stored each project's copy separately: projects with the same video now share one stored copy, and the extra
+ * copies are removed from the cloud. */
+async function shareDuplicates() {
+  const byHash = new Map();
+  for (const project of (await store.listProjects()).filter(isMine)) {
+    for (const media of project.media) {
+      if (!media.cloud?.uploaded || !media.contentHash) continue;
+      if (!byHash.has(media.contentHash)) byHash.set(media.contentHash, []);
+      byHash.get(media.contentHash).push({ project, media });
+    }
+  }
+  let extra = false;
+  for (const uses of byHash.values()) {
+    const keys = [...new Set(uses.map(({ media }) => media.cloud.key ?? media.id))];
+    if (keys.length < 2) continue;
+    for (const { project, media } of uses) if ((media.cloud.key ?? media.id) !== keys[0]) await setCloud(project.id, media.id, { ...media.cloud, key: keys[0] });
+    for (const key of keys.slice(1)) store.rememberDeletion('videos', `${userId()}/${key}`);
+    extra = true;
+  }
+  if (extra) await removePendingVideos();
+}
+
+/** Records what happened to a project's video in the cloud; sync tells the other devices. */
+async function setCloud(projectId, mediaId, cloud) {
+  const project = await store.loadProject(projectId);
+  const entry = project?.media.find((m) => m.id === mediaId);
+  if (!entry) return;
+  // `at` lets two devices that recorded different outcomes agree on the newest one.
+  entry.cloud = { ...cloud, at: new Date().toISOString() };
+  await store.saveProject(project, { touch: false });
+}
+
+/** Videos removed to make room: their projects remember it, so no device waits for them or sends them again. */
+async function markRemoved(keys = []) {
+  if (!keys.length) return;
+  for (const project of (await store.listProjects()).filter(isMine)) {
+    for (const media of project.media) if (media.cloud?.uploaded && keys.includes(media.cloud.key ?? media.id)) await setCloud(project.id, media.id, { removed: true });
+  }
+}
+
+/** The warning before old videos are deleted from the cloud. Resolves true (delete them), false (keep them) or null (ask later). */
+let dialogAnswer = null;
+async function askRoom(media, file, evict, cap) {
+  if (state.dialog || state.task) return null;
+  const names = new Map();
+  // Stored copies are named by fingerprint; every project that uses one is listed.
+  for (const project of (await store.listProjects()).filter(isMine)) {
+    for (const m of project.media) {
+      if (!m.cloud?.uploaded) continue;
+      const key = m.cloud.key ?? m.id;
+      names.set(key, names.has(key) ? `${names.get(key)}, ${project.title}` : `${project.title} · ${m.name}`);
+    }
+  }
+  return new Promise((resolve) => {
+    openDialog(`<div class="stack"><h2>Not enough cloud space</h2>
+      <p>Your cloud space is ${bytes(cap)}. To keep <strong>${esc(media.name)}</strong> (${bytes(file.size)}) in the cloud, Prism has to delete your oldest videos from it:</p>
+      <ul class="evict-list">${evict.map((v) => `<li><span>${esc(names.get(v.mediaId) ?? 'An older video')}</span><span class="muted small">${bytes(v.bytes)}</span></li>`).join('')}</ul>
+      <p class="muted small">Only the cloud copies are deleted. Projects stay, and devices that already have these videos keep them; other devices will need the file again.</p>
+      <div class="row end"><button class="button ghost" id="room-keep">Keep them</button><button class="button primary" id="room-delete">Delete them and upload</button></div></div>`);
+    dialogAnswer = resolve;
+    const answer = (value) => { dialogAnswer = null; closeDialog(); resolve(value); };
+    $('#room-keep').addEventListener('click', () => answer(false));
+    $('#room-delete').addEventListener('click', () => answer(true));
+  });
+}
+
+async function removePendingVideos() {
+  const mine = [...store.pendingDeletes('videos')].filter((entry) => entry.startsWith(`${userId()}/`));
+  if (!mine.length) return;
+  // A stored video that another project still uses stays.
+  const inUse = new Set((await store.listProjects()).filter(isMine).flatMap((p) => p.media).filter((m) => m.cloud?.uploaded).map((m) => m.cloud.key ?? m.id));
+  const gone = mine.filter((entry) => !inUse.has(entry.split('/').pop()));
+  try {
+    if (gone.length) await removeVideos({ token: accessToken, mediaIds: gone.map((entry) => entry.split('/').pop()) });
+    store.deletionReached('videos', mine);
+  } catch (error) {
+    if (error instanceof CloudVideoError && error.kind === 'unavailable') return;
+    console.warn('Cloud video removal will retry:', error);
+  }
+}
+
+/** Settings > Usage: how much cloud video space is used, or why uploads are stopped. */
+async function fillCloudVideo() {
+  const text = $('#cloud-video-text');
+  if (!text) return;
+  $('#retry-upload').hidden = !videoBlock;
+  if (videoBlock) { text.textContent = videoBlock.message; return; }
+  try {
+    const { used, cap } = await cloudUsage({ token: accessToken });
+    if (!$('#cloud-video-text')) return;
+    text.textContent = `${bytes(used)} of ${bytes(cap)} used`;
+    $('#cloud-video-bar').style.width = `${Math.min(100, cap ? used / cap * 100 : 0)}%`;
+  } catch (error) {
+    if ($('#cloud-video-text')) text.textContent = error.message;
+  }
+}
+
+/** The same file by its fingerprint; files too big to fingerprint (or never fingerprinted) are matched by size. */
+async function sameVideo(media, file) {
+  if (media.contentHash && file.size <= 1.5e9) return hex(await crypto.subtle.digest('SHA-256', await file.arrayBuffer())) === media.contentHash;
+  return file.size === media.size;
+}
+
+/** Gives every video of a project the fingerprint another device will check a re-added file against. */
+async function ensureHashes(project) {
+  for (const media of project.media) {
+    if (media.contentHash || media.size > 1.5e9) continue;
+    const file = await store.loadFile(media.id);
+    if (!file) continue;
+    media.contentHash = hex(await crypto.subtle.digest('SHA-256', await file.arrayBuffer()));
+    await store.patch('projects', project.id, (record) => { const m = record.media.find((x) => x.id === media.id); if (m) m.contentHash = media.contentHash; });
+  }
 }
 
 async function sourceFor(media) {
@@ -232,56 +1073,12 @@ const hex = (buffer) => [...new Uint8Array(buffer)].map((b) => b.toString(16).pa
 
 // MARK: Making Shorts
 
-function openMakeDialog(mediaId = state.project.media[0]?.id) {
-  const media = state.project.media.find((m) => m.id === mediaId) ?? state.project.media[0];
-  if (!media) return;
-  const minutes = Math.round(media.duration / 60 * 10) / 10;
-  const styleOptions = CAPTION_STYLES.map((s) => `<option value="${s}">${STYLE_TITLES[s]}</option>`).join('');
-  const typeOptions = VIDEO_TYPES.map((t) => `<option value="${t}">${VIDEO_TYPE_TITLES[t]}</option>`).join('');
-  openDialog(`
-    <form id="make-form" class="stack">
-      <h2>Make Shorts</h2>
-      <p class="muted small">${esc(media.name)} · ${minutes} min</p>
-      <label>How many <select name="count"><option value="0">Auto (one per minute)</option>${[...Array(20)].map((_, i) => `<option value="${i + 1}">${i + 1}</option>`).join('')}</select></label>
-      <label>Length <select name="duration"><option value="0">Auto (each story's length)</option><option>15</option><option>30</option><option selected>45</option><option>60</option><option>90</option></select></label>
-      <label>Region <select name="region">${Object.entries(REGION_TITLES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
-      <div id="custom" class="row" hidden>
-        <label>From (min) <input name="customStart" type="number" min="0" step="0.1" value="0"></label>
-        <label>To (min) <input name="customEnd" type="number" min="0" step="0.1" value="${minutes}"></label>
-      </div>
-      <label>Kind of video <select name="videoType">${typeOptions}</select></label>
-      <p class="muted small" id="type-detail">${VIDEO_TYPE_DETAILS.auto}</p>
-      <label>Captions <select name="captionStyle">${styleOptions}</select></label>
-      <canvas class="style-preview" id="make-style" aria-label="Caption style preview"></canvas>
-      <div class="row end">
-        <button type="button" class="button ghost" data-action="close">Cancel</button>
-        <button class="button primary">Make Shorts</button>
-      </div>
-    </form>`);
-  const form = $('#make-form');
-  form.elements.region.addEventListener('change', (e) => { $('#custom').hidden = e.target.value !== 'custom'; });
-  form.elements.videoType.addEventListener('change', (e) => { $('#type-detail').textContent = VIDEO_TYPE_DETAILS[e.target.value]; });
-  const showStyle = () => stylePreview($('#make-style'), form.elements.captionStyle.value);
-  form.elements.captionStyle.addEventListener('change', showStyle);
-  showStyle();
-  form.addEventListener('submit', (event) => {
-    event.preventDefault();
-    const values = Object.fromEntries(new FormData(form));
-    const options = {
-      count: Number(values.count), duration: Number(values.duration), region: values.region, videoType: values.videoType,
-      captionStyle: values.captionStyle, customStart: Number(values.customStart) * 60, customEnd: Number(values.customEnd) * 60,
-    };
-    closeDialog();
-    makeShorts(media, options);
-  });
-}
-
 async function makeShorts(media, options) {
   if (state.task) return;
   if (options.region === 'custom' && !(options.customEnd > options.customStart && options.customEnd <= media.duration + 0.5)) {
     return showError('Choose a range inside the video', 'The end of the range must come after its start and fall inside the video.');
   }
-  if (!state.session) return showSignedOut('Sign in to make Shorts.');
+  if (!state.session) return renderGate();
   const task = beginTask('Preparing video…');
   let key, minutes, check;
   try {
@@ -339,7 +1136,13 @@ async function runShorts(media, options, key, minutes) {
   try {
     // The server refuses an over-limit run too; checking first spares a request that can't succeed.
     const { data: allowed } = await db().rpc('usage_allowed', { p_video: key, p_day: localDay(), p_minutes: minutes });
-    if (allowed === false) throw new GeminiError('usageLimit', 429);
+    if (allowed === false) {
+      await refreshUsage();
+      const u = state.usage;
+      const left = u ? Math.max(0, u.allowance - u.used) : null;
+      throw new GeminiError('usageLimit', 429, left === null ? null
+        : `This video is ${Math.ceil(minutes)} min long, but you have ${Math.floor(left)} of your ${Math.floor(u.allowance)} beta minutes left. A video you already used doesn't count again. Ask for a promo code to get more, then enter it in Settings › Usage.`);
+    }
     const results = await Shorts.analyze(source, configuration, {
       duration: options.duration, count: options.count, region: options.region, customStart: options.region === 'custom' ? options.customStart : null,
       customEnd: options.region === 'custom' ? options.customEnd : null, excluding: usedRanges, videoType: options.videoType, cachedTranscript: saved,
@@ -443,6 +1246,12 @@ function openDialog(html) {
   host.querySelector('input,select,button')?.focus();
 }
 function closeDialog() {
+  // A question closed without an answer (Esc, the backdrop) is asked again later.
+  const pending = dialogAnswer;
+  dialogAnswer = null;
+  pending?.(null);
+  downloadAbort?.abort();
+  downloadAbort = null;
   state.dialog = null;
   $('#dialog').hidden = true;
   $('#dialog').innerHTML = '';
@@ -454,47 +1263,98 @@ function showError(title, message, kind = '') {
 
 // MARK: Editor
 
+const mmss = (seconds) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+const sortedByScore = () => { try { return localStorage.getItem('prism-sort') === 'score'; } catch { return false; } };
+function toggleSort() {
+  const on = !sortedByScore();
+  try { localStorage.setItem('prism-sort', on ? 'score' : 'clips'); } catch { /* the choice just isn't remembered */ }
+  renderBin();
+}
+
 function renderEditor() {
   const project = state.project;
-  const shorts = project.segments.map((s, index) => {
-    const media = project.media.find((m) => m.id === s.mediaId);
-    const title = s.suggestedTitle || `${project.title} Short ${index + 1}`;
-    return `<li><button class="short ${s.id === state.selectedId ? 'on' : ''}" data-action="select" data-id="${s.id}">
-      <span class="short-title">${esc(title)}</span>
-      <span class="muted small">${clock(s.duration)} · ${esc(media?.name ?? '')}</span></button></li>`;
-  }).join('');
-  const bin = project.media.map((m) => `<li class="media"><img alt="" src="${m.thumbnail ?? ''}"><span class="small">${esc(m.name)}</span>
-      <button class="link" data-action="make" data-id="${m.id}">Make Shorts</button></li>`).join('');
+  setScreen('editor');
+  const shortNumber = project.segments.findIndex((s) => s.id === state.selectedId) + 1;
+  // Choosing another Short in the same project rewrites the address instead of adding a history entry.
+  setUrl(projectPath(project) + (shortNumber ? `/short-${shortNumber}` : ''), location.pathname.startsWith(projectPath(project)));
+  $('#export-button').disabled = project.segments.length === 0;
   $('#app').innerHTML = `
     <section class="editor">
-      <header class="bar-top">
-        <button class="link" data-action="home">← Projects</button>
-        <input id="title" class="title" value="${esc(project.title)}" aria-label="Project name">
-        <span id="usage-badge" class="muted small"></span>
-        <button class="button ghost" data-action="usage">Usage</button>
-        <button class="button ghost" data-action="undo" title="Undo (Ctrl+Z)">Undo</button>
-        <button class="button ghost" data-action="import-more">Add video</button>
-        <input id="import-more" type="file" accept="video/*" hidden>
-        <button class="button primary" data-action="export-dialog" ${project.segments.length ? '' : 'disabled'}>Export</button>
-      </header>
       <div class="panes">
-        <aside class="bin">
-          <h3>Videos</h3><ul class="plain">${bin}</ul>
-          <h3>Shorts</h3><ul class="plain">${shorts || '<li class="muted small">No Shorts yet. Use Make Shorts on a video.</li>'}</ul>
-        </aside>
+        <aside class="bin" id="bin"></aside>
         <main class="stage" id="stage"></main>
         <aside class="inspector" id="inspector"></aside>
       </div>
     </section>`;
-  $('#title').addEventListener('change', async (e) => { project.title = e.target.value.trim() || project.title; await persist(); });
-  $('#import-more').addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    try { await importMedia(project, file); await persist(); renderEditor(); } catch (error) { showError('Couldn’t add that video', error.message); }
-  });
-  renderUsage();
+  renderBin();
   renderTask();
   renderInspector();
+}
+
+/** The Shorts as cards, as in the desktop app: first frame, score, length, title and where in the video it starts. The star lists them
+ * best score first instead of in the order of the video. */
+function renderBin() {
+  const project = state.project, bin = $('#bin');
+  if (!project || !bin) return;
+  const byScore = sortedByScore();
+  const media = project.media[0];
+  const cards = Shorts.orderedShorts(project.segments, byScore).map((s) => {
+    const number = project.segments.indexOf(s) + 1;
+    const title = s.suggestedTitle || `${project.title} Short ${number}`;
+    return `<div class="short-card ${s.id === state.selectedId ? 'on' : ''}">
+        <button class="card-main" data-action="select" data-id="${s.id}">
+          <span class="card-thumb"><img alt="" data-thumb="${s.id}">${s.score ? `<span class="badge-score">✦ ${s.score}</span>` : ''}
+            <span class="card-meta"><span>▶ Short ${number}</span><span>${mmss(s.duration)}</span></span></span>
+          <span class="card-title">${esc(title)}</span>
+          <span class="card-sub">Starts at ${mmss(s.start)}</span>
+        </button>
+        <button class="card-remove" data-action="remove" data-id="${s.id}" aria-label="Remove Short ${number}" title="Remove">✕</button>
+      </div>`;
+  }).join('');
+  bin.innerHTML = `
+    <div class="shorts-head">
+      <h3>Shorts <span class="count">${project.segments.length}</span></h3><span class="spacer"></span>
+      <button class="star" data-action="sort" aria-pressed="${byScore}" title="${byScore ? 'Best score first. Click for the order of the video' : 'In the order of the video. Click for best score first'}" aria-label="Sort by score">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.7 5.7 6.3.8-4.6 4.3 1.2 6.2L12 17l-5.6 3 1.2-6.2L3 9.5l6.3-.8Z"/></svg></button>
+      ${media ? `<button class="create-more" data-action="make" data-id="${media.id}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2 5.5L19.5 10 14 12l-2 5.5L10 12l-5.5-2L10 8.5ZM19 16v4m-2-2h4"/></svg>Create more</button>` : ''}
+    </div>
+    <p class="source-line">${project.segments.length} ${project.segments.length === 1 ? 'Short' : 'Shorts'} from ${project.media.length === 1 ? esc(media.name) : `${project.media.length} videos`}</p>
+    ${cards ? `<div class="short-grid">${cards}</div>` : '<p class="muted small">No Shorts yet. Use Create more to make some.</p>'}`;
+  fillThumbs();
+}
+
+/** A Short's picture is its first frame in the source. Cards load theirs only when they scroll into view, and keep it. */
+const shortThumbs = new Map();
+async function shortThumb(segment) {
+  const key = `${segment.mediaId}|${segment.start}`;
+  if (shortThumbs.has(key)) return shortThumbs.get(key);
+  const source = await sourceFor(state.project.media.find((m) => m.id === segment.mediaId));
+  const image = await frameImage(source, segment.start + 0.05);
+  if (!image) return null;
+  const canvas = new OffscreenCanvas(320, 180);
+  const cover = Math.max(320 / image.width, 180 / image.height);
+  canvas.getContext('2d').drawImage(image, (320 - image.width * cover) / 2, (180 - image.height * cover) / 2, image.width * cover, image.height * cover);
+  const url = URL.createObjectURL(await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.8 }));
+  shortThumbs.set(key, url);
+  while (shortThumbs.size > 300) {
+    const oldest = shortThumbs.keys().next().value;
+    URL.revokeObjectURL(shortThumbs.get(oldest));
+    shortThumbs.delete(oldest);
+  }
+  return url;
+}
+
+const thumbObserver = new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    if (!entry.isIntersecting) continue;
+    const img = entry.target;
+    thumbObserver.unobserve(img);
+    const segment = state.project?.segments.find((s) => s.id === img.dataset.thumb);
+    if (segment) shortThumb(segment).then((url) => { if (url && img.isConnected) img.src = url; }).catch((error) => console.warn('Short thumbnail failed:', error));
+  }
+}, { rootMargin: '300px' });
+function fillThumbs() {
+  for (const img of document.querySelectorAll('img[data-thumb]')) thumbObserver.observe(img);
 }
 
 function selected() {
@@ -508,19 +1368,38 @@ async function selectShort(id) {
   if (!segment) return;
   const media = state.project.media.find((m) => m.id === segment.mediaId);
   const token = ++state.previewToken;
-  setStage(`<p class="muted">Rendering preview…</p>`);
+  unmountPlayer();
   try {
     const source = await sourceFor(media);
-    if (segment.cropTrackingVersion !== Framing.VERSION || !segment.cropKeyframes) await retrack(segment, source);
-    const url = await preview(source, segment);
     if (token !== state.previewToken) return;
-    setStage(`<video id="player" class="player" controls playsinline src="${url}"></video>
-      <p class="muted small">Preview at 540 × 960. Export renders 1080 × 1920.</p>${timelineHtml(segment)}`);
+    setStage(`<div id="player-host"></div><p id="track-note" class="muted small"></p>${timelineHtml(segment)}`);
     wireTimeline(segment);
     renderInspector();
+    // Plays straight from the source file. When this browser can't play it, fall back to a rendered preview.
+    mountPlayer($('#player-host'), segment, source, () => renderedPreview(segment, source, token));
+    // Framing is found while it plays; the player reads the Short's framing every frame, so it appears as soon as it is ready.
+    if (segment.cropTrackingVersion !== Framing.VERSION || !segment.cropKeyframes) {
+      const note = $('#track-note');
+      note.textContent = 'Finding the subject…';
+      retrack(segment, source).catch(() => {}).finally(() => { if (token === state.previewToken && note) note.textContent = ''; });
+    }
   } catch (error) {
     if (token !== state.previewToken) return;
-    setStage(`<p class="error">${esc(error.message || 'The preview could not be rendered.')}</p>`);
+    setStage(`<p class="error">${esc(error.message || 'The Short could not be shown.')}</p>`);
+  }
+}
+
+async function renderedPreview(segment, source, token) {
+  if (token !== state.previewToken) return;
+  unmountPlayer();
+  setStage('<p class="muted">This browser can’t play the source video directly. Rendering a preview…</p>');
+  try {
+    const url = await preview(source, segment);
+    if (token !== state.previewToken) return;
+    setStage(`<video id="player" class="player" controls playsinline src="${url}"></video>${timelineHtml(segment)}`);
+    wireTimeline(segment);
+  } catch (error) {
+    if (token === state.previewToken) setStage(`<p class="error">${esc(error.message || 'The preview could not be rendered.')}</p>`);
   }
 }
 
@@ -663,12 +1542,28 @@ async function edit(change, { rerender = true } = {}) {
   else renderEditor();
 }
 
+async function removeShort(id) {
+  const index = state.project.segments.findIndex((s) => s.id === id);
+  if (index < 0 || !confirm('Remove this Short? You can undo this with Ctrl+Z.')) return;
+  state.undo.push({ id, before: JSON.stringify(state.project.segments[index]) });
+  state.project.segments.splice(index, 1);
+  await persist();
+  if (state.selectedId !== id) return renderBin();
+  state.selectedId = Shorts.orderedShorts(state.project.segments, sortedByScore())[0]?.id ?? null;
+  renderEditor();
+  if (state.selectedId) selectShort(state.selectedId);
+  else setStage('<p class="muted">Make Shorts from a video to start.</p>');
+}
+
 async function undo() {
   const last = state.undo.pop();
   if (!last) return;
   const index = state.project.segments.findIndex((s) => s.id === last.id);
+  // An edit goes back to how it was; a removed Short comes back.
   if (index >= 0) state.project.segments[index] = JSON.parse(last.before);
+  else { state.project.segments.push(JSON.parse(last.before)); state.selectedId = last.id; }
   await persist();
+  renderEditor();
   selectShort(state.selectedId);
 }
 
@@ -739,7 +1634,11 @@ async function exportShorts(ids, quality, folder = null) {
   openDialog(`<div class="stack"><h2>Exported</h2>
     <p>${made} ${made === 1 ? 'Short' : 'Shorts'} ${folder ? `saved to the folder “${esc(folder.name)}”` : 'downloaded to your Downloads folder'}.</p>
     <div class="row end"><button class="button primary" data-action="close">OK</button></div></div>`);
-  if (made > 0) recordExport(made, seconds.reduce((a, b) => a + b, 0), quality);
+  if (made > 0) {
+    state.project.exported = (state.project.exported ?? 0) + made;
+    persist();
+    recordExport(made, seconds.reduce((a, b) => a + b, 0), quality);
+  }
 }
 
 /** A name that doesn't exist in the folder yet ("Title", then "Title 2"); downloads can't be checked, so the browser numbers those. */
@@ -778,37 +1677,15 @@ function download(blob, name) {
 
 const safeName = (value) => value.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Short';
 
-// MARK: Usage and promo codes
-
-async function openUsage() {
-  await refreshUsage();
-  const u = state.usage;
-  openDialog(`
-    <form id="promo-form" class="stack">
-      <h2>Usage</h2>
-      <p>${u ? `${Math.floor(u.used)} of ${Math.floor(u.allowance)} minutes used.` : 'Usage is unavailable right now.'}</p>
-      <p class="muted small">Each video counts its length once. Analyzing a video again uses a share of its minutes, shown before you confirm.</p>
-      <label>Promo code <input name="code" autocomplete="off"></label>
-      <p id="promo-status" class="muted small" role="status"></p>
-      <div class="row end">
-        <a class="button ghost" href="../pricing.html">Pricing</a>
-        <button class="button ghost" type="button" data-action="close">Close</button>
-        <button class="button primary">Redeem</button>
-      </div>
-    </form>`);
-  $('#promo-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const code = new FormData(event.currentTarget).get('code').trim();
-    if (!code) return;
-    const { error } = await db().rpc('redeem_promo', { p_code: code });
-    $('#promo-status').textContent = error ? error.message : 'Promo code added. Your allowance is updated.';
-    if (!error) refreshUsage();
-  });
-}
-
 // MARK: Events
 
 document.addEventListener('click', async (event) => {
+  const choice = event.target.closest('[data-create],[data-style],[data-type]');
+  if (choice && state.create) {
+    if (choice.dataset.create) await createAction(choice.dataset.create);
+    else { if (choice.dataset.style) state.create.style = choice.dataset.style; else state.create.videoType = choice.dataset.type; renderCreate(); }
+    return;
+  }
   const target = event.target.closest('[data-action]');
   if (!target) return;
   const action = target.dataset.action;
@@ -816,35 +1693,44 @@ document.addEventListener('click', async (event) => {
   else if (action === 'cancel') cancelTask();
   else if (action === 'home') showHome();
   else if (action === 'open') openProject(target.dataset.id);
-  else if (action === 'delete-project') {
-    const project = await store.loadProject(target.dataset.id);
-    if (!project || !confirm(`Delete “${project.title}” and its Shorts from this browser? This can't be undone.`)) return;
-    await store.deleteProject(project);
-    for (const media of project.media) state.sources.delete(media.id);
-    showHome();
-  }
+  else if (action === 'project-menu') projectMenu(target.dataset.id, target);
+  else if (action === 'folder-menu') folderMenu(target.dataset.id, target);
+  else if (action === 'open-folder') showHome({ folderId: target.dataset.id });
+  else if (action === 'new-folder') newFolder();
   else if (action === 'select') selectShort(target.dataset.id);
-  else if (action === 'make') openMakeDialog(target.dataset.id);
+  else if (action === 'make') startCreate({ project: state.project, media: state.project.media.find((m) => m.id === target.dataset.id) });
+  else if (action === 'create') startCreate();
+  else if (action === 'nav') {
+    const screen = target.dataset.screen;
+    if (screen === 'home') showHome();
+    else if (screen === 'create') startCreate();
+    else if (screen === 'settings') showSettings();
+  }
+  else if (action === 'settings-tab') showSettings(target.dataset.tab);
+  else if (action === 'signout') { await db().auth.signOut(); state.session = null; renderGate(); }
+  else if (action === 'delete-account') deleteAccount();
+  else if (action === 'theme') switchTheme(target.dataset.theme);
   else if (action === 'export-dialog') openExportDialog();
   else if (action === 'export-one') openExportDialog(state.selectedId);
-  else if (action === 'undo') undo();
-  else if (action === 'usage') openUsage();
-  else if (action === 'import-more') $('#import-more').click();
+  else if (action === 'sync-now') sync();
+  else if (action === 'retry-upload') { videoBlock = null; uploadPending(); showSettings('usage'); }
+  else if (action === 'collapse') applyCollapsed(!$('.shell').classList.contains('collapsed'));
+  else if (action === 'usage') { closeDialog(); showSettings('usage'); }
   else if (action === 'retrack') edit(async (s) => { s.cropKeyframes = null; await retrack(s, await sourceFor(state.project.media.find((m) => m.id === s.mediaId))); });
-  else if (action === 'remove') {
-    if (!confirm('Remove this Short? You can undo this with Ctrl+Z.')) return;
-    const index = state.project.segments.findIndex((s) => s.id === state.selectedId);
-    state.undo.push({ id: state.selectedId, before: JSON.stringify(state.project.segments[index]) });
-    state.project.segments.splice(index, 1);
-    state.selectedId = state.project.segments[0]?.id ?? null;
-    await persist();
-    renderEditor();
-    if (state.selectedId) selectShort(state.selectedId);
-    else setStage('<p class="muted">Make Shorts from a video to start.</p>');
-  } else if (action === 'regen-captions') regenerateCaptions();
+  else if (action === 'remove') removeShort(target.dataset.id ?? state.selectedId);
+  else if (action === 'sort') toggleSort();
+  else if (action === 'regen-captions') regenerateCaptions();
 });
 
-document.addEventListener('change', (event) => {
+document.addEventListener('change', async (event) => {
+  if (event.target.id === 'title' && state.project) {
+    state.project.title = event.target.value.trim() || state.project.title;
+    event.target.value = state.project.title;
+    document.title = `${state.project.title} · Prism`;
+    await persist();
+    setUrl(projectPath(state.project) + (location.pathname.match(/\/short-\d+$/)?.[0] ?? ''), true);
+    return;
+  }
   const field = event.target.dataset?.field;
   // Title and description save as you type (see the input listener).
   if (!field || field === 'suggestedTitle' || field === 'suggestedDescription' || !selected()) return;
@@ -911,10 +1797,11 @@ window.addEventListener('beforeunload', (event) => {
 document.addEventListener('mousedown', (event) => { if (event.target.id === 'dialog') closeDialog(); });
 
 document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && $('#menu')) { closeMenu(); return; }
   if (event.key === 'Escape' && state.dialog) { closeDialog(); return; }
   if (event.target.closest('input,textarea,select') || state.dialog) return;
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); undo(); }
-  if (event.key === ' ') { const player = $('#player'); if (player) { event.preventDefault(); player.paused ? player.play() : player.pause(); } }
+  if (event.key === ' ') { const play = $('[data-play]'); if (play) { event.preventDefault(); play.click(); } }
 });
 
 boot();

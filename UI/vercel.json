@@ -1,9 +1,34 @@
 {
   "cleanUrls": true,
   "redirects": [
-    { "source": "/account", "destination": "/login", "permanent": true }
+    {
+      "source": "/account",
+      "destination": "/login",
+      "permanent": true
+    },
+    {
+      "source": "/pricing",
+      "destination": "/app",
+      "permanent": false
+    },
+    {
+      "source": "/pricing.html",
+      "destination": "/app",
+      "permanent": false
+    }
   ],
   "rewrites": [
-    { "source": "/dashboard_(.+)", "destination": "/dashboard" }
+    {
+      "source": "/dashboard_(.+)",
+      "destination": "/dashboard"
+    },
+    {
+      "source": "/app",
+      "destination": "/app/index.html"
+    },
+    {
+      "source": "/app/:path*",
+      "destination": "/app/index.html"
+    }
   ]
 }

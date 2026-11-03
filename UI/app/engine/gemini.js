@@ -3,7 +3,8 @@
 
 export const PROJECT_URL = 'https://isdplhahgggundbohmlr.supabase.co/';
 export const PUBLISHABLE_KEY = 'sb_publishable_ATTcp2-mrca0swMStHHdYQ_Le851b8l';
-export const GATEWAY_URL = PROJECT_URL + 'functions/v1/gemini';
+// On localhost the call goes through the dev server's /gateway, which forwards it; the function itself allows browsers once deployed.
+export const GATEWAY_URL = ['localhost', '127.0.0.1'].includes(globalThis.location?.hostname) ? '/gateway' : PROJECT_URL + 'functions/v1/gemini';
 
 const MESSAGES = {
   signIn: 'Sign in to your Prism account to use Prism AI.',
@@ -144,7 +145,9 @@ async function send(token, body, configuration, signal) {
       }
       return { status, body: responseText };
     } catch (error) {
-      if (signal?.aborted || attempt >= 2) throw error;
+      if (signal?.aborted) throw error;
+      // The browser says only "Failed to fetch"; give the person something they can act on.
+      if (attempt >= 2) throw new GeminiError('request', 0, 'Could not reach Prism AI. Check your internet connection and try again.');
       // Requests may run three minutes before timing out, so lost connections get only two more tries.
       configuration.onRetry?.(`Connection to Prism AI dropped · retrying in ${Math.round(wait)} s`);
       await sleep(wait, signal);

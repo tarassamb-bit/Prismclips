@@ -1,9 +1,6 @@
 // Reading the source video in the browser with WebCodecs (Mediabunny): probe, frames, gray grids for cut detection, audio
 // for Prism AI and audio levels. The browser counterpart of Shared/Prism.Core/Media.cs; the video never leaves the computer.
-import {
-  Input, ALL_FORMATS, BlobSource, CanvasSink, AudioSampleSink, Conversion, Output, BufferTarget,
-  Mp4OutputFormat, WavOutputFormat, canEncodeAudio,
-} from '../../vendor/mediabunny-1.61.5.min.mjs';
+import { Input, ALL_FORMATS, BlobSource, CanvasSink, AudioSampleSink } from '../../vendor/mediabunny-1.61.5.min.mjs';
 import { ShortMakerError, GeminiError } from './gemini.js';
 
 /** Decoding runs a couple at a time; the AI requests around it still run six side by side. */
@@ -67,6 +64,16 @@ async function framesAt(source, timestamps, maxSize) {
 }
 
 /** A small preview image of the video, as a data URL for project cards. */
+/** One decoded frame as a canvas (not encoded to JPEG), for drawing into thumbnails. */
+export async function frameImage(source, time, maxSize = 480) {
+  return decoding(async () => {
+    const sink = new CanvasSink(source.video, { ...fitWithin(source, maxSize), fit: 'fill' });
+    // A file's first frame can come after time 0, and asking for a time before it gives nothing; start at the first frame at the earliest.
+    const first = await source.video.getFirstTimestamp().catch(() => 0);
+    return (await sink.getCanvas(Math.max(time, first)))?.canvas ?? null;
+  });
+}
+
 export async function thumbnail(source, time, maxSize = 480) {
   const jpeg = await frameJpeg(source, time, maxSize);
   if (!jpeg) return null;
@@ -95,38 +102,43 @@ export async function grayGrids(source, start, duration) {
   });
 }
 
-let audioFormat = null;
-/** Small mono AAC like the desktop apps when the browser can encode it; WAV otherwise (Firefox). */
-async function chooseAudioFormat() {
-  audioFormat ??= (async () => {
-    if (await canEncodeAudio('aac', { numberOfChannels: 1, sampleRate: 16000, bitrate: 48000 }).catch(() => false))
-      return { codec: 'aac', sampleRate: 16000, mime: 'audio/mp4' };
-    if (await canEncodeAudio('aac', { numberOfChannels: 1, sampleRate: 48000, bitrate: 64000 }).catch(() => false))
-      return { codec: 'aac', sampleRate: 48000, mime: 'audio/mp4' };
-    return { codec: 'pcm-s16', sampleRate: 16000, mime: 'audio/wav' };
-  })();
-  return audioFormat;
-}
+const SPEECH_RATE = 16000;
 
-/** A stretch of audio for Prism AI: { mime, bytes }. Throws audioExport when it can't be prepared. */
+/** A stretch of audio for Prism AI as 16 kHz mono 16-bit WAV: { mime, bytes }. Plain PCM needs no encoder, so it is identical in every
+ * browser and every AI provider can read it. Throws audioExport when it can't be prepared. */
 export async function audioChunk(source, start, length, signal) {
   if (!source.audio) throw new GeminiError('audioExport');
-  const format = await chooseAudioFormat();
-  return decoding(async () => {
-    signal?.throwIfAborted();
-    const output = new Output({ format: format.codec === 'aac' ? new Mp4OutputFormat() : new WavOutputFormat(), target: new BufferTarget() });
-    const conversion = await Conversion.init({
-      input: source.input, output, video: { discard: true },
-      audio: { numberOfChannels: 1, sampleRate: format.sampleRate, codec: format.codec, bitrate: format.codec === 'aac' ? 48000 : undefined, forceTranscode: true },
-      trim: { start, end: Math.min(source.duration, start + length) },
-    });
-    if (!conversion.isValid) throw new GeminiError('audioExport');
-    const stop = () => conversion.cancel();
-    signal?.addEventListener('abort', stop, { once: true });
-    try { await conversion.execute(); } catch (error) { signal?.throwIfAborted(); throw new GeminiError('audioExport'); } finally { signal?.removeEventListener('abort', stop); }
-    if (!output.target.buffer) throw new GeminiError('audioExport');
-    return { mime: format.mime, bytes: new Uint8Array(output.target.buffer) };
-  });
+  signal?.throwIfAborted();
+  const decoded = await monoSamples(source, start, Math.min(source.duration, start + length)).catch(() => null);
+  signal?.throwIfAborted();
+  if (!decoded) throw new GeminiError('audioExport');
+  return { mime: 'audio/wav', bytes: wav(resample(decoded.samples, decoded.sampleRate, SPEECH_RATE), SPEECH_RATE) };
+}
+
+/** Averages each stretch of input into one output sample, which also filters what the lower rate can't hold. */
+export function resample(samples, from, to) {
+  if (from === to) return samples;
+  const ratio = from / to, count = Math.floor(samples.length / ratio), out = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    const a = Math.floor(i * ratio), b = Math.max(a + 1, Math.min(samples.length, Math.floor((i + 1) * ratio)));
+    let sum = 0;
+    for (let j = a; j < b; j++) sum += samples[j];
+    out[i] = sum / (b - a);
+  }
+  return out;
+}
+
+/** A mono 16-bit PCM WAV file. */
+export function wav(samples, rate) {
+  const bytes = new Uint8Array(44 + samples.length * 2);
+  const view = new DataView(bytes.buffer);
+  const tag = (offset, text) => { for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i)); };
+  tag(0, 'RIFF'); view.setUint32(4, 36 + samples.length * 2, true); tag(8, 'WAVE');
+  tag(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  tag(36, 'data'); view.setUint32(40, samples.length * 2, true);
+  for (let i = 0; i < samples.length; i++) view.setInt16(44 + i * 2, Math.round(Math.max(-1, Math.min(1, samples[i])) * 32767), true);
+  return bytes;
 }
 
 /** Mono samples of a range at the track's own rate: { samples, sampleRate }, or null without audio. */

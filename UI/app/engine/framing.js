@@ -21,6 +21,7 @@ export async function analyze(source, start, duration, zoom, configuration, spee
     if (!located) return [];
     const byIndex = new Map();
     for (const frame of located.frames) if (!byIndex.has(frame.index)) byIndex.set(frame.index, frame);
+    const wholeFrame = isWholeFrame(located, frames.length);
     const samples = frames.map((frame, index) => {
       const found = byIndex.get(index);
       let subject = null;
@@ -28,13 +29,20 @@ export async function analyze(source, start, duration, zoom, configuration, spee
         const width = clamp(found.width, 0.02, 1);
         subject = { x: clamp(found.center, 0, 1) - width / 2, width };
       }
-      return { time: frame.time, subject, cutTime: cuts[index], preserveWholeFrame: located.wholeFrame };
+      return { time: frame.time, subject, cutTime: cuts[index], preserveWholeFrame: wholeFrame };
     });
     return plan(samples, duration, source.width, source.height, zoom);
   } catch {
     signal?.throwIfAborted();
     return [];
   }
+}
+
+/** Whether the Short shows a screen, slides or gameplay that a vertical crop would cut off. When the model says so but faces are
+ * visible in most frames, it is people, not slides, and the crop follows the speaker (the Mac's Fill layout). */
+export function isWholeFrame(located, frameCount) {
+  const withFaces = located.frames.filter((f) => f.faces.length > 0).length;
+  return located.wholeFrame && withFaces < 0.6 * frameCount;
 }
 
 /** For each sample, the source cut between it and the previous sample, if one happened. */

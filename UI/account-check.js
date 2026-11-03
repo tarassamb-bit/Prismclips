@@ -64,28 +64,31 @@ function page(initial, query, { origin = 'https://example.test', pathname = '/da
 
 (async () => {
   const session = { user: { id: 'user-1', email: 'creator@example.com' } };
+  // The dashboard moved into the app's Settings: a signed-in visit (or a restored session) ends up there, a signed-out one at /login.
   const initial = deferred();
   const restored = page(initial.promise, async () => ({ data: [], error: null }));
   restored.emit(session);
   await flush();
-  assert.equal(restored.nodes.account.dataset.state, 'signed-in');
+  assert.equal(restored.location.replacements.at(-1), '/app/settings/overview');
   initial.reject(new Error('An older restore failed'));
   await flush();
-  assert.equal(restored.nodes.account.dataset.state, 'signed-in', 'a stale restore error cannot override a newer auth event');
+  assert.equal(restored.location.replacements.at(-1), '/app/settings/overview', 'a stale restore error cannot undo the redirect');
   assert.doesNotMatch(restored.nodes.status.textContent, /older restore failed/);
 
   const stats = deferred();
   const signedOut = page(Promise.resolve({ data: { session }, error: null }), () => stats.promise);
   await flush();
-  assert.equal(signedOut.nodes.account.dataset.state, 'loading');
+  assert.equal(signedOut.location.replacements.at(-1), '/app/settings/overview');
   signedOut.emit(null);
   await flush();
   assert.equal(signedOut.nodes.signedIn.hidden, true);
   assert.equal(signedOut.location.replacements.at(-1), '/login');
-  stats.resolve({ data: [{ id: 'export-1', created_at: '2026-10-25T00:00:00Z', short_count: 9, seconds: 60, quality: 'full' }], error: null });
-  await flush();
-  assert.equal(signedOut.nodes['export-count'].textContent, '—', 'old stats stay cleared while sign-out navigation is pending');
   assert.equal(signedOut.nodes.who.textContent, '');
+
+  // Signing in on the login page goes straight to the app's Settings.
+  const login = page(Promise.resolve({ data: { session }, error: null }), async () => ({ data: [], error: null }), { pathname: '/login', authPage: 'login' });
+  await flush();
+  assert.equal(login.location.replacements.at(-1), '/app/settings/overview');
 
   for (const origin of ['https://prismclips.vercel.app', 'http://localhost:4173']) {
     const signup = page(Promise.resolve({ data: { session: null }, error: null }), async () => ({ data: [], error: null }), {

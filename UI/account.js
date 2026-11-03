@@ -225,15 +225,17 @@
       if (byId('who')) byId('who').textContent = '';
     }
     if (userId && page === 'login') {
-      location.replace(nextPath() || `/dashboard_${userId}`);
+      location.replace(nextPath() || '/app/settings/overview');
       return;
     }
     if (!userId && page === 'dashboard') {
       location.replace('/login');
       return;
     }
-    if (userId && page === 'dashboard' && location.pathname !== `/dashboard_${userId}`) {
-      history.replaceState(null, '', `/dashboard_${userId}`);
+    // The dashboard moved into the app's Settings; old links and bookmarks end up there.
+    if (userId && page === 'dashboard') {
+      location.replace('/app/settings/overview');
+      return;
     }
     formWrap.hidden = Boolean(userId);
     signedIn.hidden = !userId;

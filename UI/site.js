@@ -29,15 +29,15 @@
     else link.removeAttribute('aria-current');
   });
 
-  // Signed in (Supabase keeps the session in localStorage): the header links to the dashboard.
-  // The dashboard itself re-checks the session, so a stale entry only costs one redirect to /login.
+  // Signed in (Supabase keeps the session in localStorage): the header links to the account in the app's Settings.
+  // The app re-checks the session, so a stale entry only costs the sign-in card.
   try {
     const session = JSON.parse(localStorage.getItem('sb-isdplhahgggundbohmlr-auth-token') || 'null');
     const userId = session?.user?.id;
     if (userId) {
       document.querySelectorAll('.nav-signin').forEach((link) => {
         link.textContent = 'Your account';
-        link.href = `/dashboard_${userId}`;
+        link.href = '/app/settings/overview';
       });
     }
   } catch {}

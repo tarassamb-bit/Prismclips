@@ -113,9 +113,23 @@ export function drawCaptions(ctx, layers, time) {
     ctx.save();
     ctx.translate(70, 1920 - (element.y + height));
     if (Math.abs(scale - 1) > 0.001) { ctx.translate(470, height / 2); ctx.scale(scale, scale); ctx.translate(-470, -height / 2); }
-    drawLayer(ctx, element.text, element.style, element.scale, element.highlighted);
+    ctx.drawImage(layerBitmap(element, height), 0, 0);
     ctx.restore();
   }
+}
+
+/** A layer looks the same every frame it shows (the pop-in is a transform), so its text and outline are drawn once and reused. */
+const layerCache = new Map();
+function layerBitmap(element, height) {
+  const key = `${element.style}|${element.scale}|${element.highlighted}|${element.text}`;
+  let canvas = layerCache.get(key);
+  if (!canvas) {
+    canvas = new OffscreenCanvas(940, height);
+    drawLayer(canvas.getContext('2d'), element.text, element.style, element.scale, element.highlighted);
+    layerCache.set(key, canvas);
+    if (layerCache.size > 300) layerCache.delete(layerCache.keys().next().value);
+  }
+  return canvas;
 }
 
 /** A caption layer, 940 px wide, with its top-left at the context origin. */

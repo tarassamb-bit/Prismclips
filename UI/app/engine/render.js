@@ -63,19 +63,58 @@ export function layoutAt(segment, time, sourceWidth, sourceHeight) {
   return [{ kind: 'crop', sx: x / scale, sy: y / scale, sw: 1080 / scale, sh: 1920 / scale, dx: 0, dy: 0, dw: 1080, dh: 1920 }];
 }
 
-/** Draws one source frame into the 1080×1920 context (already scaled to the output size). */
-function drawFrame(ctx, sample, segment, sourceWidth, sourceHeight, time) {
+/** The whole-frame layouts sit on a soft copy of the picture. It is drawn at 1/16 size, blurred there by hand (a canvas blur filter is slow
+ * and Safari ignores it), then scaled up: heavy blur at that size is cheap, and the scale-up shows no blocks because neighbours match. */
+const SOFT_W = 68, SOFT_H = 120;
+let softCanvas = null, softContext = null;
+
+/** Box blur of the colour channels, `passes` times; edges repeat their nearest pixel. */
+export function boxBlur(data, width, height, radius, passes) {
+  const line = new Float32Array(Math.max(width, height));
+  const run = (start, step, count) => {
+    for (let c = 0; c < 3; c++) {
+      for (let i = 0; i < count; i++) line[i] = data[start + i * step * 4 + c];
+      let sum = 0;
+      for (let k = -radius; k <= radius; k++) sum += line[Math.min(count - 1, Math.max(0, k))];
+      for (let i = 0; i < count; i++) {
+        data[start + i * step * 4 + c] = sum / (2 * radius + 1);
+        sum += line[Math.min(count - 1, i + radius + 1)] - line[Math.max(0, i - radius)];
+      }
+    }
+  };
+  for (let pass = 0; pass < passes; pass++) {
+    for (let y = 0; y < height; y++) run(y * width * 4, 1, width);
+    for (let x = 0; x < width; x++) run(x * 4, width, height);
+  }
+}
+
+function drawSoftBackground(ctx, sample, sourceWidth, sourceHeight) {
+  if (!softCanvas) {
+    softCanvas = new OffscreenCanvas(SOFT_W, SOFT_H);
+    softContext = softCanvas.getContext('2d', { willReadFrequently: true });
+  }
+  const cover = Math.max(SOFT_W / sourceWidth, SOFT_H / sourceHeight), w = sourceWidth * cover, h = sourceHeight * cover;
+  sample.draw(softContext, (SOFT_W - w) / 2, (SOFT_H - h) / 2, w, h);
+  const pixels = softContext.getImageData(0, 0, SOFT_W, SOFT_H);
+  boxBlur(pixels.data, SOFT_W, SOFT_H, 4, 3);
+  softContext.putImageData(pixels, 0, 0);
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(softCanvas, 0, 0, 1080, 1920);
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillRect(0, 0, 1080, 1920);
+  ctx.restore();
+}
+
+/** Draws one frame into the 1080×1920 context (already scaled to the output size). `sample` has draw(ctx, x, y, w, h): a decoded
+ * frame when exporting, a video element in the live player. */
+export function drawFrame(ctx, sample, segment, sourceWidth, sourceHeight, time) {
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, 1080, 1920);
   for (const op of layoutAt(segment, time, sourceWidth, sourceHeight)) {
     if (op.kind === 'fit' && (op.dw < 1080 || op.dh < 1920)) {
-      // The whole source over a blurred, zoomed copy of itself.
-      ctx.save();
-      ctx.filter = 'blur(40px) saturate(0.7) brightness(0.92)';
-      const cover = Math.max(1080 / sourceWidth, 1920 / sourceHeight);
-      const bw = sourceWidth * cover, bh = sourceHeight * cover;
-      sample.draw(ctx, (1080 - bw) / 2, (1920 - bh) / 2, bw, bh);
-      ctx.restore();
+      drawSoftBackground(ctx, sample, sourceWidth, sourceHeight);
     }
     if (op.kind === 'crop') {
       // Cover: the source window fills the destination, centred on its middle.

@@ -5,6 +5,7 @@ const env = { SUPABASE_URL: 'https://example.invalid', SUPABASE_SERVICE_ROLE_KEY
 let handler;
 globalThis.Deno = { env: { get: (key) => env[key] }, serve: (fn) => { handler = fn; } };
 const calls = [];
+let providerFails = false, providerBody = null;
 let identityStatus = 200, reservationStatus = 200, allowed = true, spendStatus = 200, runAllowed = true;
 globalThis.fetch = async (url, options = {}) => {
   calls.push({ url, ...options });
@@ -12,7 +13,11 @@ globalThis.fetch = async (url, options = {}) => {
   if (url.endsWith('/rpc/prism_reserve_beta_usage')) return Response.json(allowed, { status: reservationStatus });
   if (url.endsWith('/rpc/prism_record_beta_spend')) return new Response(null, { status: spendStatus });
   if (url.endsWith('/rpc/prism_begin_analysis_run')) return Response.json(runAllowed);
-  if (url === 'https://openrouter.ai/api/v1/chat/completions') return Response.json({ choices: [{ message: { content: 'ok' } }], usage: { cost: 0 } });
+  if (url === 'https://openrouter.ai/api/v1/chat/completions') {
+    providerBody = JSON.parse(options.body);
+    if (providerFails) return Response.json({ error: { message: 'Provider returned error', metadata: { raw: 'unsupported audio data' } } }, { status: 400 });
+    return Response.json({ choices: [{ message: { content: 'ok' } }], usage: { cost: 0 } });
+  }
   throw new Error(`Unexpected URL: ${url}`);
 };
 await import('./index.ts');
@@ -77,3 +82,36 @@ calls.length = 0;
 await handler(request());
 assert.ok(!calls.some((call) => call.url.endsWith('/rpc/prism_begin_analysis_run')), 'requests outside a run are not counted as runs');
 console.log('PASS analysis runs: id validated, recorded per account and video, refused re-analyses stop before the provider');
+
+// Browser access: the preflight is answered without touching either backend, and every answer carries the CORS headers.
+calls.length = 0;
+const preflight = await handler(new Request('https://example.invalid/functions/v1/gemini', { method: 'OPTIONS', headers: { Origin: 'http://localhost:4173', 'Access-Control-Request-Method': 'POST' } }));
+assert.equal(preflight.status, 204);
+assert.equal(preflight.headers.get('Access-Control-Allow-Origin'), '*');
+for (const name of ['authorization', 'apikey', 'content-type', 'x-prism-video', 'x-prism-minutes', 'x-prism-day', 'x-prism-run'])
+  assert.ok(preflight.headers.get('Access-Control-Allow-Headers').includes(name), `${name} must be allowed`);
+assert.equal(calls.length, 0, 'a preflight must not reach either backend');
+assert.equal((await handler(request())).headers.get('Access-Control-Allow-Origin'), '*', 'a successful answer must be readable by the page');
+assert.equal((await handler(request({ minutes: '0' }))).headers.get('Access-Control-Allow-Origin'), '*', 'a refusal must be readable by the page too');
+runAllowed = false;
+assert.equal((await handler(request({ run: runID }))).headers.get('Access-Control-Allow-Origin'), '*', 'the usage-limit answer must be readable by the page');
+runAllowed = true;
+console.log('PASS browser access: preflight answered, CORS headers on every answer');
+
+// Audio is labelled with its real format, and a refusal names every model that was tried with the provider's own reason.
+const audioRequest = (mimeType) => new Request('https://example.invalid/functions/v1/gemini', {
+  method: 'POST',
+  headers: { Authorization: 'Bearer valid-user-token', apikey: 'public-test-key', 'x-prism-video': 'a'.repeat(64), 'x-prism-minutes': '12' },
+  body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'hear this' }, { inlineData: { mimeType, data: 'AAAA' } }] }] }),
+});
+for (const [mimeType, format] of [['audio/wav', 'wav'], ['audio/mpeg', 'mp3'], ['audio/mp4', 'm4a']]) {
+  await handler(audioRequest(mimeType));
+  assert.equal(providerBody.messages.at(-1).content.find((part) => part.type === 'input_audio').input_audio.format, format);
+}
+providerFails = true;
+const refused = await handler(audioRequest('audio/wav'));
+assert.equal(refused.status, 400);
+const reason = (await refused.json()).error.message;
+assert.ok(reason.includes('nemotron-3-nano-omni') && reason.includes('unsupported audio data'), reason);
+providerFails = false;
+console.log('PASS audio format by type, and every model failure reported with the provider reason');

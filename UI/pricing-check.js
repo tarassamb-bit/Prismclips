@@ -72,7 +72,7 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
   button.events.click();
   await settle();
   assert.equal(checkouts.length, 1, 'an existing subscription opens account management');
-  assert.equal(location.href, '/dashboard_user-1');
+  assert.equal(location.href, '/app/settings/plans');
   sessionUser = null;
   button.events.click();
   await settle();

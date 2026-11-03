@@ -276,18 +276,23 @@ ${transcript}`;
 export function validatedWords(words, offset, duration) {
   const result = [];
   if (!Number.isFinite(offset) || !Number.isFinite(duration) || duration <= 0) throw new GeminiError('invalidTiming');
+  // Models time speech roughly: an end a little past the chunk ("0.00-15.37" for 15 seconds) or a start a little before it is clamped.
+  // Anything further off means the model lost its clock, and the chunk is retried in halves.
+  const slack = Math.max(1.5, duration * 0.1);
   for (const word of words) {
     const value = word.text.trim();
-    if (!Number.isFinite(word.start) || !Number.isFinite(word.end) || word.start < -0.05 || word.end <= word.start ||
-      word.start >= duration || word.end > duration + 0.1 || !value) throw new GeminiError('invalidTiming');
+    if (!Number.isFinite(word.start) || !Number.isFinite(word.end) || word.end <= word.start || !value
+      || word.start < -slack || word.start >= duration + slack || word.end > duration + slack) throw new GeminiError('invalidTiming');
+    // Starts just after the chunk's end: nothing of it is in this audio.
+    if (word.start >= duration) continue;
     let start = Math.max(0, word.start);
     const finish = Math.min(duration, word.end);
     if (result.length > 0) {
       const previous = result.at(-1);
       const previousEnd = previous.start + previous.duration - offset;
       const overlap = previousEnd - start;
-      // Split tiny overlaps at the midpoint, preserving both spoken words; larger or reversed overlaps need a retry.
-      if (start < previous.start - offset || overlap > 0.25) throw new GeminiError('invalidTiming');
+      // Split small overlaps at the midpoint, preserving both spoken words; larger or reversed overlaps need a retry.
+      if (start < previous.start - offset || overlap > 1) throw new GeminiError('invalidTiming');
       if (overlap > 0) {
         const boundary = (start + previousEnd) / 2;
         if (boundary <= previous.start - offset || finish <= boundary) throw new GeminiError('invalidTiming');

@@ -86,7 +86,7 @@
       hasPlan = hasPlan || await checkPlan();
       if (hasPlan) {
         label();
-        location.href = `/dashboard_${user.id}`;
+        location.href = '/app/settings/plans';
         return;
       }
       say('');

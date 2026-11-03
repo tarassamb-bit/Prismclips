@@ -60,7 +60,9 @@ export async function analyze(source, configuration, options) {
   const strong = clips.filter((c) => !c.reason?.startsWith('Weaker pick'));
   if (!(options.count > 0)) clips = strong.length === 0 ? clips.slice(0, 1) : strong;
   // Screens and gameplay lose their edges in a vertical crop, whatever the picker suggested.
-  const picks = clips.map((c) => ({ ...c, duration: c.end - c.start, fit: c.layout === 'fit' || forcesFit(videoType) }));
+  // Only screens and gameplay are forced to the whole frame. The picker's own 'fit' guess is ignored: from a few sparse frames it
+  // calls too many talking heads "slides". Framing looks at every second and still shows the whole frame when it really is a screen.
+  const picks = clips.map((c) => ({ ...c, duration: c.end - c.start, fit: forcesFit(videoType) }));
   let steps = 0;
   const reportStep = (stage) => { steps++; progress(0.7 + 0.29 * Math.min(1, steps / (targetCount * 2)), stage); };
   // Picks are prepared a wave at a time; a pick that now overlaps an earlier one gives way to the next backup.
@@ -173,6 +175,12 @@ export function snapToQuiet(levels, from, start, duration, interval, words = [])
   const newStart = nearestQuiet(start, Math.max(interval.start, start - 0.5), start + 0.15) ?? start;
   const newEnd = nearestQuiet(end, end - 0.15, Math.min(interval.end, end + 0.5)) ?? end;
   return newEnd - newStart > 0.5 ? { start: newStart, duration: newEnd - newStart } : { start, duration };
+}
+
+/** The Shorts as listed: in the order of the video, or best score first (ties keep their order in the video). */
+export function orderedShorts(segments, byScore) {
+  const inVideo = [...segments].sort((a, b) => a.start - b.start);
+  return byScore ? inVideo.sort((a, b) => (b.score ?? -1) - (a.score ?? -1)) : inVideo;
 }
 
 /** Shift captions into the clip's timeline without extending them beyond its end. */

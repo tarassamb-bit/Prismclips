@@ -29,6 +29,13 @@ function lowerTypes(value: unknown): unknown {
   return value;
 }
 
+/// OpenRouter wants the audio's format by name: the web app sends WAV, the desktop apps send AAC in an MP4 (m4a).
+function audioFormat(mimeType: string): string {
+  if (/wav/i.test(mimeType)) return "wav";
+  if (/mpeg|mp3/i.test(mimeType)) return "mp3";
+  return "m4a";
+}
+
 function toOpenRouter(body: GeminiRequest) {
   const content: unknown[] = [];
   let hasAudio = false, hasImage = false;
@@ -41,7 +48,7 @@ function toOpenRouter(body: GeminiRequest) {
         content.push({ type: "image_url", image_url: { url: `data:${mimeType};base64,${data}` } });
         hasImage = true;
       } else if (mimeType.startsWith("audio/")) {
-        content.push({ type: "input_audio", input_audio: { data, format: "m4a" } });
+        content.push({ type: "input_audio", input_audio: { data, format: audioFormat(mimeType) } });
         hasAudio = true;
       } else {
         throw new Error(`Unsupported attachment type ${mimeType}`);
@@ -68,10 +75,20 @@ function cleanJSON(text: string): string {
   return start >= 0 && end > start ? text.slice(start, end + 1) : text;
 }
 
+// The website's app calls this function from the browser, which asks permission first (a preflight OPTIONS request) and only
+// lets the page read answers that carry these headers. Sign-in is a bearer token, never a cookie, so any origin may ask.
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info, x-prism-video, x-prism-minutes, x-prism-day, x-prism-run",
+  "Access-Control-Max-Age": "86400",
+};
+const JSON_HEADERS = { "Content-Type": "application/json", ...CORS };
+
 function fail(status: number, message: string): Response {
   return new Response(JSON.stringify({ error: { message } }), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: JSON_HEADERS,
   });
 }
 
@@ -146,11 +163,12 @@ async function recordSpend(session: Session, answer: any) {
 function limitReached(): Response {
   return new Response(JSON.stringify({ error: { code: "usage_limit", message: LIMIT_MESSAGE } }), {
     status: 429,
-    headers: { "Content-Type": "application/json" },
+    headers: JSON_HEADERS,
   });
 }
 
 Deno.serve(async (request) => {
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
   if (request.method !== "POST") return fail(405, "Use POST.");
   const key = Deno.env.get("OPENROUTER_API_KEY");
   if (!key) return fail(500, "The AI key is not set on the server.");
@@ -173,7 +191,8 @@ Deno.serve(async (request) => {
 
   const chosen = Deno.env.get("OPENROUTER_MODEL");
   const models = [...new Set([...(chosen ? [chosen] : []), ...converted.models])];
-  let status = 503, message = "No model answered.", reply: any = null;
+  let status = 503, reply: any = null;
+  const failures: string[] = [];
   for (const model of models) {
     const upstream = await fetch(OPENROUTER_URL, {
       method: "POST",
@@ -187,13 +206,17 @@ Deno.serve(async (request) => {
       reply = answer; break;
     }
     status = upstream.status;
-    message = `${model}: ${answer?.error?.message ?? `HTTP ${upstream.status}`}`;
+    // The provider's own explanation is in error.metadata.raw; without it every refusal reads "Provider returned error".
+    const raw = typeof answer?.error?.metadata?.raw === "string" ? ` (${answer.error.metadata.raw.slice(0, 200)})` : "";
+    const message = `${model}: ${answer?.error?.message ?? `HTTP ${upstream.status}`}${raw}`;
+    failures.push(message);
     console.error(message);
     // A bad key fails every model alike; anything else may work on the next one.
     if (status === 401) break;
   }
   // Pass the last status through so the app's retry and "model busy" handling still works.
-  if (!reply) return fail(status, message);
+  // Every model that was tried is named, so the first choice's refusal isn't hidden behind the last fallback's.
+  if (!reply) return fail(status, failures.join(" · ") || "No model answered.");
 
   const choice = reply.choices[0];
   const raw: string = choice?.message?.content ?? "";
@@ -201,6 +224,6 @@ Deno.serve(async (request) => {
   const finished = choice?.finish_reason === "length" ? "MAX_TOKENS" : "STOP";
   return new Response(
     JSON.stringify({ candidates: [{ content: { parts: [{ text }] }, finishReason: finished }] }),
-    { headers: { "Content-Type": "application/json" } },
+    { headers: JSON_HEADERS },
   );
 });

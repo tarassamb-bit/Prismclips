@@ -15,7 +15,7 @@ const types = {
 
 try {
   for (const line of fs.readFileSync(path.join(root, '.env.local'), 'utf8').split('\n')) {
-    const match = line.match(/^\s*([A-Z_]+)\s*=\s*(.*?)\s*$/);
+    const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
     if (match && match[2] && !(match[1] in process.env)) process.env[match[1]] = match[2];
   }
 } catch {
@@ -37,6 +37,26 @@ const server = http.createServer(async (req, res) => {
   // Never serve dotfiles (.env.local holds secret keys) or step outside this folder.
   if (pathname.split('/').some((part) => part.startsWith('.'))) return notFound(res);
 
+  // Local stand-in for the AI call: the browser can't reach Prism's AI function directly until it allows browser requests (CORS),
+  // so on localhost the app posts here and this server forwards the request, headers and all.
+  if (pathname === '/gateway' && req.method === 'POST') {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const forwarded = {};
+    for (const name of ['authorization', 'apikey', 'content-type', 'x-prism-video', 'x-prism-minutes', 'x-prism-day', 'x-prism-run'])
+      if (req.headers[name]) forwarded[name] = req.headers[name];
+    try {
+      const upstream = await fetch('https://isdplhahgggundbohmlr.supabase.co/functions/v1/gemini', { method: 'POST', headers: forwarded, body: Buffer.concat(chunks) });
+      res.statusCode = upstream.status;
+      for (const name of ['content-type', 'retry-after']) if (upstream.headers.get(name)) res.setHeader(name, upstream.headers.get(name));
+      res.end(Buffer.from(await upstream.arrayBuffer()));
+    } catch (error) {
+      res.statusCode = 502;
+      res.end(JSON.stringify({ error: { message: `The local server could not reach Prism AI: ${error.message}` } }));
+    }
+    return;
+  }
+
   if (pathname.startsWith('/api/')) {
     const name = pathname.slice('/api/'.length);
     const file = path.join(apiDir, `${name}.js`);
@@ -56,6 +76,10 @@ const server = http.createServer(async (req, res) => {
 
   // Mirrors vercel.json: clean URLs, plus /dashboard_<user id> served by dashboard.html.
   let file = pathname === '/' ? '/index' : /^\/dashboard_[^/]+$/.test(pathname) ? '/dashboard' : pathname;
+  // Prices are switched off for now: the pricing page sends people to the app, as vercel.json does.
+  if (pathname === '/pricing' || pathname === '/pricing.html') { res.statusCode = 307; res.setHeader('Location', '/app'); return res.end(); }
+  // The web app has an address per screen (/app/settings/usage, /app/project/...): any of them without a file extension is the app.
+  if (pathname === '/app' || (pathname.startsWith('/app/') && !path.extname(pathname))) file = '/app/index.html';
   // Like Vercel, a folder serves its index.html (/app/ → app/index.html).
   if (!path.extname(file) && fs.existsSync(path.join(root, file)) && fs.statSync(path.join(root, file)).isDirectory()) file = path.join(file, 'index');
   if (!path.extname(file)) file += '.html';
