@@ -76,6 +76,8 @@ const server = http.createServer(async (req, res) => {
 
   // Mirrors vercel.json: clean URLs, plus /dashboard_<user id> served by dashboard.html.
   let file = pathname === '/' ? '/index' : /^\/dashboard_[^/]+$/.test(pathname) ? '/dashboard' : pathname;
+  // Vercel serves its analytics scripts only on deployments; locally they are empty.
+  if (pathname.startsWith('/_vercel/')) { res.setHeader('Content-Type', 'application/javascript'); return res.end(''); }
   // Prices are switched off for now: the pricing page sends people to the app, as vercel.json does.
   if (pathname === '/pricing' || pathname === '/pricing.html') { res.statusCode = 307; res.setHeader('Location', '/app'); return res.end(); }
   // The web app has an address per screen (/app/settings/usage, /app/project/...): any of them without a file extension is the app.
