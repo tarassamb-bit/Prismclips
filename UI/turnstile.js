@@ -3,7 +3,7 @@
 // Sign-in never needs it. The widget only asks for a click when Cloudflare isn't sure (appearance: interaction-only).
 window.prismTurnstile = (() => {
   // The widget's site key (public; Cloudflare → Turnstile → Prism). Empty: no widget, sign-ups carry no token.
-  const SITE_KEY = '';
+  const SITE_KEY = '0x4AAAAAAFzgmODMQZteUhwA';
   let loading = null;
 
   const load = () => loading ??= new Promise((resolve, reject) => {
