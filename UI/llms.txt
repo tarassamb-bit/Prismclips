@@ -9,17 +9,17 @@
 
 ## Pages
 
-- [Home](https://prismclips.app/): Overview of Prism and what it makes.
-- [Features](https://prismclips.app/features): Finding complete stories, reframing for vertical video, and caption styles.
-- [How it works](https://prismclips.app/how-it-works): The three steps from a long recording to a finished Short.
-- [Pricing](https://prismclips.app/pricing): Information about beta access and AI usage limits.
-- [Download](https://prismclips.app/download): Installers for macOS, Windows and Linux.
-- [FAQ](https://prismclips.app/faq): Answers about plans, privacy, editing and getting started.
-- [About](https://prismclips.app/about): What Prism is and who it's for.
+- [Home](https://prismclips.vercel.app/): Overview of Prism and what it makes.
+- [Features](https://prismclips.vercel.app/features): Finding complete stories, reframing for vertical video, and caption styles.
+- [How it works](https://prismclips.vercel.app/how-it-works): The three steps from a long recording to a finished Short.
+- [Web app](https://prismclips.vercel.app/app): Make Shorts in the browser; free beta with a usage limit.
+- [Download](https://prismclips.vercel.app/download): Installers for macOS, Windows and Linux.
+- [FAQ](https://prismclips.vercel.app/faq): Answers about plans, privacy, editing and getting started.
+- [About](https://prismclips.vercel.app/about): What Prism is and who it's for.
 
 ## Optional
 
-- [Changelog](https://prismclips.app/changelog): What changed in each release.
-- [Privacy](https://prismclips.app/privacy): What stays on your computer and what is sent for AI processing.
-- [Terms](https://prismclips.app/terms): Terms of use.
-- [Full text](https://prismclips.app/llms-full.txt): All main pages in one file.
+- [Changelog](https://prismclips.vercel.app/changelog): What changed in each release.
+- [Privacy](https://prismclips.vercel.app/privacy): What stays on your computer and what is sent for AI processing.
+- [Terms](https://prismclips.vercel.app/terms): Terms of use.
+- [Full text](https://prismclips.vercel.app/llms-full.txt): All main pages in one file.

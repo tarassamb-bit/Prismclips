@@ -18,4 +18,4 @@ Disallow: /account
 Disallow: /welcome
 Disallow: /api/
 
-Sitemap: https://prismclips.app/sitemap.xml
+Sitemap: https://prismclips.vercel.app/sitemap.xml

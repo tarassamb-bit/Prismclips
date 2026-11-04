@@ -1,12 +1,12 @@
-# Prism — full text of prismclips.app
+# Prism — full text of prismclips.vercel.app
 
-> Every main page of prismclips.app as plain text. Summary and links: https://prismclips.app/llms.txt
+> Every main page of prismclips.vercel.app as plain text. Summary and links: https://prismclips.vercel.app/llms.txt
 
 Prism is in beta. On Mac, sign in to try it; AI usage limits apply. Windows and Linux use your own Gemini API key. Paid plans are not available yet.
 
 ---
 
-URL: https://prismclips.app/
+URL: https://prismclips.vercel.app/
 Title: Prism — Long video. Short-form magic.
 
 A fresh perspective on short-form BETA
@@ -44,7 +44,7 @@ Get answers before you make your first Short.
 
 ---
 
-URL: https://prismclips.app/features
+URL: https://prismclips.vercel.app/features
 Title: Features — Prism
 
 THE CREATIVE TOOLKIT
@@ -89,7 +89,7 @@ Get Prism
 
 ---
 
-URL: https://prismclips.app/how-it-works
+URL: https://prismclips.vercel.app/how-it-works
 Title: How it works — Prism
 
 FROM THE FULL STORY TO THE GOOD PART
@@ -130,7 +130,7 @@ Choose your platform
 
 ---
 
-URL: https://prismclips.app/pricing
+URL: https://prismclips.vercel.app/pricing
 Title: Pricing — Prism
 
 BETA ACCESS
@@ -153,7 +153,7 @@ Prism transcribes speech and writes captions in the language spoken in your vide
 
 ---
 
-URL: https://prismclips.app/download
+URL: https://prismclips.vercel.app/download
 Title: Download — Prism
 
 YOUR NEXT CREATIVE SHORTCUT
@@ -197,7 +197,7 @@ Read the FAQs
 
 ---
 
-URL: https://prismclips.app/faq
+URL: https://prismclips.vercel.app/faq
 Title: Help & FAQs — Prism
 
 A FEW GOOD QUESTIONS
@@ -231,7 +231,7 @@ Check the project documentation ↗ or share your feedback on GitHub ↗.
 
 ---
 
-URL: https://prismclips.app/about
+URL: https://prismclips.vercel.app/about
 Title: About — Prism
 
 ABOUT PRISM
@@ -256,7 +256,7 @@ See features, how it works and the FAQs, or download Prism.
 
 ---
 
-URL: https://prismclips.app/changelog
+URL: https://prismclips.vercel.app/changelog
 Title: Changelog — Prism
 
 RELEASE NOTES
@@ -301,7 +301,7 @@ NEXT
 
 ---
 
-URL: https://prismclips.app/privacy
+URL: https://prismclips.vercel.app/privacy
 Title: Privacy — Prism
 
 PRIVACY
@@ -348,7 +348,7 @@ This page describes how the software works. It is not legal advice.
 
 ---
 
-URL: https://prismclips.app/terms
+URL: https://prismclips.vercel.app/terms
 Title: Terms — Prism
 
 TERMS
