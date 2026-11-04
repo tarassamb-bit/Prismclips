@@ -66,7 +66,10 @@ function toOpenRouter(body: GeminiRequest) {
   messages.push({ role: "user", content });
   // No response_format: most free models don't support JSON mode, and asking for it hides them. The prompt asks instead.
   const models = hasAudio ? AUDIO_MODELS : hasImage ? IMAGE_MODELS : TEXT_MODELS;
-  return { models, wantsJSON: Boolean(schema), request: { messages, temperature: body.generationConfig?.temperature ?? 0.2 } };
+  // Reasoning models (Mimo) think for minutes on a whole transcript by default, past Supabase's 150 s limit per
+  // function; low effort answers in seconds. Models without reasoning ignore it.
+  const request = { messages, temperature: body.generationConfig?.temperature ?? 0.2, reasoning: { effort: "low", exclude: true } };
+  return { models, wantsJSON: Boolean(schema), request };
 }
 
 /// Models without JSON mode sometimes wrap the object in prose or ``` fences; keep only the object.
@@ -147,6 +150,7 @@ async function checkVideoLimit(request: Request): Promise<{ refused: Response | 
 // Free models report a cost of 0, which would let an account use them without limit. Every answer counts at least this
 // much, so the spend cap also bounds free use: the default cap of 60 minutes × $0.05 allows about 1,500 answers.
 const MIN_ANSWER_USD = 0.002;
+const MODEL_TIMEOUT_MS = 100_000;
 
 /// Adds what one model answer cost to the account. OpenRouter reports the cost in each response.
 async function recordSpend(session: Session, answer: any) {
@@ -194,11 +198,21 @@ Deno.serve(async (request) => {
   let status = 503, reply: any = null;
   const failures: string[] = [];
   for (const model of models) {
-    const upstream = await fetch(OPENROUTER_URL, {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json", "X-Title": "Prism" },
-      body: JSON.stringify({ model, ...converted.request }),
-    });
+    let upstream: Response;
+    try {
+      upstream = await fetch(OPENROUTER_URL, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json", "HTTP-Referer": "https://prismclips.vercel.app", "X-Title": "Prism Clips" },
+        body: JSON.stringify({ model, ...converted.request }),
+        // Answer before Supabase stops the function at 150 s, so the app gets a clear "busy" and retries.
+        signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
+      });
+    } catch {
+      status = 504;
+      failures.push(`${model}: no answer within ${MODEL_TIMEOUT_MS / 1000} s`);
+      console.error(failures.at(-1));
+      break;
+    }
     const answer = await upstream.json().catch(() => ({}));
     // Only answers count toward the cap, so a model that refuses or is down doesn't use up the person's allowance.
     if (upstream.ok && answer?.choices?.length) {

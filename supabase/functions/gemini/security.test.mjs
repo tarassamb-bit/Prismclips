@@ -51,6 +51,7 @@ allowed = true;
 calls.length = 0;
 assert.equal((await handler(request())).status, 200);
 assert.equal(calls.length, 4);
+assert.deepEqual(providerBody.reasoning, { effort: 'low', exclude: true }, 'reasoning models must answer within the function time limit');
 assert.equal(calls[1].headers.Authorization, 'Bearer server-only-test-key');
 assert.equal(JSON.parse(calls[1].body).p_user, '12345678-1234-1234-1234-123456789abc');
 assert.equal(calls[3].headers.Authorization, 'Bearer server-only-test-key');
