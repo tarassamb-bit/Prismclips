@@ -47,7 +47,7 @@ window.prismBeta = (() => {
         if (!list.elements.email.checkValidity() || !email) { status.textContent = 'Enter a valid email address.'; return; }
         list.querySelector('button').disabled = true;
         status.textContent = 'Adding you…';
-        const { error } = await db.rpc('join_beta_waitlist', { p_email: email }).catch((e) => ({ error: e }));
+        const { error } = await Promise.resolve(db.rpc('join_beta_waitlist', { p_email: email })).catch((e) => ({ error: e }));
         list.querySelector('button').disabled = false;
         if (!error) { list.hidden = true; status.textContent = 'You’re on the waitlist. We’ll email you when a spot opens.'; return; }
         status.textContent = /RATE_LIMITED/.test(error.message) ? 'Too many tries. Wait an hour, then try again.'

@@ -99,7 +99,7 @@ window.prismAuth = (() => {
         <div class="auth-row">
           <div class="auth-field"><label for="name">Name</label><input id="name" name="name" autocomplete="name" maxlength="60" placeholder="Your name" required></div>
           <div class="auth-field"><label for="username">Username</label>
-            <div class="auth-at"><span>@</span><input id="username" name="username" autocomplete="username" maxlength="21" placeholder="yourname" spellcheck="false" autocapitalize="none" required></div>
+            <div class="auth-at"><span>@</span><input id="username" name="username" autocomplete="off" maxlength="21" placeholder="yourname" spellcheck="false" autocapitalize="none" required></div>
             <p class="auth-hint" id="username-hint">3–20 letters, numbers or _</p></div>
         </div>
         <div class="auth-field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" required></div>
@@ -183,7 +183,8 @@ window.prismAuth = (() => {
           hint.textContent = 'Checking…';
           const ticket = ++checking;
           checkTimer = setTimeout(async () => {
-            const { data, error } = await db.rpc('username_available', { p_username: value }).catch((e) => ({ error: e }));
+            // Supabase's request builders have no .catch(); Promise.resolve makes them real promises.
+            const { data, error } = await Promise.resolve(db.rpc('username_available', { p_username: value })).catch((e) => ({ error: e }));
             if (ticket !== checking) return;
             // Before the profiles migration the check doesn't exist; let the server decide then.
             usernameOk = error ? true : data === true;
@@ -230,7 +231,7 @@ window.prismAuth = (() => {
             if (await beta?.signUpFailed(error)) return say('');
             // A username taken between the check and the sign-up refuses the account; say so.
             if (/Database error|unexpected_failure/i.test(error.message)) {
-              const { data: free } = await db.rpc('username_available', { p_username: username }).catch(() => ({}));
+              const { data: free } = await Promise.resolve(db.rpc('username_available', { p_username: username })).catch(() => ({}));
               if (free === false) { usernameOk = false; root.querySelector('#username-hint').textContent = `@${username} was just taken`; throw new Error('Pick another username.'); }
             }
             throw error;
