@@ -15,9 +15,9 @@ A fresh perspective on short-form BETA
 
 Your next great Short is already in your video. Prism finds the moments, frames the story, and adds the captions. You make the final cut.
 
-Get Prism See how it works
+Try it free · See how it works
 
-Early beta on Mac · Windows and Linux ports untested on devices
+Free beta · Runs in your browser, nothing to install · Mac app also available
 
 THE GOOD PART STARTS HERE 01 / PRISM EDITOR
 
@@ -32,10 +32,10 @@ AI finds it. You make it yours.9:16 · MP4
 
 Explore clip selection, framing, and captions.
 
-02 / THE PRICE
-### Try the beta.
+02 / THE BETA
+### Try it free.
 
-Sign in to try Prism. Beta AI usage limits apply.
+Prism runs in your browser. Sign up for the free beta: 60 minutes of video per account.
 
 03 / THE DETAILS
 ### A few good questions.
@@ -130,23 +130,17 @@ Choose your platform
 
 ---
 
-URL: https://prismclips.vercel.app/pricing
-Title: Pricing — Prism
+URL: https://prismclips.vercel.app/app
+Title: Web app — Prism
 
-BETA ACCESS
-
-# Start creating.
-Prism is in beta. Sign in to try it, and check Settings in the app for your AI usage allowance. Paid plans are not available yet.
-
-ABOUT THE BETA
-
-### Good to know.
+# Make Shorts in your browser.
+Prism runs in the browser: choose a video, let Prism AI suggest Shorts, edit captions and framing, and export MP4s. Nothing to install. Projects and videos are saved to your account and open on any device you sign in on.
 
 **How does beta access work?**
-Sign in to try Prism. AI usage limits apply; check Settings in the app for your allowance. Paid plans are not available yet.
+Sign up at https://prismclips.vercel.app/signup. The free beta is open to 100 accounts; when it's full, you can join the waitlist. Each account gets 60 minutes of video to make Shorts from and 1 GB of cloud storage for videos. There are no payments or paid plans.
 
-**Which platforms does Prism run on?**
-The beta is available for macOS 14 or later on Apple Silicon. Windows and Linux ports have not yet been tested on real devices.
+**Which browsers work?**
+Current Chrome, Edge, Safari and Firefox on a computer.
 
 **Which languages do captions support?**
 Prism transcribes speech and writes captions in the language spoken in your video. Automatic filler-word cleanup currently works for English only.

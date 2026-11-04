@@ -29,15 +29,15 @@
     else link.removeAttribute('aria-current');
   });
 
-  // Signed in (Supabase keeps the session in localStorage): the header links to the account in the app's Settings.
-  // The app re-checks the session, so a stale entry only costs the sign-in card.
+  // The pages are written for visitors: "Sign in" and "Try it free" (sign-up). Signed in (Supabase keeps the session in
+  // localStorage), the header shows only "Open Prism" and the main buttons go straight into the app, which re-checks the session.
   try {
     const session = JSON.parse(localStorage.getItem('sb-isdplhahgggundbohmlr-auth-token') || 'null');
-    const userId = session?.user?.id;
-    if (userId) {
-      document.querySelectorAll('.nav-signin').forEach((link) => {
-        link.textContent = 'Your account';
-        link.href = '/app/settings/overview';
+    if (session?.user?.id) {
+      document.querySelectorAll('.nav-signin').forEach((link) => { link.hidden = true; });
+      document.querySelectorAll('.nav-download, [data-cta]').forEach((link) => {
+        link.href = '/app/';
+        link.firstChild.textContent = 'Open Prism ';
       });
     }
   } catch {}

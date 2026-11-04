@@ -1,10 +1,11 @@
 # Prism
 
-> Prism is a desktop app that turns long videos into vertical Shorts with captions. AI finds moments that stand on their own; you review them and make the final cut. Captions are written in the language spoken in the video. Prism is in beta; AI usage limits apply.
+> Prism ("Prism Clips") turns long videos into vertical Shorts with captions. It runs in the browser at https://prismclips.vercel.app/app, with nothing to install; desktop apps also exist. Prism AI finds moments that stand on their own; you review them, adjust captions and framing, and export MP4s. Captions are written in the language spoken in the video.
 
 - Who it's for: creators, podcasters and streamers who want short-form clips from long recordings.
-- Platforms: macOS 14 or later on Apple Silicon; Windows and Linux ports have not yet been tested on real devices.
-- Access: On Mac, sign in to try the beta; AI usage limits apply. Windows and Linux use your own Gemini API key. Paid plans are not available yet.
+- Web app: free beta for up to 100 accounts. Each account gets 60 minutes of video to make Shorts from and 1 GB of cloud storage for videos; projects sync across devices. Works in current Chrome, Edge, Safari and Firefox on a computer.
+- Desktop apps: macOS 14 or later on Apple Silicon (sign in, same beta allowance). Windows and Linux builds use your own Gemini API key and have not yet been tested on real devices.
+- Access: sign up at https://prismclips.vercel.app/signup. When the beta is full, the page offers a waitlist. No payments or paid plans.
 - Status: beta. Review every Short before publishing.
 
 ## Pages
@@ -12,7 +13,8 @@
 - [Home](https://prismclips.vercel.app/): Overview of Prism and what it makes.
 - [Features](https://prismclips.vercel.app/features): Finding complete stories, reframing for vertical video, and caption styles.
 - [How it works](https://prismclips.vercel.app/how-it-works): The three steps from a long recording to a finished Short.
-- [Web app](https://prismclips.vercel.app/app): Make Shorts in the browser; free beta with a usage limit.
+- [Web app](https://prismclips.vercel.app/app): Make Shorts in the browser.
+- [Sign up](https://prismclips.vercel.app/signup): Create a free beta account, or join the waitlist.
 - [Download](https://prismclips.vercel.app/download): Installers for macOS, Windows and Linux.
 - [FAQ](https://prismclips.vercel.app/faq): Answers about plans, privacy, editing and getting started.
 - [About](https://prismclips.vercel.app/about): What Prism is and who it's for.
