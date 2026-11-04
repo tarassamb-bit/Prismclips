@@ -13,7 +13,10 @@ const SITEVERIFY = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 const TOLERANCE_SECONDS = 5 * 60;
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-const refuse = (message: string, status = 400) => json({ error: { http_code: status, message } }, status);
+// A refused sign-up is answered with HTTP 200 and an `error` object: Supabase Auth shows its message to the person signing up.
+// Any other status makes Auth report a generic failure ("Invalid payload sent to hook") instead.
+const refuse = (message: string, status = 400) => json({ error: { http_code: status, message } });
+const unauthorized = () => json({ error: { http_code: 401, message: "Unauthorized." } }, 401);
 const base64 = (bytes: ArrayBuffer) => btoa(String.fromCharCode(...new Uint8Array(bytes)));
 
 /** Standard Webhooks: HMAC-SHA256 of "id.timestamp.body" with the base64 secret after "v1,whsec_", recent timestamp. */
@@ -35,9 +38,9 @@ export async function signedBySupabase(body: string, headers: Headers, secret: s
 }
 
 export async function handle(req: Request, env: (name: string) => string | undefined = (n) => Deno.env.get(n)): Promise<Response> {
-  if (req.method !== "POST") return refuse("Method not allowed.", 405);
+  if (req.method !== "POST") return json({ error: { http_code: 405, message: "Method not allowed." } }, 405);
   const body = await req.text();
-  if (!(await signedBySupabase(body, req.headers, env("SIGNUP_HOOK_SECRET") ?? ""))) return refuse("Unauthorized.", 401);
+  if (!(await signedBySupabase(body, req.headers, env("SIGNUP_HOOK_SECRET") ?? ""))) return unauthorized();
   let payload: { user?: { user_metadata?: Record<string, unknown> }; metadata?: { ip_address?: string } };
   try { payload = JSON.parse(body); } catch { return refuse("Bad request."); }
   const token = payload.user?.user_metadata?.turnstile;
