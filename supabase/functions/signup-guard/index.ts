@@ -62,6 +62,10 @@ export async function handle(req: Request, env: (name: string) => string | undef
     const result = await answer.json() as { success?: boolean; "error-codes"?: string[] };
     if (result.success === true) return json({});
     console.warn("Turnstile refused a sign-up:", result["error-codes"]?.join(", "));
+    // A wrong or missing secret is a setup problem, not the person's: don't ask them to retry the check.
+    if (result["error-codes"]?.some((code) => code.endsWith("-secret"))) {
+      return refuse("Sign-up is unavailable right now. Please try again later.", 503);
+    }
   } catch (error) {
     console.error("Turnstile could not be reached:", error);
     return refuse("Sign-up is unavailable right now. Please try again in a moment.", 503);

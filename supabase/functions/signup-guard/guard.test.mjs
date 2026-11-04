@@ -43,6 +43,8 @@ const refusal = async (request) => { const r = await handle(request, env); asser
 assert.equal(await refusal(signed(signup({}))), 400, 'no token: refused');
 cloudflare = { success: false, 'error-codes': ['timeout-or-duplicate'] };
 assert.equal(await refusal(signed(signup({ turnstile: 'used-token' }))), 400, 'a token Cloudflare refuses');
+cloudflare = { success: false, 'error-codes': ['invalid-input-secret'] };
+assert.equal(await refusal(signed(signup({ turnstile: 'good-token' }))), 503, 'a wrong Turnstile secret is a setup problem, not the person');
 cloudflare = 'down';
 assert.equal(await refusal(signed(signup({ turnstile: 'good-token' }))), 503, 'Cloudflare unreachable: refused, not let through');
 cloudflare = { success: true };
