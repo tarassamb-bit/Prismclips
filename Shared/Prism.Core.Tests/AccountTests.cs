@@ -29,21 +29,10 @@ public class AccountTests
     }
 
     [Fact]
-    public async Task SignUpReturnsToTheProductionWebsiteAndWaitsForEmailConfirmation()
+    public void SignUpOpensTheWebsiteWithTheEmailFilledIn()
     {
-        var keys = new MemoryKeys();
-        using var handler = new DelayedAccount { Reply = """{"id":"pending-user"}""" };
-        handler.Release.SetResult();
-        using var client = new HttpClient(handler);
-        var account = new Account(keys, client);
-        await account.SignUp("me@example.com", "password");
-
-        var request = new Uri(Account.ProjectUrl, Assert.Single(handler.Paths));
-        Assert.Equal("/auth/v1/signup", request.AbsolutePath);
-        Assert.Equal("?redirect_to=https://prismclips.vercel.app/login", Uri.UnescapeDataString(request.Query));
-        Assert.False(account.IsSignedIn);
-        Assert.Equal("", keys.Value);
-        Assert.Contains("Check your inbox", account.Status);
+        Assert.Equal("https://prismclips.vercel.app/signup?email=me%2Btest%40example.com", Account.SignUpPage(" me+test@example.com "));
+        Assert.Equal("https://prismclips.vercel.app/signup", Account.SignUpPage(""));
     }
 
     [Theory]

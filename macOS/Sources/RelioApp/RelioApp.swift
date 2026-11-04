@@ -1851,7 +1851,7 @@ struct ContentView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 HStack {
-                    Button("Create account") { Task { await model.account.signUp(email: accountEmail, password: accountPassword); accountPassword = "" } }
+                    Button("Create account") { NSWorkspace.shared.open(Account.signUpPage(email: accountEmail)) }
                     Spacer()
                     if model.account.isWorking { ProgressView().controlSize(.small) }
                     Button("Sign in") { Task { await model.account.signIn(email: accountEmail, password: accountPassword); if model.account.isSignedIn { accountPassword = "" } } }
@@ -2305,7 +2305,7 @@ struct ContentView: View {
                 HStack(spacing: 10) {
                     Button("Sign in") { Task { await model.account.signIn(email: accountEmail, password: accountPassword); if model.account.isSignedIn { accountPassword = "" } } }
                         .buttonStyle(PrismButtonStyle(kind: .primary, stretches: true))
-                    Button("Create account") { Task { await model.account.signUp(email: accountEmail, password: accountPassword); accountPassword = "" } }
+                    Button("Create account") { NSWorkspace.shared.open(Account.signUpPage(email: accountEmail)) }
                         .buttonStyle(PrismButtonStyle(kind: .secondary, stretches: true))
                 }
                 .disabled(model.account.isWorking || accountEmail.isEmpty || accountPassword.isEmpty)

@@ -42,7 +42,9 @@ public sealed class Account : INotifyPropertyChanged
     }
 
     public Task SignIn(string email, string password) => Authenticate("auth/v1/token?grant_type=password", email, password);
-    public Task SignUp(string email, string password) => Authenticate("auth/v1/signup?redirect_to=" + Uri.EscapeDataString(StatsPage), email, password);
+    /// <summary>Accounts are created on the website, which has the "I'm human" check new sign-ups need; the email is filled in.</summary>
+    public static string SignUpPage(string email) =>
+        "https://prismclips.vercel.app/signup" + (string.IsNullOrWhiteSpace(email) ? "" : "?email=" + Uri.EscapeDataString(email.Trim()));
 
     public void SignOut()
     {

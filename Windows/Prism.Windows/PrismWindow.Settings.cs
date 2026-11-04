@@ -75,7 +75,7 @@ public sealed partial class PrismWindow
             AutomationProperties.SetName(password, "Password (at least 6 characters)");
             var hint = Text("Password (at least 6 characters)", 12, muted: true); hint.Margin = new Thickness(0, 0, 0, 4);
             var signIn = Button("Sign in", async () => { await account.SignIn(address.Text, password.Password); if (account.IsSignedIn) password.Clear(); }, true);
-            var create = Button("Create account", async () => { await account.SignUp(address.Text, password.Password); password.Clear(); });
+            var create = Button("Create account", () => WindowsPlatform.OpenExternal(Account.SignUpPage(address.Text)));
             void Enable() => signIn.IsEnabled = create.IsEnabled = !account.IsWorking && address.Text.Trim().Length > 0 && password.Password.Length > 0;
             address.TextChanged += (_, _) => Enable(); password.PasswordChanged += (_, _) => Enable();
             password.KeyDown += async (_, args) => { if (args.Key == Key.Enter && signIn.IsEnabled) { args.Handled = true; await account.SignIn(address.Text, password.Password); if (account.IsSignedIn) password.Clear(); } };

@@ -31,10 +31,12 @@ final class Account {
         await authenticate(path: "auth/v1/token?grant_type=password", email: email, password: password)
     }
 
-    func signUp(email: String, password: String) async {
-        var url = URLComponents(string: "auth/v1/signup")!
-        url.queryItems = [URLQueryItem(name: "redirect_to", value: Self.statsPage.absoluteString)]
-        await authenticate(path: url.string!, email: email, password: password)
+    /// Accounts are created on the website, which has the "I'm human" check new sign-ups need; the email is filled in.
+    static func signUpPage(email: String) -> URL {
+        var url = URLComponents(string: "https://prismclips.vercel.app/signup")!
+        let email = email.trimmingCharacters(in: .whitespaces)
+        if !email.isEmpty { url.queryItems = [URLQueryItem(name: "email", value: email)] }
+        return url.url!
     }
 
     func signOut() {

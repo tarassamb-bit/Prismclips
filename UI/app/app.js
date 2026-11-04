@@ -61,8 +61,10 @@ async function signIn(email, password) {
   return error ? error.message : null;
 }
 
-async function signUp(email, password) {
-  const { data, error } = await db().auth.signUp({ email: email.trim(), password, options: { emailRedirectTo: new URL('app/', location.origin + '/').href } });
+async function signUp(email, password, turnstile) {
+  const { data, error } = await db().auth.signUp({ email: email.trim(), password, options: {
+    emailRedirectTo: new URL('app/', location.origin + '/').href, ...(turnstile ? { data: { turnstile } } : {}),
+  } });
   if (error) return { message: error.message };
   track('signup_completed');
   return { message: data.session ? null : 'Check your inbox to confirm your email, then sign in.' };
@@ -231,6 +233,7 @@ function renderGate(message = '') {
       <form id="auth-form" class="stack">
         <input name="email" type="email" placeholder="Email" autocomplete="username" aria-label="Email">
         <input name="password" type="password" placeholder="Password (at least 6 characters)" autocomplete="current-password" aria-label="Password">
+        <div id="turnstile-slot" class="turnstile-slot"></div>
         <p id="auth-status" class="muted small" role="status">${esc(message)}</p>
         <div class="row between">
           <button type="button" class="button ghost" id="auth-up">Create account</button>
@@ -241,6 +244,8 @@ function renderGate(message = '') {
   const form = $('#auth-form');
   const buttons = [$('#auth-up'), $('#auth-in')];
   // Free beta spots; once they're gone, Create account gives way to the waitlist, and signing in still works.
+  // The "I'm human" check is only for Create account; it shows only when Cloudflare needs a click.
+  const human = window.prismTurnstile?.mount($('#turnstile-slot'));
   const beta = window.prismBeta?.attach(db(), form, { note: 'muted small beta-spots', field: 'stack', button: 'button primary' }, [$('#auth-up')]);
   const refresh = (working = false) => { for (const b of buttons) b.disabled = working || !form.email.value || !form.password.value; };
   form.addEventListener('input', () => refresh());
@@ -250,7 +255,13 @@ function renderGate(message = '') {
     const status = $('#auth-status');
     const { email, password } = form;
     status.textContent = mode === 'up' ? 'Creating account…' : 'Signing in…';
-    const failure = mode === 'up' ? (await signUp(email.value, password.value)).message : await signIn(email.value, password.value);
+    let failure;
+    try {
+      failure = mode === 'up' ? (await signUp(email.value, password.value, await human?.token())).message : await signIn(email.value, password.value);
+    } catch (error) {
+      failure = error.message;
+    }
+    if (mode === 'up') human?.reset();
     refresh();
     if (failure && mode === 'up' && await beta?.signUpFailed({ message: failure })) { status.textContent = ''; return; }
     // Supabase's wording for any failure in the database during sign-up; never show it as is.

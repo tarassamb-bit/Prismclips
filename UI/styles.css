@@ -564,3 +564,6 @@ td.table-message { text-align: center; line-height: 1.9; padding: 22px 8px; }
 .beta-waitlist h3 { margin: 0; font-size: 18px; }
 .beta-waitlist p { margin: 0; color: var(--text2); }
 .beta-waitlist form { display: grid; gap: 12px; }
+
+.turnstile-slot:empty { display: none; }
+.turnstile-slot { margin: 4px 0 12px; }

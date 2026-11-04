@@ -349,3 +349,5 @@ details.insp-section:not([open]) { gap: 0; }
 .beta-waitlist p { margin: 0; color: var(--text2); font-size: 13px; }
 .beta-waitlist form { display: grid; gap: 10px; }
 .beta-waitlist label { display: none; }
+
+.turnstile-slot:empty { display: none; }

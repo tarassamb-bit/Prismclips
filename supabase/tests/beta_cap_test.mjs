@@ -20,8 +20,9 @@ await admin.query(`
   create schema if not exists auth;
   create table if not exists auth.users (id uuid primary key default gen_random_uuid(), email text);
   grant usage on schema public to anon, authenticated;`);
-await admin.query(migration);
-await admin.query(migration); // safe to run twice
+const stripToken = fs.readFileSync(new URL('../migrations/202611040002_strip_signup_token.sql', import.meta.url), 'utf8');
+await admin.query('alter table auth.users add column if not exists raw_user_meta_data jsonb');
+for (const sql of [migration, migration, stripToken, stripToken]) await admin.query(sql); // each safe to run twice
 await admin.query('delete from auth.users');
 await admin.query('truncate public.beta_waitlist, public.beta_waitlist_attempts, public.analytics_events');
 
@@ -62,6 +63,10 @@ assert.equal((await admin.query('select count(*)::int as n from auth.users')).ro
 await admin.query("delete from auth.users where email = 'tester1@example.com'");
 assert.equal(await spotsLeft(), 1);
 await signUp(admin, 102);
+// The Turnstile token sent with a sign-up is not kept; other metadata is.
+await admin.query("delete from auth.users where email = 'tester2@example.com'");
+await admin.query(`insert into auth.users (email, raw_user_meta_data) values ('tester2@example.com', '{"turnstile":"0.abc","plan":"beta"}')`);
+assert.deepEqual((await admin.query("select raw_user_meta_data as m from auth.users where email = 'tester2@example.com'")).rows[0].m, { plan: 'beta' });
 console.log('PASS beta cap: #100 gets in, #101 is refused with BETA_FULL, simultaneous sign-ups at 99 let only one in');
 
 // Waitlist: anyone can join; no one but the server can read it; spam is rate-limited.
