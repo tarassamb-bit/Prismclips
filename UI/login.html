@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0E0F14" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
-  <title>Log in — Prism</title>
+  <title>Sign in — Prism</title>
   <meta name="description" content="Log in to your Prism account to see your export history.">
   <link rel="canonical" href="https://prismclips.app/login">
   <meta property="og:type" content="website">
@@ -24,65 +24,20 @@
   <meta name="robots" content="noindex">
   <link rel="preload" href="fonts/SpaceGrotesk-Medium.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="styles.css">
-  <script src="site.js" defer></script>
+  <link rel="stylesheet" href="auth.css">
   <script src="vendor/supabase-2.45.4.js" defer></script>
   <script src="supabase-client.js" defer></script>
-  <script src="account.js" defer></script>
+  <script src="beta.js" defer></script>
+  <script src="turnstile.js" defer></script>
+  <script src="auth.js" defer></script>
+  <script src="auth-page.js" defer></script>
   <!-- Vercel Web Analytics and Speed Insights: cookieless page views and load times. -->
   <script src="/analytics.js"></script>
   <script defer src="/_vercel/insights/script.js"></script>
   <script defer src="/_vercel/speed-insights/script.js"></script>
 </head>
-<body data-auth-page="login" class="page-account">
-  <a class="skip-link" href="#main">Skip to content</a>
-  <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
-    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
-    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M5 16v4h14v-4"/></symbol>
-    <symbol id="i-play" viewBox="0 0 24 24"><path d="m9 5 11 7-11 7Z"/></symbol>
-    <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5ZM20 2v4m-2-2h4"/></symbol>
-    <symbol id="i-frame" viewBox="0 0 24 24"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5M9 8h6v8H9Z"/></symbol>
-    <symbol id="i-captions" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 10H7v4h3m7-4h-3v4h3"/></symbol>
-    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
-    <symbol id="i-github" viewBox="0 0 24 24"><path d="M9 19c-4 1-4-2-6-2m15 5v-3.9c0-1-.3-1.8-.8-2.3 2.7-.3 5.5-1.3 5.5-6A4.7 4.7 0 0 0 21.4 6a4.4 4.4 0 0 0-.1-3.7S20.3 2 17.4 3.8a13.2 13.2 0 0 0-7 0C7.5 2 6.5 2.3 6.5 2.3A4.4 4.4 0 0 0 6.4 6a4.7 4.7 0 0 0-1.3 3.3c0 4.7 2.8 5.7 5.5 6-.5.5-.8 1.3-.8 2.3V22" transform="translate(-1 -1) scale(.95)"/></symbol>
-    <symbol id="i-apple" viewBox="0 0 24 24"><path d="M16.6 12.5c0-2 1.7-3 1.8-3.1-1-1.5-2.6-1.7-3.2-1.7-1.4-.2-2.7.8-3.4.8s-1.8-.8-2.9-.8C7.4 7.7 6 8.6 5.2 10c-1.6 2.8-.4 7 1.2 9.3.8 1.1 1.6 2.3 2.8 2.2 1.1 0 1.6-.7 3-.7s1.8.7 3 .7 2-1.1 2.7-2.2c.9-1.3 1.3-2.5 1.3-2.5s-2.6-1-2.6-4.3ZM14.3 6.1c.6-.8 1.1-1.9 1-3.1-1 .1-2.1.7-2.8 1.5-.6.7-1.2 1.9-1.1 3 1.1.1 2.2-.6 2.9-1.4Z"/></symbol>
-    <symbol id="i-windows" viewBox="0 0 24 24"><path d="m3 5 8-1v7H3Zm10-1 8-1v8h-8ZM3 13h8v7l-8-1Zm10 0h8v8l-8-1Z"/></symbol>
-    <symbol id="i-linux" viewBox="0 0 24 24"><path d="M8 11V7a4 4 0 0 1 8 0v4l3 7-4 3-3-2-3 2-4-3Z"/><path d="m10 11 2 1 2-1M10 7v1m4-1v1"/></symbol>
-    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></symbol>
-    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2"/></symbol>
-  </defs></svg>
-  <header class="site-header">
-    <div class="container header-inner">
-      <a class="brand" href="index.html" aria-label="Prism home"><img src="icon.png" width="33" height="33" alt=""><span>Prism<span class="brand-dot">.</span></span></a>
-      <nav id="main-nav" aria-label="Main navigation">
-        <a href="features.html">Features</a>
-        <a href="how-it-works.html">How it works</a>
-        
-        <a href="faq.html">FAQs</a>
-        <a href="changelog.html">Changelog</a>
-      </nav>
-      <div class="header-actions">
-        <a class="nav-signin" href="login.html" aria-current="page">Sign in</a>
-        <a class="nav-download" href="app/">Open Prism <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a>
-      </div>
-      <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="main-nav" aria-label="Open navigation"><span></span><span></span></button>
-    </div>
-  </header>
-  <main id="main">
-
-    <section class="account-page container" aria-labelledby="account-title">
-      <div class="account-intro"><p class="eyebrow">YOUR CREATIVE MOMENTUM</p><h1 id="account-title" data-account-title>Your next<br><span>chapter.</span></h1><p data-account-description>Sign in to see your export history, Shorts made, and minutes of Shorts. Pick up where your creativity left off.</p><div class="account-note"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg><span>Sign in to see your export history and use the app.</span></div><a class="text-link" href="download.html">Just here for the app? <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a></div>
-      <div class="account-card" id="account"><div id="auth-form-wrap"><span class="card-eyebrow">YOUR PRISM ACCOUNT</span><h2>Welcome back.</h2><p>Sign in with your Prism account.</p><form id="auth"><div class="form-field"><label for="email">Email address</label><input id="email" type="email" name="email" placeholder="you@example.com" autocomplete="username" required></div><div class="form-field"><label for="password">Password <span>At least 6 characters</span></label><input id="password" type="password" name="password" placeholder="Your password" autocomplete="current-password" minlength="6" required></div><button id="auth-submit" class="button button-primary" type="submit" value="in">Sign in <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button><div class="create-account-row"><span>New around here?</span><a href="signup.html">Create an account</a></div></form></div>
-        <div id="signedIn" hidden><div class="signed-in-heading"><div><span class="card-eyebrow">YOUR CREATIVE MOMENTUM</span><p id="who"></p></div><button class="button button-secondary button-small" id="signOut" type="button">Sign out</button></div><div class="stats"><div class="stat"><b id="export-count">—</b><span>Exports</span></div><div class="stat"><b id="shorts">—</b><span>Shorts made</span></div><div class="stat"><b id="minutes">—</b><span>Minutes of Shorts</span></div></div><h3 class="history-title">Recent exports</h3><div class="table-wrap"><table><caption class="sr-only">Your most recent 50 exports from Prism for Mac</caption><thead><tr><th scope="col">Date</th><th scope="col">Shorts</th><th scope="col">Length</th><th scope="col">Quality</th></tr></thead><tbody id="rows"></tbody></table></div></div>
-        <p id="status" role="status" aria-live="polite" aria-atomic="true"></p><noscript><p>Enable JavaScript to sign in and view your stats. All downloads work without it.</p></noscript>
-      </div>
-    </section>
-  </main>
-  <footer class="site-footer">
-    <div class="container footer-main">
-      <div class="footer-brand"><a class="brand" href="index.html" aria-label="Prism home"><img src="icon.png" width="28" height="28" alt=""><span>Prism<span class="brand-dot">.</span></span></a><p>One in. Many out.</p></div>
-      <nav aria-label="Footer navigation"><a href="download.html">Download</a><a href="about.html">About</a><a href="login.html">Your account</a><a href="faq.html">Help & FAQs</a><a href="https://github.com/tarassamb-bit/Prismclips/issues">Feedback ↗</a><a href="privacy.html">Privacy</a><a href="terms.html">Terms</a></nav>
-    </div>
-    <div class="container footer-bottom"><span>Built for creators. Open to everyone.</span><span>© 2026 Prismclips <span class="separator">/</span> Prism beta</span></div>
-  </footer>
+<body data-auth-page="login">
+  <div id="auth-root"></div>
+  <noscript><p style="padding:24px">Enable JavaScript to sign in. All downloads work without it: <a href="/download">Download Prism</a>.</p></noscript>
 </body>
 </html>

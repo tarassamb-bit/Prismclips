@@ -19,10 +19,13 @@ await admin.query(`
   end $$;
   create schema if not exists auth;
   create table if not exists auth.users (id uuid primary key default gen_random_uuid(), email text);
+  create or replace function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
+  grant usage on schema auth to anon, authenticated;
   grant usage on schema public to anon, authenticated;`);
 const stripToken = fs.readFileSync(new URL('../migrations/202611040002_strip_signup_token.sql', import.meta.url), 'utf8');
 await admin.query('alter table auth.users add column if not exists raw_user_meta_data jsonb');
-for (const sql of [migration, migration, stripToken, stripToken]) await admin.query(sql); // each safe to run twice
+const profiles = fs.readFileSync(new URL('../migrations/202611040003_profiles.sql', import.meta.url), 'utf8');
+for (const sql of [migration, migration, stripToken, stripToken, profiles, profiles]) await admin.query(sql); // each safe to run twice
 await admin.query('delete from auth.users');
 await admin.query('truncate public.beta_waitlist, public.beta_waitlist_attempts, public.analytics_events');
 
@@ -110,6 +113,42 @@ await assert.rejects(asRole(a, 'authenticated', 'delete from public.analytics_ev
 const daily = (await admin.query('select name, events::int from public.analytics_daily order by name')).rows;
 assert.deepEqual(daily, [{ name: 'analysis_started', events: 1 }, { name: 'clip_exported', events: 1 }, { name: 'clips_generated', events: 1 }]);
 console.log('PASS analytics: the eight events with bucket data only, insert-only for users, daily counts for the server');
+
+// Profiles: the sign-up's name and username become the profile; usernames are unique, checked live, and only yours to read.
+await admin.query('delete from auth.users');
+const signUpAs = (client, email, meta) => client.query('insert into auth.users (email, raw_user_meta_data) values ($1, $2) returning id', [email, meta]);
+const available = async (name) => (await asRole(a, 'anon', 'select public.username_available($1) as ok', [name])).rows[0].ok;
+assert.equal(await available('Marian_1'), true);
+const marian = (await signUpAs(admin, 'm@example.com', { name: '  Marian  ', username: '@Marian_1', turnstile: 'x' })).rows[0].id;
+assert.deepEqual((await admin.query('select display_name, username from public.profiles where user_id = $1', [marian])).rows[0], { display_name: 'Marian', username: 'marian_1' });
+assert.equal(await available('marian_1'), false, 'taken, whatever the case');
+assert.equal(await available('MARIAN_1'), false);
+assert.equal(await available('no spaces allowed'), false);
+assert.equal(await available('ab'), false, 'too short');
+await assert.rejects(signUpAs(admin, 'copy@example.com', { username: 'marian_1' }), /USERNAME_TAKEN/);
+assert.equal((await admin.query("select count(*)::int as n from auth.users where email = 'copy@example.com'")).rows[0].n, 0, 'no account without its username');
+const google = (await signUpAs(admin, 'g@example.com', { full_name: 'Google Person' })).rows[0].id;
+assert.deepEqual((await admin.query('select display_name, username from public.profiles where user_id = $1', [google])).rows[0], { display_name: 'Google Person', username: null });
+// Simultaneous sign-ups with the same new username: one gets it, the other is refused.
+const race = await Promise.all([a, b].map((client, i) => signUpAs(client, `race${i}@example.com`, { username: 'same_name' }).then(() => 'in', (e) => e.message)));
+assert.equal(race.filter((r) => r === 'in').length, 1, String(race));
+// A signed-in person reads and edits only their own profile.
+const asUser = async (id, sql, params) => {
+  await a.query('begin');
+  try {
+    await a.query(`select set_config('request.jwt.claim.sub', $1, true)`, [id]);
+    await a.query('set local role authenticated');
+    const result = await a.query(sql, params); await a.query('commit'); return result;
+  } catch (error) { await a.query('rollback'); throw error; }
+};
+assert.equal((await asUser(google, 'select user_id from public.profiles')).rows.length, 1, 'only their own row');
+await asUser(google, 'update public.profiles set username = $1 where user_id = $2', ['google_person', google]);
+assert.equal((await asUser(google, 'update public.profiles set username = $1 where user_id = $2', ['hacked', marian])).rowCount, 0, "can't edit someone else's");
+await assert.rejects(asUser(google, 'update public.profiles set username = $1 where user_id = $2', ['marian_1', google]), /duplicate key/);
+await assert.rejects(asUser(google, 'update public.profiles set username = $1 where user_id = $2', ['Bad Name', google]), /check constraint/);
+await assert.rejects(asUser(google, 'update public.profiles set user_id = $1 where user_id = $1', [google]), /permission denied/);
+assert.equal(await available('google_person'), false);
+console.log('PASS profiles: name and unique username from sign-up, live availability, own profile only');
 
 await admin.query('delete from auth.users');
 await Promise.all([admin, a, b].map((client) => client.end()));

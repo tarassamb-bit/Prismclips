@@ -41,8 +41,11 @@ export async function handle(req: Request, env: (name: string) => string | undef
   if (req.method !== "POST") return json({ error: { http_code: 405, message: "Method not allowed." } }, 405);
   const body = await req.text();
   if (!(await signedBySupabase(body, req.headers, env("SIGNUP_HOOK_SECRET") ?? ""))) return unauthorized();
-  let payload: { user?: { user_metadata?: Record<string, unknown> }; metadata?: { ip_address?: string } };
+  let payload: { user?: { user_metadata?: Record<string, unknown>; app_metadata?: { provider?: string } }; metadata?: { ip_address?: string } };
   try { payload = JSON.parse(body); } catch { return refuse("Bad request."); }
+  // Sign-up with Google can't carry the check, and Google has already checked the person; only email sign-ups need it.
+  const provider = payload.user?.app_metadata?.provider;
+  if (provider && provider !== "email") return json({});
   const token = payload.user?.user_metadata?.turnstile;
   const secret = env("TURNSTILE_SECRET");
   if (typeof token !== "string" || token.length === 0 || token.length > 2048) {

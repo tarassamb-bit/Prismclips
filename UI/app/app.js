@@ -56,19 +56,7 @@ function renderUsage() {
   badge.textContent = state.usage ? `${Math.ceil(state.usage.used)} of ${Math.floor(state.usage.allowance)} min used` : '';
 }
 
-async function signIn(email, password) {
-  const { error } = await db().auth.signInWithPassword({ email: email.trim(), password });
-  return error ? error.message : null;
-}
 
-async function signUp(email, password, turnstile) {
-  const { data, error } = await db().auth.signUp({ email: email.trim(), password, options: {
-    emailRedirectTo: new URL('app/', location.origin + '/').href, ...(turnstile ? { data: { turnstile } } : {}),
-  } });
-  if (error) return { message: error.message };
-  track('signup_completed');
-  return { message: data.session ? null : 'Check your inbox to confirm your email, then sign in.' };
-}
 
 // MARK: Routes: every screen has its own address, so reload, Back and shared links all work
 
@@ -218,61 +206,25 @@ async function updateStorage() {
   bar.style.width = estimate ? `${Math.min(100, Math.max(2, estimate.usage / estimate.quota * 100))}%` : '0';
 }
 
-/** While nobody is signed in, this card covers the whole app, like the Mac's sign-in card. */
+/** While nobody is signed in, the full-screen sign-in screen (/auth.js) covers the whole app. */
 function renderGate(message = '') {
   const gate = $('#gate');
   const open = !state.session;
   $('.shell').inert = open;
   gate.hidden = !open;
   if (!open) { gate.innerHTML = ''; return; }
-  if (gate.querySelector('form') && !message) return;
-  gate.innerHTML = `
-    <div class="gate-card" role="dialog" aria-modal="true" aria-labelledby="gate-title">
-      <div class="row"><img src="/icon.png" width="28" height="28" alt=""><h2 id="gate-title">Sign in to Prism</h2></div>
-      <p class="muted">Sign in or create a free account to start. Prism's AI runs on our server, so you don't need an API key.</p>
-      <form id="auth-form" class="stack">
-        <input name="email" type="email" placeholder="Email" autocomplete="username" aria-label="Email">
-        <input name="password" type="password" placeholder="Password (at least 6 characters)" autocomplete="current-password" aria-label="Password">
-        <div id="turnstile-slot" class="turnstile-slot"></div>
-        <p id="auth-status" class="muted small" role="status">${esc(message)}</p>
-        <div class="row between">
-          <button type="button" class="button ghost" id="auth-up">Create account</button>
-          <button class="button primary" id="auth-in">Sign in</button>
-        </div>
-      </form>
-    </div>`;
-  const form = $('#auth-form');
-  const buttons = [$('#auth-up'), $('#auth-in')];
-  // Free beta spots; once they're gone, Create account gives way to the waitlist, and signing in still works.
-  // The "I'm human" check is only for Create account; it shows only when Cloudflare needs a click.
-  const human = window.prismTurnstile?.mount($('#turnstile-slot'));
-  const beta = window.prismBeta?.attach(db(), form, { note: 'muted small beta-spots', field: 'stack', button: 'button primary' }, [$('#auth-up')]);
-  const refresh = (working = false) => { for (const b of buttons) b.disabled = working || !form.email.value || !form.password.value; };
-  form.addEventListener('input', () => refresh());
-  refresh();
-  const run = async (mode) => {
-    refresh(true);
-    const status = $('#auth-status');
-    const { email, password } = form;
-    status.textContent = mode === 'up' ? 'Creating account…' : 'Signing in…';
-    let failure;
-    try {
-      failure = mode === 'up' ? (await signUp(email.value, password.value, await human?.token())).message : await signIn(email.value, password.value);
-    } catch (error) {
-      failure = error.message;
-    }
-    if (mode === 'up') human?.reset();
-    refresh();
-    if (failure && mode === 'up' && await beta?.signUpFailed({ message: failure })) { status.textContent = ''; return; }
-    // Supabase's wording for any failure in the database during sign-up; never show it as is.
-    if (failure) { status.textContent = /Database error/i.test(failure) ? 'Couldn’t create your account right now. Please try again in a moment.' : failure; return; }
-    state.session = (await db().auth.getSession()).data.session;
-    renderGate();
-    refreshUsage();
-  };
-  form.addEventListener('submit', (event) => { event.preventDefault(); run('in'); });
-  $('#auth-up').addEventListener('click', () => run('up'));
-  form.email.focus();
+  if (gate.querySelector('.auth') && !message) return;
+  gate.innerHTML = '';
+  const screen = window.prismAuth.mount(gate, {
+    db: db(), mode: new URLSearchParams(location.search).get('mode') === 'signup' ? 'signup' : 'signin', redirectTo: location.origin + '/app/',
+    onSignedIn: async () => {
+      state.session = (await db().auth.getSession()).data.session;
+      renderGate();
+      refreshUsage();
+    },
+  });
+  if (message) gate.querySelector('.auth-status').textContent = message;
+  return screen;
 }
 
 // MARK: Home (projects and folders), as in the macOS app
@@ -756,6 +708,14 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
         <p class="muted small">Your projects, Shorts and videos are saved to your account, and each export adds its date, number of Shorts, length and quality to your stats under Overview.</p>
         ${email ? '<div class="row"><button class="button ghost" data-action="signout">Sign out</button><button class="button ghost danger" data-action="delete-account">Delete account</button></div><p id="delete-account-note" class="error small" role="alert"></p>' : ''}
       </div>
+      ${email ? `<form id="profile-form" class="box stack">
+        <strong>Profile</strong>
+        <div class="profile-fields">
+          <label>Name <input name="name" maxlength="60" autocomplete="name"></label>
+          <label>Username <span class="at-input"><span>@</span><input name="username" maxlength="21" spellcheck="false" autocapitalize="none" placeholder="choose one"></span></label>
+        </div>
+        <div class="row"><button class="button primary" disabled>Save</button><span id="profile-status" class="muted small" role="status"></span></div>
+      </form>` : ''}
       ${email ? `<div class="box"><strong>Cloud sync</strong><p id="sync-text">${esc(syncText(syncStatus()))}</p>
         <p class="muted small">Your projects, folders, Shorts and edits are saved to your account, so you can open them on any device you sign in on. Their videos are kept in the cloud too: see Usage.</p>
         <button class="button ghost" data-action="sync-now">Sync now</button></div>` : ''}`;
@@ -772,7 +732,39 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
     if (!error) { await refreshUsage(); showSettings('usage'); }
   });
   if (state.session && tab === 'overview') fillAccountData(tab);
+  if (state.session && tab === 'account') fillProfile();
   if (tab === 'usage' && email) fillCloudVideo();
+}
+
+/** Name and username (profiles table): filled in, then saved on Save. Usernames are unique; the database has the last word. */
+async function fillProfile() {
+  const form = $('#profile-form');
+  if (!form) return;
+  const { data, error } = await db().from('profiles').select('display_name, username').maybeSingle();
+  if (!form.isConnected) return;
+  const status = $('#profile-status'), save = form.querySelector('button');
+  if (error) { status.textContent = 'Your profile couldn’t load. Try again later.'; return; }
+  form.elements.name.value = data?.display_name ?? '';
+  form.elements.username.value = data?.username ?? '';
+  if (data?.display_name) $('.who strong').textContent = data.display_name;
+  if (data?.username) $('.who .muted').textContent = `@${data.username} · ${state.session.user.email}`;
+  form.addEventListener('input', () => {
+    const username = form.elements.username.value.trim().replace(/^@/, '').toLowerCase();
+    if (form.elements.username.value !== username) form.elements.username.value = username;
+    const valid = /^[a-z0-9_]{3,20}$/.test(username) && form.elements.name.value.trim();
+    status.textContent = username && !/^[a-z0-9_]{3,20}$/.test(username) ? '3–20 letters, numbers or _' : '';
+    save.disabled = !valid;
+  });
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    save.disabled = true;
+    status.textContent = 'Saving…';
+    const username = form.elements.username.value, display_name = form.elements.name.value.trim();
+    const { error: failed } = await db().from('profiles').update({ display_name, username }).eq('user_id', state.session.user.id);
+    status.textContent = !failed ? 'Saved.' : /duplicate|unique/i.test(failed.message) ? `@${username} is taken. Try another.` : 'Couldn’t save. Try again.';
+    if (!failed) { $('.who strong').textContent = display_name; $('.who .muted').textContent = `@${username} · ${state.session.user.email}`; }
+    else save.disabled = false;
+  });
 }
 
 /** Loads what the dashboard used to show. Each piece fills in when it arrives, and is dropped if the person has moved to another tab. */

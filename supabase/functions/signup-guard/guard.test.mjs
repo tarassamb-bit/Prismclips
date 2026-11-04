@@ -48,4 +48,9 @@ assert.equal(await refusal(signed(signup({ turnstile: 'good-token' }))), 503, 'C
 cloudflare = { success: true };
 const noSecret = await handle(signed(signup({ turnstile: 'good-token' })), (n) => n === 'SIGNUP_HOOK_SECRET' ? hookSecret : undefined);
 assert.equal((await noSecret.json()).error.http_code, 503, 'no Turnstile secret: fails closed');
+const googleSignup = { ...signup({}), user: { email: 'g@b.co', user_metadata: {}, app_metadata: { provider: 'google' } } };
+const asked = verdicts.length;
+assert.deepEqual(await (await handle(signed(googleSignup), env)).json(), {}, 'Google sign-ups pass without a token');
+assert.equal(verdicts.length, asked, 'Cloudflare is not asked for them');
+assert.equal(await refusal(signed({ ...signup({}), user: { email: 'a@b.co', user_metadata: {}, app_metadata: { provider: 'email' } } })), 400, 'email sign-ups still need it');
 console.log('PASS sign-ups need a Turnstile token Cloudflare accepts; failures refuse');
