@@ -150,7 +150,16 @@ async function checkVideoLimit(request: Request): Promise<{ refused: Response | 
 // Free models report a cost of 0, which would let an account use them without limit. Every answer counts at least this
 // much, so the spend cap also bounds free use: the default cap of 60 minutes × $0.05 allows about 1,500 answers.
 const MIN_ANSWER_USD = 0.002;
-const MODEL_TIMEOUT_MS = 100_000;
+const MODEL_TIMEOUT_MS = 130_000;
+// All models together must answer before Supabase stops the function at 150 s (the sign-in and usage checks come first).
+const REQUEST_BUDGET_MS = 135_000;
+// A fallback model gets tried only with at least this much of the budget left.
+const MIN_MODEL_TIME_MS = 20_000;
+
+/** OpenRouter keeps a slow request alive by sending ": OPENROUTER PROCESSING" lines before the JSON answer. */
+export function parseOpenRouter(body: string): any {
+  return JSON.parse(body.split("\n").filter((line) => !line.startsWith(":")).join("\n"));
+}
 
 /// Adds what one model answer cost to the account. OpenRouter reports the cost in each response.
 async function recordSpend(session: Session, answer: any) {
@@ -197,7 +206,15 @@ Deno.serve(async (request) => {
   const models = [...new Set([...(chosen ? [chosen] : []), ...converted.models])];
   let status = 503, reply: any = null;
   const failures: string[] = [];
+  const started = Date.now();
   for (const model of models) {
+    // Supabase stops the function at 150 s: a model started with too little time left could only be cut off.
+    const left = REQUEST_BUDGET_MS - (Date.now() - started);
+    if (left < MIN_MODEL_TIME_MS) {
+      status = 504;
+      failures.push(`no time left to try ${model}`);
+      break;
+    }
     let upstream: Response;
     try {
       upstream = await fetch(OPENROUTER_URL, {
@@ -205,7 +222,7 @@ Deno.serve(async (request) => {
         headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json", "HTTP-Referer": "https://prismclips.vercel.app", "X-Title": "Prism Clips" },
         body: JSON.stringify({ model, ...converted.request }),
         // Answer before Supabase stops the function at 150 s, so the app gets a clear "busy" and retries.
-        signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
+        signal: AbortSignal.timeout(Math.min(MODEL_TIMEOUT_MS, left)),
       });
     } catch {
       status = 504;
@@ -213,7 +230,7 @@ Deno.serve(async (request) => {
       console.error(failures.at(-1));
       break;
     }
-    const answer = await upstream.json().catch(() => ({}));
+    const answer = await upstream.text().then(parseOpenRouter).catch(() => ({}));
     // Only answers count toward the cap, so a model that refuses or is down doesn't use up the person's allowance.
     if (upstream.ok && answer?.choices?.length) {
       try { await recordSpend(session, answer); } catch { return fail(503, "Prism could not record usage. Please try again later."); }

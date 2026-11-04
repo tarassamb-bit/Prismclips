@@ -5,7 +5,7 @@ const env = { SUPABASE_URL: 'https://example.invalid', SUPABASE_SERVICE_ROLE_KEY
 let handler;
 globalThis.Deno = { env: { get: (key) => env[key] }, serve: (fn) => { handler = fn; } };
 const calls = [];
-let providerFails = false, providerBody = null;
+let providerFails = false, providerBody = null, slowAnswer = false;
 let identityStatus = 200, reservationStatus = 200, allowed = true, spendStatus = 200, runAllowed = true;
 globalThis.fetch = async (url, options = {}) => {
   calls.push({ url, ...options });
@@ -16,7 +16,10 @@ globalThis.fetch = async (url, options = {}) => {
   if (url === 'https://openrouter.ai/api/v1/chat/completions') {
     providerBody = JSON.parse(options.body);
     if (providerFails) return Response.json({ error: { message: 'Provider returned error', metadata: { raw: 'unsupported audio data' } } }, { status: 400 });
-    return Response.json({ choices: [{ message: { content: 'ok' } }], usage: { cost: 0 } });
+    const body = JSON.stringify({ choices: [{ message: { content: 'ok' } }], usage: { cost: 0 } });
+    // A slow answer: OpenRouter sends keep-alive comment lines before the JSON.
+    if (slowAnswer) return new Response(': OPENROUTER PROCESSING\n\n: OPENROUTER PROCESSING\n\n' + body, { headers: { 'Content-Type': 'application/json' } });
+    return new Response(body, { headers: { 'Content-Type': 'application/json' } });
   }
   throw new Error(`Unexpected URL: ${url}`);
 };
@@ -116,3 +119,11 @@ const reason = (await refused.json()).error.message;
 assert.ok(reason.includes('nemotron-3-nano-omni') && reason.includes('unsupported audio data'), reason);
 providerFails = false;
 console.log('PASS audio format by type, and every model failure reported with the provider reason');
+
+// A slow answer arrives after OpenRouter's keep-alive lines; it is the answer, not a failure.
+slowAnswer = true;
+const slow = await handler(request());
+assert.equal(slow.status, 200);
+assert.equal((await slow.json()).candidates[0].content.parts[0].text, 'ok');
+slowAnswer = false;
+console.log('PASS slow answers after OpenRouter keep-alive lines are read, not thrown away');
