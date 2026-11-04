@@ -47,7 +47,7 @@ export function pages(cues, words, style) {
   const result = [];
   for (const cue of cues) {
     const exact = words.filter((w) => w.start >= cue.start - 0.02 && w.start + w.duration <= cue.start + cue.duration + 0.02).sort((a, b) => a.start - b.start);
-    const cueWords = exact.length > 0 && sameTokens(exact.flatMap((w) => tokens(w.text)), tokens(cue.text)) ? exact : estimatedWords(cue);
+    const cueWords = exact.length > 0 && sameTokens(exact.flatMap((w) => tokens(w.text)), tokens(cue.text)) ? exact : spokenWords(cue, words);
     let group = [];
     const flush = () => {
       if (group.length === 0) return;
@@ -67,12 +67,22 @@ export function pages(cues, words, style) {
     }
     flush();
   }
-  // A page stays up until the next one starts, or briefly after its last word when a pause follows.
+  // Each page stays up until the next one starts, so there is never a gap between captions; the last one lingers briefly.
   result.forEach((page, index) => {
-    const next = index + 1 < result.length ? result[index + 1].start : Infinity;
-    page.end = Math.max(page.start + 0.05, Math.min(page.end + 0.35, next));
+    page.end = index + 1 < result.length ? Math.max(page.start + 0.05, result[index + 1].start) : page.end + 0.35;
   });
   return result;
+}
+
+/** A line whose text no longer matches the word timings (edited, or numbers written differently): its words follow the
+ *  speech heard in its time, one for one when the counts match, else spread over just the spoken part, not its silences. */
+function spokenWords(cue, words) {
+  const heard = words.filter((w) => w.start < cue.start + cue.duration && w.start + w.duration > cue.start).sort((a, b) => a.start - b.start);
+  if (heard.length === 0) return estimatedWords(cue);
+  const texts = cue.text.split(/\s+/).filter(Boolean);
+  if (texts.length === heard.length) return texts.map((text, i) => ({ text, start: heard[i].start, duration: heard[i].duration }));
+  const start = Math.max(cue.start, heard[0].start), end = Math.min(cue.start + cue.duration, heard.at(-1).start + heard.at(-1).duration);
+  return end > start ? estimatedWords({ text: cue.text, start, duration: end - start }) : estimatedWords(cue);
 }
 
 /** Word timings spread across a line by length, for lines without exact timings. */

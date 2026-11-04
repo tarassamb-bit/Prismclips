@@ -4,6 +4,7 @@ import {
   Output, BufferTarget, Mp4OutputFormat, CanvasSource, AudioSampleSource, VideoSampleSink, AudioSampleSink, canEncodeVideo,
 } from '../../vendor/mediabunny-1.61.5.min.mjs';
 import { ShortMakerError } from './gemini.js';
+import { letterbox } from './media.js';
 import { eased } from './framing.js';
 import { elements, drawCaptions } from './captions.js';
 import { EXPORT_QUALITIES } from './models.js';
@@ -33,8 +34,10 @@ function easedPath(original, usable) {
   return path;
 }
 
-export function layoutAt(segment, time, sourceWidth, sourceHeight) {
-  const ow = sourceWidth, oh = sourceHeight;
+export function layoutAt(segment, time, sourceWidth, sourceHeight, bars = { top: 0, bottom: 0 }) {
+  // Crops use the picture between any burned-in black bars; Fit still shows the whole frame.
+  const top = bars.top ?? 0;
+  const ow = sourceWidth, oh = Math.max(1, sourceHeight - top - (bars.bottom ?? 0));
   const keyframes = (segment.cropKeyframes ?? []).filter((k) => Number.isFinite(k.time) && Number.isFinite(k.position));
   // A tracked path Gemini marked as screens or slides shows the whole frame, like Fit.
   const wholeFrame = keyframes.length > 0 && keyframes.every((k) => k.preserveWholeFrame === true);
@@ -43,14 +46,14 @@ export function layoutAt(segment, time, sourceWidth, sourceHeight) {
     const centers = segment.splitCenters?.length === 2 ? segment.splitCenters : null;
     const windowX = (center) => Math.min(ow - half, Math.max(0, center * ow - half / 2));
     return [
-      { kind: 'crop', sx: centers ? windowX(centers[0]) : 0, sy: 0, sw: half, sh: oh, dx: 0, dy: 0, dw: 1080, dh: 960 },
-      { kind: 'crop', sx: centers ? windowX(centers[1]) : half, sy: 0, sw: half, sh: oh, dx: 0, dy: 960, dw: 1080, dh: 960 },
+      { kind: 'crop', sx: centers ? windowX(centers[0]) : 0, sy: top, sw: half, sh: oh, dx: 0, dy: 0, dw: 1080, dh: 960 },
+      { kind: 'crop', sx: centers ? windowX(centers[1]) : half, sy: top, sw: half, sh: oh, dx: 0, dy: 960, dw: 1080, dh: 960 },
     ];
   }
   if (segment.fitToFrame === true || wholeFrame) {
-    const scale = Math.min(1080 / ow, 1920 / oh);
-    const dw = ow * scale, dh = oh * scale;
-    return [{ kind: 'fit', sx: 0, sy: 0, sw: ow, sh: oh, dx: (1080 - dw) / 2, dy: (1920 - dh) / 2, dw, dh }];
+    const scale = Math.min(1080 / ow, 1920 / sourceHeight);
+    const dw = ow * scale, dh = sourceHeight * scale;
+    return [{ kind: 'fit', sx: 0, sy: 0, sw: ow, sh: sourceHeight, dx: (1080 - dw) / 2, dy: (1920 - dh) / 2, dw, dh }];
   }
   const scale = Math.max(1080 / ow, 1920 / oh) * Math.min(2, Math.max(1, segment.cropZoom ?? 1.08));
   const scaledWidth = ow * scale, scaledHeight = oh * scale;
@@ -60,7 +63,7 @@ export function layoutAt(segment, time, sourceWidth, sourceHeight) {
   if (pan <= 2) x = Math.max(0, (scaledWidth - 1080) / 2);
   else if (keyframes.length === 0) x = pan * Math.min(1, Math.max(0, segment.cropPosition ?? 0.5));
   else x = pan * cropPositionAt(easedPath(segment.cropKeyframes, keyframes), time, (segment.cropPosition ?? 0.5) - 0.5);
-  return [{ kind: 'crop', sx: x / scale, sy: y / scale, sw: 1080 / scale, sh: 1920 / scale, dx: 0, dy: 0, dw: 1080, dh: 1920 }];
+  return [{ kind: 'crop', sx: x / scale, sy: top + y / scale, sw: 1080 / scale, sh: 1920 / scale, dx: 0, dy: 0, dw: 1080, dh: 1920 }];
 }
 
 /** The whole-frame layouts sit on a soft copy of the picture. It is drawn at 1/16 size, blurred there by hand (a canvas blur filter is slow
@@ -109,10 +112,10 @@ function drawSoftBackground(ctx, sample, sourceWidth, sourceHeight) {
 
 /** Draws one frame into the 1080×1920 context (already scaled to the output size). `sample` has draw(ctx, x, y, w, h): a decoded
  * frame when exporting, a video element in the live player. */
-export function drawFrame(ctx, sample, segment, sourceWidth, sourceHeight, time) {
+export function drawFrame(ctx, sample, segment, sourceWidth, sourceHeight, time, bars) {
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, 1080, 1920);
-  for (const op of layoutAt(segment, time, sourceWidth, sourceHeight)) {
+  for (const op of layoutAt(segment, time, sourceWidth, sourceHeight, bars)) {
     if (op.kind === 'fit' && (op.dw < 1080 || op.dh < 1920)) {
       drawSoftBackground(ctx, sample, sourceWidth, sourceHeight);
     }
@@ -136,32 +139,37 @@ export function drawFrame(ctx, sample, segment, sourceWidth, sourceHeight, time)
  * The video's audio is kept unless the Short is muted.
  */
 export async function render(source, segment, options) {
-  const { width = 1080, height = 1920, codec = 'avc', bitrate = 12e6, metadata = {}, progress = () => {}, signal } = options;
+  const { width = 1080, height = 1920, codec = 'avc', bitrate = 12e6, metadata = {}, progress = () => {}, step = () => {}, signal } = options;
   if (![segment.start, segment.duration].every(Number.isFinite) || segment.start < 0 || segment.duration <= 0 || segment.start + segment.duration > source.duration + 0.05) {
     throw new ShortMakerError('invalidRange');
   }
+  step('checking the video encoder');
   if (!(await canEncodeVideo(codec, { width, height, bitrate }).catch(() => false))) {
     throw new ShortMakerError('cannotExport', codec === 'hevc' ? "This browser can't encode HEVC; choose 1080p · H.264." : 'This browser cannot encode H.264 video.');
   }
+  const bars = await letterbox(source, segment.start, segment.duration);
   // Layout and captions are drawn in 1080×1920 units and scaled onto the output canvas.
   const canvas = new OffscreenCanvas(width, height);
   const ctx = canvas.getContext('2d');
   const layers = elements(segment);
   const output = new Output({ format: new Mp4OutputFormat({ fastStart: 'in-memory' }), target: new BufferTarget() });
   if (metadata.title || metadata.description) output.setMetadataTags({ title: metadata.title || undefined, description: metadata.description || undefined });
-  const videoSource = new CanvasSource(canvas, { codec, bitrate, keyFrameInterval: 2 });
+  // Safari's encoder in the default "quality" mode takes a few frames and then never answers; "realtime" encodes every frame.
+  const videoSource = new CanvasSource(canvas, { codec, bitrate, keyFrameInterval: 2, latencyMode: 'realtime' });
   output.addVideoTrack(videoSource, { frameRate: FPS });
   const keepAudio = segment.isMuted !== true && source.audio;
   const audioSource = keepAudio ? new AudioSampleSource({ codec: 'aac', bitrate: 160_000 }) : null;
   if (audioSource) output.addAudioTrack(audioSource);
+  step('starting the encoder');
   await output.start();
+  step('reading the first frame');
   const count = Math.max(1, Math.round(segment.duration * FPS));
   const start = segment.start;
   const cancelled = () => signal?.throwIfAborted();
   const emit = async (sample, index) => {
     const time = index / FPS;
     ctx.setTransform(width / 1080, 0, 0, height / 1920, 0, 0);
-    drawFrame(ctx, sample, segment, source.width, source.height, time);
+    drawFrame(ctx, sample, segment, source.width, source.height, time, bars);
     drawCaptions(ctx, layers, time);
     await videoSource.add(time, 1 / FPS);
     progress(Math.min(1, (index + 1) / count));
@@ -184,6 +192,7 @@ export async function render(source, segment, options) {
     previous?.close();
     if (next === 0) throw new ShortMakerError('noVideo');
     if (audioSource) {
+      step('adding the sound');
       const audioSink = new AudioSampleSink(source.audio);
       for await (const sample of audioSink.samples(start, start + segment.duration)) {
         cancelled();
@@ -198,6 +207,7 @@ export async function render(source, segment, options) {
     }
     videoSource.close();
     audioSource?.close();
+    step('finishing the file');
     await output.finalize();
   } catch (error) {
     await output.cancel().catch(() => {});

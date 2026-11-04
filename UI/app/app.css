@@ -34,6 +34,22 @@ label.check { display: flex; align-items: center; gap: 8px; color: var(--text); 
 label.check input { margin: 0; }
 fieldset { border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin: 0; }
 legend { padding: 0 6px; color: var(--text2); font-size: 13px; }
+.insp { display: grid; gap: 18px; }
+.insp-section { display: grid; gap: 12px; padding-top: 16px; border-top: 1px solid var(--border); }
+.insp-section h3 { margin: 0; font-size: 14px; font-weight: 600; color: var(--text); }
+.insp-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.insp select, .insp input:not([type=checkbox]) { width: 100%; }
+details.insp-section > summary { list-style: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+details.insp-section > summary::-webkit-details-marker { display: none; }
+details.insp-section > summary::after { content: "+"; color: var(--text2); font-size: 18px; line-height: 1; }
+details.insp-section[open] > summary::after { content: "−"; }
+details.insp-section:not([open]) { gap: 0; }
+.style-preview.wide { width: 100%; height: 72px; justify-self: stretch; }
+.link-button { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; justify-self: start; font-size: 14px; }
+.link-button.danger { color: var(--coral); }
+.insp-actions { display: grid; gap: 12px; justify-items: center; padding-top: 4px; }
+.insp-actions .button { width: 100%; justify-content: center; }
+.insp-actions .link-button { justify-self: center; }
 .button { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 8px 16px; border: 1px solid var(--border); background: var(--surface1); cursor: pointer; text-decoration: none; color: var(--text); white-space: nowrap; }
 .button.primary { background: var(--sky); border-color: var(--sky); color: #0e0f14; font-weight: 500; }
 .button.ghost { background: transparent; }
@@ -325,3 +341,11 @@ legend { padding: 0 6px; color: var(--text2); font-size: 13px; }
 .evict-list li { display: flex; justify-content: space-between; gap: 12px; background: var(--surface2); border-radius: 10px; padding: 8px 12px; font-size: 13px; }
 
 .section-title { font-size: 16px; margin: 8px 0 -4px; }
+
+/* Beta cap on the sign-in card (/beta.js). */
+.beta-spots { margin: 0; }
+.beta-waitlist { display: grid; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+.beta-waitlist h3 { margin: 0; font-size: 15px; }
+.beta-waitlist p { margin: 0; color: var(--text2); font-size: 13px; }
+.beta-waitlist form { display: grid; gap: 10px; }
+.beta-waitlist label { display: none; }

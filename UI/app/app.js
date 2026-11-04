@@ -64,10 +64,15 @@ async function signIn(email, password) {
 async function signUp(email, password) {
   const { data, error } = await db().auth.signUp({ email: email.trim(), password, options: { emailRedirectTo: new URL('app/', location.origin + '/').href } });
   if (error) return { message: error.message };
+  track('signup_completed');
   return { message: data.session ? null : 'Check your inbox to confirm your email, then sign in.' };
 }
 
 // MARK: Routes: every screen has its own address, so reload, Back and shared links all work
+
+/** A custom analytics event (see /analytics.js). Only counts and buckets go in `data`, never titles or anything a person wrote. */
+const track = (name, data) => window.prismTrack?.(name, data);
+const lengthBucket = (minutes) => minutes < 10 ? '<10 min' : minutes < 30 ? '10–30 min' : minutes < 60 ? '30–60 min' : '60+ min';
 
 const slug = (name) => name.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'untitled';
 /** Projects and folders are named by their title plus the start of their id, so two with the same name still have different addresses. */
@@ -235,6 +240,8 @@ function renderGate(message = '') {
     </div>`;
   const form = $('#auth-form');
   const buttons = [$('#auth-up'), $('#auth-in')];
+  // Free beta spots; once they're gone, Create account gives way to the waitlist, and signing in still works.
+  const beta = window.prismBeta?.attach(db(), form, { note: 'muted small beta-spots', field: 'stack', button: 'button primary' }, [$('#auth-up')]);
   const refresh = (working = false) => { for (const b of buttons) b.disabled = working || !form.email.value || !form.password.value; };
   form.addEventListener('input', () => refresh());
   refresh();
@@ -245,7 +252,9 @@ function renderGate(message = '') {
     status.textContent = mode === 'up' ? 'Creating account…' : 'Signing in…';
     const failure = mode === 'up' ? (await signUp(email.value, password.value)).message : await signIn(email.value, password.value);
     refresh();
-    if (failure) { status.textContent = failure; return; }
+    if (failure && mode === 'up' && await beta?.signUpFailed({ message: failure })) { status.textContent = ''; return; }
+    // Supabase's wording for any failure in the database during sign-up; never show it as is.
+    if (failure) { status.textContent = /Database error/i.test(failure) ? 'Couldn’t create your account right now. Please try again in a moment.' : failure; return; }
     state.session = (await db().auth.getSession()).data.session;
     renderGate();
     refreshUsage();
@@ -558,6 +567,7 @@ function startCreate({ project = null, media = null, file = null } = {}) {
 }
 
 async function chooseVideo(file) {
+  track('video_selected');
   const c = state.create;
   c.error = '';
   c.busy = true;
@@ -1099,6 +1109,7 @@ async function makeShorts(media, options) {
   await refreshUsage();
   const left = Math.max(0, (state.usage?.allowance ?? 0) - (state.usage?.used ?? 0));
   if (check.charge > left) {
+    track('limit_reached');
     return showError('Not enough minutes', `This re-analysis needs ${Math.floor(check.charge)} min, but you have ${Math.floor(left)} min left. Ask for a promo code to get more, then enter it in Usage.`, 'limit');
   }
   confirmRerun(media, options, { key, minutes, check });
@@ -1116,6 +1127,7 @@ function confirmRerun(media, options, usage) {
     </div>`);
   $('#confirm-rerun').addEventListener('click', () => {
     closeDialog();
+    track('reanalysis_started', { length: lengthBucket(usage.minutes) });
     runShorts(media, options, usage.key, usage.minutes);
   });
 }
@@ -1143,6 +1155,7 @@ async function runShorts(media, options, key, minutes) {
       throw new GeminiError('usageLimit', 429, left === null ? null
         : `This video is ${Math.ceil(minutes)} min long, but you have ${Math.floor(left)} of your ${Math.floor(u.allowance)} beta minutes left. A video you already used doesn't count again. Ask for a promo code to get more, then enter it in Settings › Usage.`);
     }
+    track('analysis_started', { length: lengthBucket(minutes) });
     const results = await Shorts.analyze(source, configuration, {
       duration: options.duration, count: options.count, region: options.region, customStart: options.region === 'custom' ? options.customStart : null,
       customEnd: options.region === 'custom' ? options.customEnd : null, excluding: usedRanges, videoType: options.videoType, cachedTranscript: saved,
@@ -1169,6 +1182,8 @@ async function runShorts(media, options, key, minutes) {
     if (state.project?.id !== projectId) return;
     project.segments.push(...created);
     await persist();
+    track('analysis_finished', { length: lengthBucket(minutes) });
+    track('clips_generated', { clips: created.length });
     endTask(task);
     state.selectedId = created[0].id;
     renderEditor();
@@ -1191,7 +1206,7 @@ function reportGenerationError(error) {
   if (cause instanceof GeminiError) {
     if (cause.failure === 'noStrongClips' || cause.failure === 'noDistinctClips') return showError('No Shorts found', cause.message);
     if (cause.failure === 'signIn' || cause.status === 401 || cause.status === 403) return showError('Check your sign-in', cause.message);
-    if (cause.failure === 'usageLimit') return showError('You’ve reached your beta limit', cause.message, 'limit');
+    if (cause.failure === 'usageLimit') { track('limit_reached'); return showError('You’ve reached your beta limit', cause.message, 'limit'); }
     if (cause.failure === 'request' && [429, 500, 502, 503, 504, 546].includes(cause.status)) return showError('Prism AI is unavailable right now', cause.message, 'temporary');
   }
   if (error instanceof ShortMakerError) return showError('Couldn’t make Shorts', error.message);
@@ -1231,11 +1246,16 @@ function renderTask() {
   const task = state.task;
   host.hidden = !task;
   if (!task) return;
-  host.innerHTML = `<div class="card progress-card" role="status">
-      <strong>${esc(task.stage)}</strong>
-      <div class="bar"><div style="width:${Math.round((task.progress ?? 0) * 100)}%"></div></div>
+  // Export updates this every frame; rebuilding the card each time would swallow clicks on Cancel.
+  if (!host.querySelector('.progress-card')) {
+    host.innerHTML = `<div class="card progress-card" role="status">
+      <strong></strong>
+      <div class="bar"><div></div></div>
       <button class="button ghost" data-action="cancel">Cancel</button>
     </div>`;
+  }
+  host.querySelector('strong').textContent = task.stage;
+  host.querySelector('.bar > div').style.width = `${Math.round((task.progress ?? 0) * 100)}%`;
 }
 
 function openDialog(html) {
@@ -1421,42 +1441,37 @@ function renderInspector() {
   if (!host) return;
   const segment = selected();
   if (!segment) { host.innerHTML = '<p class="muted small">Select a Short to edit it.</p>'; return; }
-  const media = state.project.media.find((m) => m.id === segment.mediaId);
-  const source = state.sources.get(segment.mediaId);
-  const maxStart = Math.max(0, (source?.duration ?? media?.duration ?? 0) - segment.duration);
   const styleOptions = CAPTION_STYLES.map((s) => `<option value="${s}" ${s === (segment.captionStyle ?? 'classic') ? 'selected' : ''}>${STYLE_TITLES[s]}</option>`).join('');
+  const choice = (field, values, fallback) => values.map((v) => `<option value="${v}" ${v === (segment[field] ?? fallback) ? 'selected' : ''}>${v[0].toUpperCase() + v.slice(1)}</option>`).join('');
   host.innerHTML = `
-    <div class="stack">
+    <div class="insp">
       <label>Title <input data-field="suggestedTitle" value="${esc(segment.suggestedTitle ?? '')}"></label>
-      <label>Description <textarea data-field="suggestedDescription" rows="3">${esc(segment.suggestedDescription ?? '')}</textarea></label>
-      <p class="muted small">${esc(segment.selectionReason ?? '')}</p>
       ${segment.captionNotice ? `<p class="notice small">${esc(segment.captionNotice)}</p>` : ''}
-      <fieldset class="stack"><legend>Timing</legend>
-        <label>Start (s) <input type="number" step="0.1" min="0" max="${maxStart}" data-field="start" value="${segment.start.toFixed(2)}"></label>
-        <label>Length (s) <input type="number" step="0.1" min="0.5" data-field="duration" value="${segment.duration.toFixed(2)}"></label>
-        <p class="muted small">${source ? `Source is ${clock(source.duration)} long.` : ''} Changing the timing re-tracks the framing.</p>
-      </fieldset>
-      <fieldset class="stack"><legend>Captions</legend>
+      <section class="insp-section">
+        <h3>Captions</h3>
+        <canvas class="style-preview wide" id="inspector-style" aria-label="Caption style preview"></canvas>
         <label>Style <select data-field="captionStyle">${styleOptions}</select></label>
-        <canvas class="style-preview" id="inspector-style" aria-label="Caption style preview"></canvas>
-        <p class="muted small">${esc(STYLE_DETAILS[segment.captionStyle ?? 'classic'] ?? '')}</p>
-        <label>Position <select data-field="captionPosition">${['top', 'middle', 'bottom'].map((p) => `<option value="${p}" ${p === (segment.captionPosition ?? 'bottom') ? 'selected' : ''}>${p[0].toUpperCase() + p.slice(1)}</option>`).join('')}</select></label>
-        <label>Size <select data-field="captionSize">${['small', 'medium', 'large'].map((p) => `<option value="${p}" ${p === (segment.captionSize ?? 'medium') ? 'selected' : ''}>${p[0].toUpperCase() + p.slice(1)}</option>`).join('')}</select></label>
+        <div class="insp-pair">
+          <label>Position <select data-field="captionPosition">${choice('captionPosition', ['top', 'middle', 'bottom'], 'bottom')}</select></label>
+          <label>Size <select data-field="captionSize">${choice('captionSize', ['small', 'medium', 'large'], 'medium')}</select></label>
+        </div>
         <label class="check"><input type="checkbox" data-field="captionAnimated" ${segment.captionAnimated ? 'checked' : ''}> Pop in new captions</label>
-        <label>Caption lines <textarea data-field="captionTexts" rows="5">${esc((segment.captions ?? []).map((c) => c.text).join('\n'))}</textarea></label>
-        <p class="muted small">Edit the words, one line per caption. Timing stays the same.</p>
-        <button class="button ghost" data-action="regen-captions">Regenerate subtitles</button>
-      </fieldset>
-      <fieldset class="stack"><legend>Picture</legend>
+        <label>Words <textarea data-field="captionTexts" rows="4">${esc((segment.captions ?? []).map((c) => c.text).join('\n'))}</textarea></label>
+        <button class="link-button" data-action="regen-captions">Regenerate subtitles</button>
+      </section>
+      <details class="insp-section">
+        <summary><h3>Picture and sound</h3></summary>
+        <div class="stack">
         <label class="check"><input type="checkbox" data-field="splitScreen" ${segment.splitScreen ? 'checked' : ''}> Split screen (two speakers)</label>
         <label class="check"><input type="checkbox" data-field="fitToFrame" ${segment.fitToFrame ? 'checked' : ''}> Show the whole frame</label>
         <label class="check"><input type="checkbox" data-field="isMuted" ${segment.isMuted ? 'checked' : ''}> Mute audio</label>
         <label>On-screen text <input data-field="caption" value="${esc(segment.caption ?? '')}"></label>
-        <button class="button ghost" data-action="retrack">Re-track the subject</button>
-      </fieldset>
-      <div class="row between">
-        <button class="button ghost danger" data-action="remove">Remove Short</button>
-        <button class="button ghost" data-action="export-one">Export this Short</button>
+        <button class="link-button" data-action="retrack">Re-track the subject</button>
+        </div>
+      </details>
+      <div class="insp-actions">
+        <button class="button primary" data-action="export-one">Export this Short</button>
+        <button class="link-button danger" data-action="remove">Remove Short</button>
       </div>
     </div>`;
   stylePreview($('#inspector-style'), segment.captionStyle ?? 'classic');
@@ -1573,13 +1588,15 @@ function openExportDialog(onlyId = null) {
   const list = state.project.segments.map((s, i) => `
     <label class="check"><input type="checkbox" name="pick" value="${s.id}" ${!onlyId || s.id === onlyId ? 'checked' : ''}>
       ${esc(s.suggestedTitle || `Short ${i + 1}`)} <span class="muted small">${clock(s.duration)}</span></label>`).join('');
-  const qualities = Object.entries(EXPORT_QUALITIES).map(([k, q]) => `<option value="${k}">${q.title} — ${q.detail}</option>`).join('');
+  // shortcut: Safari reports HEVC encoding as hardware but runs it at ~4 frames/s (2.5 min per 20 s Short), so it isn't offered there; drop when Safari's HEVC gets fast.
+  const safari = /Safari\//.test(navigator.userAgent) && !/Chrome|Chromium|Edg|CriOS|FxiOS/.test(navigator.userAgent);
+  const qualities = Object.entries(EXPORT_QUALITIES).filter(([k]) => !(safari && k === 'compact')).map(([k, q]) => `<option value="${k}">${q.title} — ${q.detail}</option>`).join('');
   openDialog(`
     <form id="export-form" class="stack">
       <h2>Export Shorts</h2>
       ${list}
       <label>Quality <select name="quality">${qualities}</select></label>
-      <p class="muted small">Each Short downloads as an MP4, with its title and description in a .txt file next to it.</p>
+      <p class="muted small">Each Short downloads as an MP4.</p>
       <p id="export-status" class="muted small" role="status"></p>
       <div class="row end">
         <button type="button" class="button ghost" data-action="close">Cancel</button>
@@ -1597,9 +1614,13 @@ function openExportDialog(onlyId = null) {
       try { folder = await window.showDirectoryPicker({ id: 'prism-export', mode: 'readwrite', startIn: 'downloads' }); }
       catch (error) { if (error.name === 'AbortError') return; }
     }
-    exportShorts(ids, form.elements.quality.value, folder);
+    const quality = form.elements.quality.value;
+    closeDialog();
+    exportShorts(ids, quality, folder);
   });
 }
+
+const STALL_MS = 45_000;
 
 async function exportShorts(ids, quality, folder = null) {
   const task = beginTask('Exporting…');
@@ -1613,21 +1634,31 @@ async function exportShorts(ids, quality, folder = null) {
       const source = await sourceFor(media);
       const label = segment.suggestedTitle?.trim() || `${state.project.title} Short ${state.project.segments.indexOf(segment) + 1}`;
       setTask(`Exporting ${index + 1} of ${ids.length} · ${label}`, index / ids.length);
-      const blob = await render(source, segment, {
+      // A browser whose encoder or decoder stops answering would leave the export waiting forever; name the step instead.
+      let lastStep = 'opening the video', lastActive = Date.now(), watchdog;
+      const active = () => { lastActive = Date.now(); };
+      const stalled = new Promise((_, reject) => {
+        watchdog = setInterval(() => {
+          if (Date.now() - lastActive < STALL_MS) return;
+          task.controller.abort();
+          reject(new Error(`The export stopped while ${lastStep} and made no progress for ${STALL_MS / 1000} seconds. Try 720p · H.264, or another browser.`));
+        }, 1000);
+      });
+      const blob = await Promise.race([stalled, render(source, segment, {
         ...settings, quality, signal: task.controller.signal,
         metadata: { title: segment.suggestedTitle?.trim() ?? '', description: segment.suggestedDescription?.trim() ?? '' },
-        progress: (fraction) => setTask(`Exporting ${index + 1} of ${ids.length} · ${label}`, (index + fraction) / ids.length),
-      });
+        step: (name) => { lastStep = name; active(); },
+        progress: (fraction) => { lastStep = 'rendering the video'; active(); setTask(`Exporting ${index + 1} of ${ids.length} · ${label}`, (index + fraction) / ids.length); },
+      })]).finally(() => clearInterval(watchdog));
       const base = await uniqueName(folder, safeName(label));
       await saveFile(folder, blob, `${base}.mp4`);
-      const notes = [segment.suggestedTitle?.trim(), segment.suggestedDescription?.trim()].filter(Boolean).join('\n\n');
-      if (notes) await saveFile(folder, new Blob([notes + '\n'], { type: 'text/plain' }), `${base}.txt`);
+      track('clip_exported', { quality });
       seconds.push(segment.duration);
       made++;
     }
   } catch (error) {
     endTask(task);
-    if (task.controller.signal.aborted) return;
+    if (task.cancelled) return;
     return showError('Couldn’t export', error.message);
   }
   endTask(task);

@@ -180,3 +180,68 @@ export function cuesCovering(transcript, start, finish) {
   if (!transcript || transcript.start > start + 0.01 || transcript.end < finish - 0.01) return null;
   return transcript.cues.filter((c) => c.start >= start - 0.001 && end(c) <= finish + 0.001);
 }
+
+/** Speech in 10 ms loudness frames: loud stretches of at least 0.1 s, with gaps shorter than 0.15 s (inside a phrase) closed. */
+export function speechRuns(levels, from) {
+  const frame = 0.01;
+  const smooth = Array.from(levels, (_, i) => {
+    const low = Math.max(0, i - 2), high = Math.min(levels.length - 1, i + 2);
+    let sum = 0;
+    for (let j = low; j <= high; j++) sum += levels[j];
+    return sum / (high - low + 1);
+  });
+  const sorted = [...smooth].sort((a, b) => a - b);
+  const quiet = sorted[Math.floor(sorted.length * 0.1)] ?? 0, loud = sorted[Math.floor(sorted.length * 0.9)] ?? 0;
+  const threshold = Math.max(0.003, quiet + (loud - quiet) * 0.2);
+  const runs = [];
+  smooth.forEach((value, i) => {
+    if (value <= threshold) return;
+    const start = from + i * frame, last = runs.at(-1);
+    if (last && start - last.end < 0.15) last.end = start + frame;
+    else runs.push({ start, end: start + frame });
+  });
+  return runs.filter((r) => r.end - r.start >= 0.1);
+}
+
+/** The AI's word timings are guesses. Keeps its words and order, and moves them onto the speech actually heard: consecutive
+ *  words are grouped onto each stretch of speech so group lengths fit the stretch (at the clip's own speaking rate) and stay
+ *  near where the AI heard them; inside a stretch, words share its time by length. Unchanged when speech can't be found. */
+export function alignToSpeech(words, runs) {
+  if (words.length === 0 || runs.length === 0) return words;
+  const weight = words.map((w) => w.text.replace(/[^\p{L}\p{N}]/gu, '').length + 1);
+  const prefix = [0];
+  for (const w of weight) prefix.push(prefix.at(-1) + w);
+  const voiced = runs.reduce((sum, r) => sum + r.end - r.start, 0);
+  const rate = voiced / prefix.at(-1);
+  const n = words.length, m = runs.length;
+  // best[j][i]: cheapest way to place the first i words on the first j stretches; a stretch may stay empty (a breath, a sound).
+  const best = Array.from({ length: m + 1 }, () => new Float64Array(n + 1).fill(Infinity));
+  const back = Array.from({ length: m + 1 }, () => new Int32Array(n + 1).fill(-1));
+  best[0][0] = 0;
+  for (let j = 1; j <= m; j++) {
+    const run = runs[j - 1], length = run.end - run.start, middle = (run.start + run.end) / 2;
+    for (let i = 0; i <= n; i++) {
+      if (best[j - 1][i] + length < best[j][i]) { best[j][i] = best[j - 1][i] + length; back[j][i] = i; }
+      for (let k = 0; k < i; k++) {
+        if (best[j - 1][k] === Infinity) continue;
+        const heard = (words[k].start + words[i - 1].start + words[i - 1].duration) / 2;
+        const cost = best[j - 1][k] + Math.abs(length - (prefix[i] - prefix[k]) * rate) + 0.5 * Math.abs(heard - middle);
+        if (cost < best[j][i]) { best[j][i] = cost; back[j][i] = k; }
+      }
+    }
+  }
+  if (best[m][n] === Infinity) return words;
+  const result = new Array(n);
+  for (let j = m, i = n; j > 0; j--) {
+    const k = back[j][i], run = runs[j - 1];
+    let t = run.start;
+    const scale = (run.end - run.start) / Math.max(1e-9, prefix[i] - prefix[k]);
+    for (let w = k; w < i; w++) {
+      const duration = weight[w] * scale;
+      result[w] = { ...words[w], start: t, duration };
+      t += duration;
+    }
+    i = k;
+  }
+  return result;
+}

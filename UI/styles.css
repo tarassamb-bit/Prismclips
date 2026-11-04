@@ -557,3 +557,10 @@ td.table-message { text-align: center; line-height: 1.9; padding: 22px 8px; }
   .app-user #who { display: none; }
   .app-main { padding-block: 28px; }
 }
+
+/* Beta cap on the sign-up form (beta.js). */
+.beta-spots { margin: 0 0 14px; font-size: 13px; color: var(--text2); }
+.beta-waitlist { display: grid; gap: 12px; }
+.beta-waitlist h3 { margin: 0; font-size: 18px; }
+.beta-waitlist p { margin: 0; color: var(--text2); }
+.beta-waitlist form { display: grid; gap: 12px; }

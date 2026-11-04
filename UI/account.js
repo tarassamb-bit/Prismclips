@@ -118,6 +118,10 @@
     return;
   }
   available = true;
+  // The sign-up page shows the beta's free spots, and the waitlist once they're gone.
+  const beta = signInButton?.value === 'up' && window.prismBeta
+    ? window.prismBeta.attach(db, form, { note: 'beta-spots', field: 'form-field', button: 'button button-primary' })
+    : null;
 
   // ?next=/pricing returns the user where they came from. Only same-site paths are allowed; parsing
   // the URL also catches tricks like "/\evil.com" that a simple prefix check lets through.
@@ -207,6 +211,8 @@
       return 'Too many sign-up emails were sent in the last hour. Please try again a bit later.';
     }
     if (error?.status === 429) return 'Too many attempts. Wait a minute, then try again.';
+    // Supabase's wording for any failure in the database during sign-up; never show it as is.
+    if (/Database error/i.test(error?.message ?? '')) return 'Couldn’t create your account right now. Please try again in a moment.';
     return error?.message || 'Couldn’t connect. Please try again.';
   }
 
@@ -274,13 +280,15 @@
         })
         : await db.auth.signInWithPassword(credentials);
       if (error) throw error;
+      if (action === 'up') window.prismTrack?.('signup_completed');
       passwordInput.value = '';
       if (data?.session) showSession(data.session);
       else say(action === 'up'
         ? 'Check your inbox to confirm your email, then sign in here.'
         : 'Your session couldn’t be established. Please try signing in again.');
     } catch (error) {
-      say(authErrorMessage(error), 'error');
+      if (action === 'up' && await beta?.signUpFailed(error)) say('');
+      else say(authErrorMessage(error), 'error');
     } finally {
       setPending(false);
     }

@@ -1,7 +1,7 @@
 // OpenShorts' score → shortlist → detail pipeline on Prism AI, a port of Shared/Prism.Core/Selection.cs (GeminiSelection).
 import { generate, generateText, text, inline, map, GeminiError, StageFailure } from './gemini.js';
 import * as T from './transcript.js';
-import { frameJpeg, audioChunk } from './media.js';
+import { frameJpeg, audioChunk, audioLevels } from './media.js';
 
 export const PARALLEL_REQUESTS = 6;
 export const SENTENCE_TIMING_NOTICE = 'Captions use sentence timing because word alignment could not be verified. Review timing before export.';
@@ -331,7 +331,11 @@ export async function transcribe(source, interval, configuration, { progress, gr
     handedBack = prefix;
     finished?.(results.slice(0, prefix).flat(), chunks[prefix - 1].start + chunks[prefix - 1].length);
   });
-  return results.flat();
+  const words = results.flat();
+  if (granularity !== 'words' || words.length === 0) return words;
+  // Word times from the AI are rough; move them onto the speech heard in the audio.
+  const levels = await audioLevels(source, interval.start, interval.end).catch(() => null);
+  return levels ? T.alignToSpeech(words, T.speechRuns(levels, interval.start)) : words;
 }
 
 /** One chunk of audio. Timing for long chunks sometimes doesn't validate; such a chunk is split in half and retried. */

@@ -2,6 +2,7 @@
 // layout and captions on top, drawn by the same code as export. No rendering wait, and edits show on the next frame.
 import { drawFrame } from './engine/render.js';
 import { elements, drawCaptions } from './engine/captions.js';
+import { letterbox } from './engine/media.js';
 
 const clock = (seconds) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 let stop = null;
@@ -25,12 +26,13 @@ export function mountPlayer(host, segment, source, onFailure) {
   const layers = elements(segment);
   // The same drawing code as export, with the video element standing in for a decoded frame.
   const frame = { draw: (c, x, y, w, h) => c.drawImage(video, x, y, w, h) };
-  let raf = 0, alive = true;
+  let raf = 0, alive = true, bars;
+  letterbox(source, segment.start, segment.duration).then((found) => { bars = found; if (alive) paint(); });
 
   const paint = () => {
     const t = Math.min(segment.duration, Math.max(0, video.currentTime - segment.start));
     ctx.setTransform(canvas.width / 1080, 0, 0, canvas.height / 1920, 0, 0);
-    drawFrame(ctx, frame, segment, source.width, source.height, t);
+    drawFrame(ctx, frame, segment, source.width, source.height, t, bars);
     drawCaptions(ctx, layers, t);
     slider.value = t;
     time.textContent = `${clock(t)} / ${clock(segment.duration)}`;

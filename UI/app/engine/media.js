@@ -29,6 +29,55 @@ export async function openSource(file) {
   }
 }
 
+/** Black bars burned into a Short's picture (a widescreen film in a 16:9 file), in source pixels, from eight of its frames;
+ *  bars can change from shot to shot. Crops leave them out, so the Short fills the screen. Cached per source and range. */
+export function letterbox(source, start, duration) {
+  source.bars ??= new Map();
+  const key = `${start.toFixed(2)}|${duration.toFixed(2)}`;
+  if (!source.bars.has(key)) source.bars.set(key, measureBars(source, start, duration).catch(() => ({ top: 0, bottom: 0 })));
+  return source.bars.get(key);
+}
+
+async function measureBars(source, start, duration) {
+  const size = fitWithin(source, 160);
+  const sink = new CanvasSink(source.video, { ...size, fit: 'fill' });
+  const times = Array.from({ length: 8 }, (_, i) => start + (i + 0.5) / 8 * duration);
+  const frames = [];
+  for await (const wrapped of sink.canvasesAtTimestamps(times)) {
+    if (!wrapped) continue;
+    const data = wrapped.canvas.getContext('2d').getImageData(0, 0, size.width, size.height).data;
+    frames.push(Array.from({ length: size.height }, (_, y) => {
+      let max = 0;
+      for (let i = y * size.width * 4; i < (y + 1) * size.width * 4; i += 4) max = Math.max(max, data[i], data[i + 1], data[i + 2]);
+      return max;
+    }));
+  }
+  return barsFromFrames(frames, source.height);
+}
+
+/** Each frame's brightest value per row, to bars: a run of black rows from an edge counts only where it meets the picture
+ *  at a sharp edge (a dark scene fades out instead). Bars change between shots, so the widest real one wins, at most a
+ *  quarter of the picture. */
+export function barsFromFrames(frames, sourceHeight) {
+  const BLACK = 28, PICTURE = 60;
+  const bar = (rows) => {
+    let n = 0;
+    while (n < rows.length && rows[n] <= BLACK) n++;
+    return n > 0 && n < rows.length && rows[n] >= PICTURE ? n : 0;
+  };
+  let top = 0, bottom = 0, height = 0;
+  for (const rows of frames) {
+    height = rows.length;
+    top = Math.max(top, bar(rows));
+    bottom = Math.max(bottom, bar([...rows].reverse()));
+  }
+  if (height === 0) return { top: 0, bottom: 0 };
+  const limit = Math.floor(height / 4), scale = sourceHeight / height;
+  // One extra row on each side clears the soft line where the bar meets the picture.
+  const pixels = (rows) => rows ? Math.ceil((Math.min(limit, rows) + 1) * scale) : 0;
+  return { top: pixels(top), bottom: pixels(bottom) };
+}
+
 function fitWithin(source, maxSize) {
   const scale = Math.min(1, maxSize / Math.max(source.width, source.height));
   return { width: Math.max(2, Math.round(source.width * scale / 2) * 2), height: Math.max(2, Math.round(source.height * scale / 2) * 2) };
