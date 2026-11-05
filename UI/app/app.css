@@ -82,7 +82,7 @@ details.insp-section:not([open]) { gap: 0; }
 .transport input { flex: 1; padding: 0; }
 .transport .button { padding: 4px 12px; }
 .hidden-video { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-.player { height: min(62vh, 640px); width: auto; max-width: 100%; aspect-ratio: 9 / 16; background: #000; border-radius: 14px; }
+.player { height: min(80vh, 900px); width: auto; max-width: 100%; aspect-ratio: 9 / 16; background: #000; border-radius: 14px; }
 .inspector textarea { width: 100%; resize: vertical; }
 .inspector .stack > label, .inspector fieldset label { min-width: 0; }
 .progress { position: fixed; right: 20px; bottom: 20px; z-index: 40; }

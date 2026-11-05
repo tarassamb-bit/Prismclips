@@ -13,8 +13,8 @@ const LIMIT_MESSAGE = "You've reached your beta usage limit. Ask for a promo cod
 // Free models report a cost of 0; every answer counts at least this much, so the spend cap also bounds free use.
 const MIN_ANSWER_USD = 0.002;
 // All models together must answer before Vercel stops the function at 300 s (maxDuration in vercel.json).
-// Mimo sometimes stalls on an audio piece; after this long the next model gets the rest of the budget.
-const MODEL_TIMEOUT_MS = 120_000;
+// Mimo sometimes stalls on a request it answers in 10–30 s on a fresh try; after this long it gets that fresh try.
+const MODEL_TIMEOUT_MS = 90_000;
 const REQUEST_BUDGET_MS = 280_000;
 const MIN_MODEL_TIME_MS = 20_000;
 
@@ -155,7 +155,8 @@ async function handler(req, res) {
   if (!user) return;
 
   const chosen = process.env.OPENROUTER_MODEL;
-  const models = [...new Set([...(chosen ? [chosen] : []), ...converted.models])];
+  // The chosen model twice: a stalled request usually answers on a second try, and the free fallbacks are often rate-limited.
+  const models = [...(chosen ? [chosen, chosen] : []), ...converted.models.filter((model) => model !== chosen)];
   let status = 503, reply = null;
   const failures = [];
   const started = Date.now();
