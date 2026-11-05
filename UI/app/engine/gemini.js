@@ -21,8 +21,8 @@ const MESSAGES = {
 function requestMessage(status) {
   if (status === 401 || status === 403) return 'Your Prism sign-in was not accepted. Sign in again in Settings › Account.';
   if (status === 429) return 'Prism AI is handling too many requests right now. Wait a moment, then try again.';
-  if (status === 503) return 'Prism AI is overloaded right now (HTTP 503). Wait a moment, then try again.';
-  return `Prism AI could not complete the request (HTTP ${status}). Please try again.`;
+  if (status === 503) return 'Prism AI is overloaded right now. Wait a moment, then try again.';
+  return 'Prism AI could not complete the request. Please try again.';
 }
 
 export class GeminiError extends Error {
@@ -98,7 +98,8 @@ export async function generateText(parts, schema, configuration, signal) {
   if (response.status !== 200) {
     // The reason is in the body; show it instead of guessing from the status code.
     const { code, message } = serverError(response.body);
-    throw new GeminiError(code === 'usage_limit' ? 'usageLimit' : 'request', response.status, message);
+    // Server errors name models and timeouts, which mean nothing to people; those get the plain message instead.
+    throw new GeminiError(code === 'usage_limit' ? 'usageLimit' : 'request', response.status, response.status >= 500 ? null : message);
   }
   try {
     const candidate = JSON.parse(response.body).candidates[0];
@@ -135,9 +136,7 @@ async function send(body, configuration, signal) {
       const status = response.status;
       if (canRetry && [500, 502, 503, 504, 546].includes(status)) {
         const pause = Math.min(60, Math.max(wait, retryDelay(response, responseText) ?? 0));
-        // The server's own reason (or the platform's, e.g. Vercel's error code), so a screenshot says what went wrong.
-        const reason = serverError(responseText).message ?? response.headers.get('x-vercel-error') ?? responseText.trim().slice(0, 80);
-        configuration.onRetry?.(`Prism AI is busy (HTTP ${status}${reason ? `: ${reason}` : ''}) · retrying in ${Math.round(pause)} s`);
+        configuration.onRetry?.(`Prism AI is busy · retrying in ${Math.round(pause)} s`);
         await sleep(pause, signal);
         continue;
       }
