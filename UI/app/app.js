@@ -890,7 +890,8 @@ async function fetchFromCloud(project, media, shortPart) {
 
 // MARK: Videos in the cloud (upload after sync, removal, and the sidebar progress)
 
-let uploading = false, videoBlock = null;
+// uploadProblem: why the last upload stopped, shown in Settings › Usage so a stalled upload isn't invisible.
+let uploading = false, videoBlock = null, uploadProblem = null;
 function showUpload(text, fraction = 0) {
   const box = $('#upload-status');
   if (!box) return;
@@ -925,6 +926,7 @@ async function uploadPending() {
           });
           await markRemoved(evicted);
           await setCloud(project.id, media.id, { uploaded: true, bytes: file.size, key });
+          uploadProblem = null;
         } catch (error) {
           if (!(error instanceof CloudVideoError)) throw error;
           await markRemoved(error.evicted);
@@ -936,7 +938,7 @@ async function uploadPending() {
     }
   } catch (error) {
     if (error instanceof CloudVideoError && error.kind === 'unavailable') videoBlock = error;
-    else { console.warn('Video upload paused:', error); setTimeout(uploadPending, 60_000); }
+    else { console.warn('Video upload paused:', error); uploadProblem = error?.message || String(error); setTimeout(uploadPending, 60_000); }
   } finally {
     uploading = false;
     showUpload(null);
@@ -1034,7 +1036,13 @@ async function fillCloudVideo() {
   try {
     const { used, cap } = await cloudUsage({ token: accessToken });
     if (!$('#cloud-video-text')) return;
-    text.textContent = `${bytes(used)} of ${bytes(cap)} used`;
+    // Videos that stay on this device only, and why, so a missing upload is never a mystery.
+    const media = (await store.listProjects()).filter(isMine).flatMap((p) => p.media);
+    const local = media.filter((m) => !m.cloud?.uploaded);
+    const why = (m) => m.cloud?.tooBig ? 'bigger than your cloud space' : m.cloud?.declined ? 'you kept older videos instead' : uploading ? 'uploading now' : 'waiting to upload';
+    const notes = local.map((m) => `“${m.name}” stays on this device: ${why(m)}.`);
+    if (uploadProblem) notes.unshift(`Upload paused: ${uploadProblem} Prism tries again every minute.`);
+    text.textContent = `${bytes(used)} of ${bytes(cap)} used${notes.length ? ` · ${notes.join(' ')}` : ''}`;
     $('#cloud-video-bar').style.width = `${Math.min(100, cap ? used / cap * 100 : 0)}%`;
   } catch (error) {
     if ($('#cloud-video-text')) text.textContent = error.message;
