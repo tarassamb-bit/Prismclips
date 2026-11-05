@@ -13,7 +13,7 @@ globalThis.fetch = async (url, options = {}) => {
   if (url.endsWith('/rpc/prism_reserve_beta_usage')) return Response.json(allowed, { status: reservationStatus });
   if (url.endsWith('/rpc/prism_record_beta_spend')) return new Response(null, { status: spendStatus });
   if (url.endsWith('/rpc/prism_begin_analysis_run')) return Response.json(runAllowed);
-  if (url.endsWith('/rest/v1/ai_failures')) return new Response(null, { status: 201 });
+  if (url.endsWith('/rest/v1/ai_failures') || url.endsWith('/rest/v1/ai_spend')) return new Response(null, { status: 201 });
   if (url === 'https://openrouter.ai/api/v1/chat/completions') {
     providerBody = JSON.parse(options.body);
     if (providerFails) return Response.json({ error: { message: 'Provider returned error', metadata: { raw: 'unsupported audio data' } } }, { status: 400 });
@@ -54,7 +54,9 @@ assert.equal(calls.length, 2, 'a refused allowance must not call the provider');
 allowed = true;
 calls.length = 0;
 assert.equal((await handler(request())).status, 200);
-assert.equal(calls.length, 4);
+assert.equal(calls.length, 5);
+assert.deepEqual(JSON.parse(calls[4].body), { user_id: '12345678-1234-1234-1234-123456789abc', source: 'desktop', model: null, provider: null, usd: 0, prompt_tokens: null, completion_tokens: null }, 'the real cost is logged per answer');
+assert.equal(calls[4].headers.Authorization, 'Bearer server-only-test-key');
 assert.deepEqual(providerBody.reasoning, { effort: 'low', exclude: true }, 'reasoning models must answer within the function time limit');
 assert.equal(calls[1].headers.Authorization, 'Bearer server-only-test-key');
 assert.equal(JSON.parse(calls[1].body).p_user, '12345678-1234-1234-1234-123456789abc');

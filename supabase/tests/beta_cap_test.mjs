@@ -159,5 +159,18 @@ await assert.rejects(asRole(a, 'anon', 'select * from public.ai_failures_daily')
 await assert.rejects(asRole(a, 'authenticated', "insert into public.ai_failures (source, model, error_type) values ('web', 'x', 'timeout')"), /permission denied/);
 console.log('PASS ai_failures: the servers log, nobody else reads or writes');
 
+const costs = fs.readFileSync(new URL('../migrations/202611050002_ai_cost_daily.sql', import.meta.url), 'utf8');
+await admin.query(`create table if not exists public.usage_videos (user_id uuid, video text, day date, minutes double precision);
+  create table if not exists public.usage_runs (user_id uuid, video text, run uuid, charged_minutes double precision default 0, created timestamptz default now());`);
+for (const sql of [costs, costs]) await admin.query(sql);
+await admin.query("insert into public.usage_videos values ($1, 'v', current_date, 20)", [google]);
+await admin.query("insert into public.usage_runs (user_id, video, run) values ($1, 'v', gen_random_uuid()), ($1, 'v', gen_random_uuid())", [google]);
+await admin.query("insert into public.ai_spend (user_id, source, usd) values ($1, 'web', 0.03), ($1, 'web', 0.05)", [google]);
+const today = (await admin.query('select runs, minutes_processed, answers, openrouter_usd, usd_per_minute from public.ai_cost_daily')).rows[0];
+assert.deepEqual(today, { runs: '2', minutes_processed: '40.0', answers: '2', openrouter_usd: '0.0800', usd_per_minute: '0.00200' });
+await assert.rejects(asUser(google, 'select * from public.ai_spend'), /permission denied/);
+await assert.rejects(asRole(a, 'authenticated', 'select * from public.ai_cost_daily'), /permission denied/);
+console.log('PASS ai_cost_daily: minutes per run, real OpenRouter cost per day, closed to users');
+
 await admin.query('delete from auth.users');
 await Promise.all([admin, a, b].map((client) => client.end()));

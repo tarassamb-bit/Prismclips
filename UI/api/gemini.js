@@ -158,6 +158,13 @@ function errorType(status) {
 async function recordSpend(user, answer) {
   const reported = Number(answer?.usage?.cost ?? 0);
   await rpc('prism_record_beta_spend', { p_user: user, p_usd: Math.max(Number.isFinite(reported) ? reported : 0, MIN_ANSWER_USD) });
+  // The real cost for the ai_cost_daily view; a failed write must not fail an answer that was already paid for.
+  await fetch(`${SUPABASE_URL}/rest/v1/ai_spend`, {
+    method: 'POST', headers: { ...serviceHeaders(), Prefer: 'return=minimal' }, signal: AbortSignal.timeout(5_000),
+    body: JSON.stringify({ user_id: user, source: 'web', model: answer?.model ?? null, provider: answer?.provider ?? null,
+      usd: Number.isFinite(reported) && reported > 0 ? reported : 0, prompt_tokens: answer?.usage?.prompt_tokens ?? null,
+      completion_tokens: answer?.usage?.completion_tokens ?? null }),
+  }).catch(() => {});
 }
 
 async function handler(req, res) {

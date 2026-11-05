@@ -191,6 +191,17 @@ async function recordSpend(session: Session, answer: any) {
     body: JSON.stringify({ p_user: session.user, p_usd: usd }),
   });
   if (!response.ok) throw new Error("Usage accounting failed");
+  // The real cost for the ai_cost_daily view; a failed write must not fail an answer that was already paid for.
+  await fetch(`${session.url}/rest/v1/ai_spend`, {
+    method: "POST",
+    headers: { ...session.headers, Prefer: "return=minimal" },
+    signal: AbortSignal.timeout(5_000),
+    body: JSON.stringify({
+      user_id: session.user, source: "desktop", model: answer?.model ?? null, provider: answer?.provider ?? null,
+      usd: Number.isFinite(reported) && reported > 0 ? reported : 0, prompt_tokens: answer?.usage?.prompt_tokens ?? null,
+      completion_tokens: answer?.usage?.completion_tokens ?? null,
+    }),
+  }).catch(() => {});
 }
 
 function limitReached(): Response {
