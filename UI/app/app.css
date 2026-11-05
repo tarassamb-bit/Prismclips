@@ -104,7 +104,7 @@ details.insp-section:not([open]) { gap: 0; }
 .collapsed .sidebar { padding-inline: 8px; }
 .collapsed .brand-row { flex-direction: column; gap: 10px; padding: 0; }
 .collapsed .collapse-button { margin-left: 0; }
-.collapsed .brand-name, .collapsed .label, .collapsed .tagline, .collapsed .resources { display: none; }
+.collapsed .brand-name, .collapsed .label, .collapsed .tagline { display: none; }
 .collapsed .side-button { justify-content: center; padding-inline: 0; }
 .collapsed .side-nav { margin-top: 14px; }
 .sidebar { background: var(--surface1); border-right: 1px solid var(--border); padding: 18px 14px; display: flex; flex-direction: column; gap: 6px; overflow: auto; }
@@ -122,7 +122,6 @@ details.insp-section:not([open]) { gap: 0; }
 .side-button.prominent { background: var(--sky); color: #0e0f14; }
 .side-button:disabled { opacity: .45; cursor: default; }
 .side-bottom { margin-top: auto; display: grid; gap: 14px; }
-.resources { padding: 0 6px; display: grid; gap: 6px; }
 .res-line { display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; }
 .res-line .mono { font-size: 11px; }
 .meter { height: 8px; background: var(--surface2); border-radius: 99px; overflow: hidden; }
@@ -180,7 +179,7 @@ details.insp-section:not([open]) { gap: 0; }
   body { overflow: auto; }
   .shell { grid-template-columns: 1fr; height: auto; min-height: 100vh; }
   .sidebar { flex-direction: row; flex-wrap: wrap; align-items: center; border-right: 0; border-bottom: 1px solid var(--border); }
-  .tagline, .resources { display: none; }
+  .tagline { display: none; }
   .side-nav { display: flex; gap: 6px; flex-wrap: wrap; } .side-button { width: auto; }
   .side-bottom { margin: 0 0 0 auto; }
   .settings-row { grid-template-columns: 1fr; }
@@ -309,7 +308,7 @@ details.insp-section:not([open]) { gap: 0; }
 /* Phone: the sidebar becomes one slim bar of icons */
 @media (max-width: 800px) {
   .sidebar { flex-wrap: nowrap; gap: 8px; padding: 10px 12px; }
-  .collapse-button, .tagline, .resources { display: none; }
+  .collapse-button, .tagline { display: none; }
   .brand-row { padding: 0; }
   .side-nav { display: flex; gap: 6px; margin: 0 0 0 auto; }
   .side-bottom { margin: 0; }

@@ -123,8 +123,6 @@ async function boot() {
   });
   applyTheme(savedTheme());
   applyCollapsed(savedSidebar() === '1');
-  updateStorage();
-  setInterval(updateStorage, 60_000);
   if (!db()) {
     await route();
     return renderGate('Sign-in is unavailable right now. Check your connection and reload.');
@@ -193,18 +191,6 @@ function applyTheme(theme) {
 
 const bytes = (value) => (value >= 1e9 ? `${Number((value / 1e9).toFixed(1))} GB` : value >= 1e6 ? `${Math.round(value / 1e6)} MB`
   : value > 0 ? `${Math.max(1, Math.round(value / 1e3))} KB` : '0 MB');
-
-/** What this browser keeps for Prism (projects and videos), the web counterpart of the Mac's "System resources". */
-async function storageEstimate() {
-  try { const { usage, quota } = await navigator.storage.estimate(); return quota ? { usage, quota } : null; } catch { return null; }
-}
-async function updateStorage() {
-  const estimate = await storageEstimate();
-  const label = $('#storage-label'), bar = $('#storage-bar');
-  if (!label || !bar) return;
-  label.textContent = estimate ? `${bytes(estimate.usage)} / ${bytes(estimate.quota)}` : '—';
-  bar.style.width = estimate ? `${Math.min(100, Math.max(2, estimate.usage / estimate.quota * 100))}%` : '0';
-}
 
 /** While nobody is signed in, the full-screen sign-in screen (/auth.js) covers the whole app. */
 function renderGate(message = '') {

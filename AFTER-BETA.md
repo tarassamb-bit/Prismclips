@@ -13,7 +13,7 @@ and who found it. Tick them off (`- [x]`) when fixed.
 
 ## Web app: sidebar
 
-- [ ] **"On this device · Storage 342 KB / 82.5 GB" isn't useful** (owner, 2026-11-04). It shows the browser's own storage
+- [x] **"On this device · Storage 342 KB / 82.5 GB" isn't useful** (owner, 2026-11-04). It shows the browser's own storage
   for the site (the 82.5 GB is what the browser allows, not a limit people manage) and gets confused with the 1 GB cloud
   storage in Settings › Usage. Remove it, or rename it to something like "Saved in this browser: 342 KB".
 
