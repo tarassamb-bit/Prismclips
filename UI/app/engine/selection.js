@@ -94,11 +94,22 @@ export async function select(source, cues, interval, targetDuration, count, conf
   }
   const batches = T.batches(windows.map((_, index) => index), 6);
   progress(0, `Prism AI · scoring story windows · 0 of ${batches.length}`);
-  let scored = 0;
-  const scoredBatches = await map(batches, (ids, token) => scoreBatch(ids, windows, guidance, excluding, configuration, token), signal, PARALLEL_REQUESTS, () => {
+  let scored = 0, failed = null;
+  // A batch Prism AI couldn't score ranks last and is reported as missed, instead of stopping the whole run.
+  const scoredBatches = await map(batches, async (ids, token) => {
+    try {
+      return await scoreBatch(ids, windows, guidance, excluding, configuration, token);
+    } catch (error) {
+      token.throwIfAborted();
+      failed ??= error;
+      configuration.onMissed?.(ids.length);
+      return ids.map((id) => ({ id, score: 0 }));
+    }
+  }, signal, PARALLEL_REQUESTS, () => {
     scored++;
     progress(0.45 * scored / batches.length, `Prism AI · scoring story windows · ${scored} of ${batches.length}`);
   });
+  if (failed && scoredBatches.flat().every((s) => s.score === 0)) throw failed;
   const ranked = rankedWindowIds(scoredBatches.flat(), windows.map((_, index) => index));
   return refine(ranked, windows, source, cues, interval, targetDuration, count, configuration, excluding, guidance, progress, signal);
 }
@@ -146,6 +157,7 @@ async function refine(ranked, windows, source, cues, interval, targetDuration, c
       return { clips: await selectDetailed(source, selectedCues, bounds, targetDuration, Math.min(20, count + 2), configuration, excluding, guidance, allowed, token), error: null };
     } catch (error) {
       token.throwIfAborted();
+      configuration.onMissed?.(ids.length);
       return { clips: [], error };
     }
   }, signal, PARALLEL_REQUESTS, () => {

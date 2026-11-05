@@ -1,20 +1,25 @@
 // Vercel function: Prism AI for the web app. A port of supabase/functions/gemini/index.ts (the Mac app still uses that one),
 // moved here because Vercel lets a function run 300 s and Supabase stops at 150 s, too soon for slow Mimo answers.
 // The app sends Gemini-format requests signed in with its Supabase session; this forwards them to OpenRouter and answers
-// in the same format. Vercel environment variables: OPENROUTER_API_KEY, SUPABASE_SERVICE_ROLE_KEY, optional OPENROUTER_MODEL.
+// in the same format. Vercel environment variables: OPENROUTER_API_KEY, SUPABASE_SERVICE_ROLE_KEY, optional OPENROUTER_MODEL
+// and OPENROUTER_FALLBACK_MODEL. Every failed model attempt is logged in the ai_failures table.
 // Keep the two copies in step when changing models, limits or usage accounting.
 const SUPABASE_URL = 'https://isdplhahgggundbohmlr.supabase.co';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const AUDIO_MODELS = ['nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free'];
-const IMAGE_MODELS = ['google/gemma-4-31b-it:free', 'google/gemma-4-26b-a4b-it:free', 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free'];
-const TEXT_MODELS = ['nvidia/nemotron-3-ultra-550b-a55b:free', 'google/gemma-4-31b-it:free', 'google/gemma-4-26b-a4b-it:free'];
+// Mimo first; one paid model that takes audio, images and text answers when Mimo fails twice. No free models: they are
+// rate-limited exactly when they are needed.
+const DEFAULT_MODEL = 'xiaomi/mimo-v2.6-flash';
+const DEFAULT_FALLBACK = 'google/gemini-3.8-flash';
+// Only providers that keep no data (zero data retention) and don't train on it; among those, the quickest to answer.
+const PROVIDER = { zdr: true, data_collection: 'deny', sort: 'latency' };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const LIMIT_MESSAGE = "You've reached your beta usage limit. Ask for a promo code to get more, then enter it in Settings › Usage.";
-// Free models report a cost of 0; every answer counts at least this much, so the spend cap also bounds free use.
+// A model reporting a cost of 0 would be free to use without limit; every answer counts at least this much.
 const MIN_ANSWER_USD = 0.002;
 // All models together must answer before Vercel stops the function at 300 s (maxDuration in vercel.json).
-// Mimo sometimes stalls on a request it answers in 10–30 s on a fresh try; after this long it gets that fresh try.
-const MODEL_TIMEOUT_MS = 90_000;
+// Mimo sometimes stalls on a request it answers in 10–30 s on a fresh try; after this long it gets that fresh try,
+// and the fallback gets what is left (at least 120 s).
+const MODEL_TIMEOUT_MS = 80_000;
 const REQUEST_BUDGET_MS = 280_000;
 const MIN_MODEL_TIME_MS = 20_000;
 
@@ -62,9 +67,8 @@ function toOpenRouter(body) {
     });
   }
   messages.push({ role: 'user', content });
-  const models = hasAudio ? AUDIO_MODELS : hasImage ? IMAGE_MODELS : TEXT_MODELS;
-  const request = { messages, temperature: body.generationConfig?.temperature ?? 0.2, reasoning: { effort: 'low', exclude: true } };
-  return { models, wantsJSON: Boolean(schema), request };
+  const request = { messages, temperature: body.generationConfig?.temperature ?? 0.2, reasoning: { effort: 'low', exclude: true }, provider: PROVIDER };
+  return { kind: hasAudio ? 'audio' : hasImage ? 'image' : 'text', wantsJSON: Boolean(schema), request };
 }
 
 function cleanJSON(text) {
@@ -134,6 +138,23 @@ async function checkVideoLimit(req, res) {
   return user;
 }
 
+/** One row per failed model attempt, so the owner can see how often each model and provider fails. Never blocks the answer. */
+async function logFailure(row) {
+  console.error(`${row.model}: ${row.error_type} ${row.message ?? ''}`);
+  await fetch(`${SUPABASE_URL}/rest/v1/ai_failures`, {
+    method: 'POST', headers: { ...serviceHeaders(), Prefer: 'return=minimal' }, body: JSON.stringify({ ...row, source: 'web' }),
+    signal: AbortSignal.timeout(5_000),
+  }).catch(() => {});
+}
+
+function errorType(status) {
+  if (status === 429) return 'rate_limit';
+  if (status === 404) return 'no_provider';
+  if (status === 401 || status === 402 || status === 403) return 'account';
+  if (status === 400 || status === 413) return 'bad_request';
+  return 'provider_error';
+}
+
 async function recordSpend(user, answer) {
   const reported = Number(answer?.usage?.cost ?? 0);
   await rpc('prism_record_beta_spend', { p_user: user, p_usd: Math.max(Number.isFinite(reported) ? reported : 0, MIN_ANSWER_USD) });
@@ -154,19 +175,23 @@ async function handler(req, res) {
   const user = await checkVideoLimit(req, res);
   if (!user) return;
 
-  const chosen = process.env.OPENROUTER_MODEL;
-  // The chosen model twice: a stalled request usually answers on a second try, and the free fallbacks are often rate-limited.
-  const models = [...(chosen ? [chosen, chosen] : []), ...converted.models.filter((model) => model !== chosen)];
+  const chosen = process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
+  // The chosen model twice: a stalled request usually answers on a second try.
+  const models = [chosen, chosen, process.env.OPENROUTER_FALLBACK_MODEL || DEFAULT_FALLBACK];
   let status = 503, reply = null;
   const failures = [];
   const started = Date.now();
-  for (const model of models) {
+  for (const [attempt, model] of models.entries()) {
     const left = REQUEST_BUDGET_MS - (Date.now() - started);
     if (left < MIN_MODEL_TIME_MS) { status = 504; failures.push(`no time left to try ${model}`); break; }
+    // The last model gets all the time that is left.
+    const limit = attempt === models.length - 1 ? left : Math.min(MODEL_TIMEOUT_MS, left);
+    const tried = Date.now();
+    const failure = (error_type, extra = {}) => logFailure({ user_id: user, model, kind: converted.kind, attempt: attempt + 1, error_type, ms: Date.now() - tried, ...extra });
     let upstream, answer;
     try {
       // The timeout covers reading the body too: OpenRouter sends headers at once and the answer only when it's done.
-      const signal = AbortSignal.timeout(Math.min(MODEL_TIMEOUT_MS, left));
+      const signal = AbortSignal.timeout(limit);
       upstream = await fetch(OPENROUTER_URL, {
         method: 'POST',
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://prismclips.vercel.app', 'X-Title': 'Prism Clips' },
@@ -176,21 +201,27 @@ async function handler(req, res) {
       answer = await upstream.text().then(parseOpenRouter).catch((error) => { if (signal.aborted) throw error; return {}; });
     } catch {
       status = 504;
-      failures.push(`${model}: no answer within ${Math.round(Math.min(MODEL_TIMEOUT_MS, left) / 1000)} s`);
-      console.error(failures.at(-1));
+      failures.push(`${model}: no answer within ${Math.round(limit / 1000)} s`);
+      await failure('timeout');
       continue;
     }
     if (upstream.ok && answer?.choices?.length) {
       try { await recordSpend(user, answer); } catch { return fail(res, 503, 'Prism could not record usage. Please try again later.'); }
       reply = answer; break;
     }
-    status = upstream.status;
+    // A 200 without a choice is an empty answer; treat it like a provider error so the next model gets a turn.
+    status = upstream.ok ? 502 : upstream.status;
     const raw = typeof answer?.error?.metadata?.raw === 'string' ? ` (${answer.error.metadata.raw.slice(0, 200)})` : '';
     failures.push(`${model}: ${answer?.error?.message ?? `HTTP ${upstream.status}`}${raw}`);
-    console.error(failures.at(-1));
+    await failure(upstream.ok ? 'empty_answer' : errorType(upstream.status), {
+      status: upstream.status, provider: answer?.error?.metadata?.provider_name ?? null, message: failures.at(-1).slice(0, 500),
+    });
     if (status === 401) break;
   }
-  if (!reply) return fail(res, status, failures.join(' · ') || 'No model answered.');
+  if (!reply) {
+    await logFailure({ user_id: user, model: 'all', kind: converted.kind, attempt: models.length, error_type: 'gave_up', status, ms: Date.now() - started });
+    return fail(res, status, failures.join(' · ') || 'No model answered.');
+  }
 
   const choice = reply.choices[0];
   const raw = choice?.message?.content ?? '';

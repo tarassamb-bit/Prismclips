@@ -135,15 +135,13 @@ async function send(body, configuration, signal) {
       const responseText = await response.text();
       const status = response.status;
       if (canRetry && [500, 502, 503, 504, 546].includes(status)) {
-        const pause = Math.min(60, Math.max(wait, retryDelay(response, responseText) ?? 0));
-        configuration.onRetry?.(`Prism AI is busy · retrying in ${Math.round(pause)} s`);
-        await sleep(pause, signal);
+        // Silent: the server already tried Mimo twice and the fallback; the progress bar just keeps going.
+        await sleep(Math.min(60, Math.max(wait, retryDelay(response, responseText) ?? 0)), signal);
         continue;
       }
       // A per-minute limit says how long to wait; a usage limit or a daily limit doesn't, so it still fails.
       const delay = status === 429 ? retryDelay(response, responseText) : null;
       if (canRetry && delay !== null && delay <= 60) {
-        configuration.onRetry?.(`Prism AI rate limit · retrying in ${Math.round(delay) + 1} s`);
         await sleep(delay + 1, signal);
         continue;
       }

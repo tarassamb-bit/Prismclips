@@ -13,10 +13,14 @@ export const autoCount = (seconds) => Math.min(MAX_SHORTS, Math.max(1, Math.floo
 const truncate = (value, length) => (value.length > length ? value.slice(0, length) : value);
 
 /**
- * @param options { duration, count, region, customStart, customEnd, excluding, videoType, cachedTranscript, onTranscript, progress, signal }
+ * @param options { duration, count, region, customStart, customEnd, excluding, videoType, cachedTranscript, onTranscript, onMissed, progress, signal }
+ *   onMissed(n) hears how many Shorts couldn't be made because Prism AI failed on part of the video, after every retry.
  * @returns Shorts as { start, duration, captions, cropKeyframes, speechWords, warning, title, reason, fit, videoType, score, description }
  */
-export async function analyze(source, configuration, options) {
+export async function analyze(source, configuration_, options) {
+  // Moments lost to failed requests: scoring or refining batches that failed after every retry and fallback.
+  let missed = 0;
+  const configuration = { ...configuration_, onMissed: (n) => { missed += n; } };
   const { excluding = [], cachedTranscript = null, onTranscript = () => {}, progress = () => {}, signal } = options;
   let videoType = options.videoType ?? 'general';
   const interval = regionInterval(options.region, source.duration, options.customStart, options.customEnd);
@@ -105,8 +109,11 @@ export async function analyze(source, configuration, options) {
     };
   }, signal);
   // Keep existing edits intact and ask for another range instead of silently inventing a selection.
+  // Nothing made because Prism AI kept failing is a temporary failure the person can retry, not "no strong moments".
+  if (results.length === 0 && missed > 0) throw new GeminiError('request', 503);
   if (results.length === 0) throw new GeminiError(excluding.length > 0 ? 'noDistinctClips' : 'noStrongClips');
   signal?.throwIfAborted();
+  if (missed > 0) options.onMissed?.(Math.min(missed, Math.max(0, targetCount - results.length)));
   progress(1, 'Shorts ready');
   return results.sort((a, b) => a.start - b.start);
 }

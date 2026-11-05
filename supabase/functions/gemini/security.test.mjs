@@ -13,6 +13,7 @@ globalThis.fetch = async (url, options = {}) => {
   if (url.endsWith('/rpc/prism_reserve_beta_usage')) return Response.json(allowed, { status: reservationStatus });
   if (url.endsWith('/rpc/prism_record_beta_spend')) return new Response(null, { status: spendStatus });
   if (url.endsWith('/rpc/prism_begin_analysis_run')) return Response.json(runAllowed);
+  if (url.endsWith('/rest/v1/ai_failures')) return new Response(null, { status: 201 });
   if (url === 'https://openrouter.ai/api/v1/chat/completions') {
     providerBody = JSON.parse(options.body);
     if (providerFails) return Response.json({ error: { message: 'Provider returned error', metadata: { raw: 'unsupported audio data' } } }, { status: 400 });
@@ -113,12 +114,20 @@ for (const [mimeType, format] of [['audio/wav', 'wav'], ['audio/mpeg', 'mp3'], [
   assert.equal(providerBody.messages.at(-1).content.find((part) => part.type === 'input_audio').input_audio.format, format);
 }
 providerFails = true;
+calls.length = 0;
 const refused = await handler(audioRequest('audio/wav'));
 assert.equal(refused.status, 400);
 const reason = (await refused.json()).error.message;
-assert.ok(reason.includes('nemotron-3-nano-omni') && reason.includes('unsupported audio data'), reason);
+assert.ok(reason.includes('mimo-v2.6-flash') && reason.includes('gemini-3.8-flash') && reason.includes('unsupported audio data'), reason);
+assert.ok(!providerBody.model.endsWith(':free'), 'no free models');
+assert.deepEqual(providerBody.provider, { zdr: true, data_collection: 'deny', sort: 'latency' }, 'only providers that keep no data');
+const logged = calls.filter((call) => call.url.endsWith('/rest/v1/ai_failures')).map((call) => JSON.parse(call.body));
+assert.deepEqual(logged.map((row) => [row.model, row.error_type, row.source]),
+  [['xiaomi/mimo-v2.6-flash', 'bad_request', 'desktop'], ['google/gemini-3.8-flash', 'bad_request', 'desktop'], ['all', 'gave_up', 'desktop']]);
+assert.equal(logged[0].user_id, '12345678-1234-1234-1234-123456789abc');
+assert.equal(calls.find((call) => call.url.endsWith('/rest/v1/ai_failures')).headers.Authorization, 'Bearer server-only-test-key');
 providerFails = false;
-console.log('PASS audio format by type, and every model failure reported with the provider reason');
+console.log('PASS audio format by type, Mimo then the paid fallback on no-retention providers, every failure reported and logged');
 
 // A slow answer arrives after OpenRouter's keep-alive lines; it is the answer, not a failure.
 slowAnswer = true;

@@ -1,15 +1,15 @@
 // Prism's AI server. The app sends Gemini-format requests here, signed in with its Supabase session; this function
 // forwards them to OpenRouter with the OPENROUTER_API_KEY secret and answers in the same Gemini format.
 // The key lives only in Supabase's secrets, never in the app. Set it with Project Settings → Edge Functions → Secrets.
-// Optional secret OPENROUTER_MODEL is tried first; the free models below follow, so one that is down or refuses
-// hands the request to the next. Requests with audio only go to models that accept audio.
+// OPENROUTER_MODEL (default Mimo) is tried first, then one paid fallback (OPENROUTER_FALLBACK_MODEL) that takes audio,
+// images and text. Every failed attempt is logged in the ai_failures table. The web app uses UI/api/gemini.js instead.
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-// Free models only: each request goes to models that accept its input. The thinkingmachines models are left out, because
-// OpenRouter blocks them outside its own apps.
-const AUDIO_MODELS = ["nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"];
-const IMAGE_MODELS = ["google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"];
-const TEXT_MODELS = ["nvidia/nemotron-3-ultra-550b-a55b:free", "google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free"];
+// No free models: they are rate-limited exactly when they are needed.
+const DEFAULT_MODEL = "xiaomi/mimo-v2.6-flash";
+const DEFAULT_FALLBACK = "google/gemini-3.8-flash";
+// Only providers that keep no data (zero data retention) and don't train on it; among those, the quickest to answer.
+const PROVIDER = { zdr: true, data_collection: "deny", sort: "latency" };
 
 type Part = { text?: string; inlineData?: { mimeType: string; data: string } };
 type GeminiRequest = {
@@ -65,11 +65,11 @@ function toOpenRouter(body: GeminiRequest) {
   }
   messages.push({ role: "user", content });
   // No response_format: most free models don't support JSON mode, and asking for it hides them. The prompt asks instead.
-  const models = hasAudio ? AUDIO_MODELS : hasImage ? IMAGE_MODELS : TEXT_MODELS;
+
   // Reasoning models (Mimo) think for minutes on a whole transcript by default, past Supabase's 150 s limit per
   // function; low effort answers in seconds. Models without reasoning ignore it.
-  const request = { messages, temperature: body.generationConfig?.temperature ?? 0.2, reasoning: { effort: "low", exclude: true } };
-  return { models, wantsJSON: Boolean(schema), request };
+  const request = { messages, temperature: body.generationConfig?.temperature ?? 0.2, reasoning: { effort: "low", exclude: true }, provider: PROVIDER };
+  return { kind: hasAudio ? "audio" : hasImage ? "image" : "text", wantsJSON: Boolean(schema), request };
 }
 
 /// Models without JSON mode sometimes wrap the object in prose or ``` fences; keep only the object.
@@ -147,10 +147,11 @@ async function checkVideoLimit(request: Request): Promise<{ refused: Response | 
   return { refused: null, session };
 }
 
-// Free models report a cost of 0, which would let an account use them without limit. Every answer counts at least this
-// much, so the spend cap also bounds free use: the default cap of 60 minutes × $0.05 allows about 1,500 answers.
+// A model reporting a cost of 0 would be free to use without limit. Every answer counts at least this much, so the spend
+// cap bounds use: the default cap of 60 minutes × $0.05 allows about 1,500 answers.
 const MIN_ANSWER_USD = 0.002;
-const MODEL_TIMEOUT_MS = 130_000;
+// Mimo gets this long; the fallback gets what is left of the budget.
+const MODEL_TIMEOUT_MS = 75_000;
 // All models together must answer before Supabase stops the function at 150 s (the sign-in and usage checks come first).
 const REQUEST_BUDGET_MS = 135_000;
 // A fallback model gets tried only with at least this much of the budget left.
@@ -159,6 +160,25 @@ const MIN_MODEL_TIME_MS = 20_000;
 /** OpenRouter keeps a slow request alive by sending ": OPENROUTER PROCESSING" lines before the JSON answer. */
 export function parseOpenRouter(body: string): any {
   return JSON.parse(body.split("\n").filter((line) => !line.startsWith(":")).join("\n"));
+}
+
+/// One row per failed model attempt, so the owner can see how often each model and provider fails. Never blocks the answer.
+async function logFailure(session: Session, row: Record<string, unknown>) {
+  console.error(`${row.model}: ${row.error_type} ${row.message ?? ""}`);
+  await fetch(`${session.url}/rest/v1/ai_failures`, {
+    method: "POST",
+    headers: { ...session.headers, Prefer: "return=minimal" },
+    body: JSON.stringify({ ...row, user_id: session.user, source: "desktop" }),
+    signal: AbortSignal.timeout(5_000),
+  }).catch(() => {});
+}
+
+function errorType(status: number): string {
+  if (status === 429) return "rate_limit";
+  if (status === 404) return "no_provider";
+  if (status === 401 || status === 402 || status === 403) return "account";
+  if (status === 400 || status === 413) return "bad_request";
+  return "provider_error";
 }
 
 /// Adds what one model answer cost to the account. OpenRouter reports the cost in each response.
@@ -202,12 +222,11 @@ Deno.serve(async (request) => {
   const { refused, session } = await checkVideoLimit(request);
   if (refused || !session) return refused ?? fail(401, "Sign in to your Prism account to continue.");
 
-  const chosen = Deno.env.get("OPENROUTER_MODEL");
-  const models = [...new Set([...(chosen ? [chosen] : []), ...converted.models])];
+  const models = [Deno.env.get("OPENROUTER_MODEL") || DEFAULT_MODEL, Deno.env.get("OPENROUTER_FALLBACK_MODEL") || DEFAULT_FALLBACK];
   let status = 503, reply: any = null;
   const failures: string[] = [];
   const started = Date.now();
-  for (const model of models) {
+  for (const [attempt, model] of models.entries()) {
     // Supabase stops the function at 150 s: a model started with too little time left could only be cut off.
     const left = REQUEST_BUDGET_MS - (Date.now() - started);
     if (left < MIN_MODEL_TIME_MS) {
@@ -215,39 +234,52 @@ Deno.serve(async (request) => {
       failures.push(`no time left to try ${model}`);
       break;
     }
-    let upstream: Response;
+    // The last model gets all the time that is left.
+    const limit = attempt === models.length - 1 ? left : Math.min(MODEL_TIMEOUT_MS, left);
+    const tried = Date.now();
+    const failure = (error_type: string, extra: Record<string, unknown> = {}) =>
+      logFailure(session, { model, kind: converted.kind, attempt: attempt + 1, error_type, ms: Date.now() - tried, ...extra });
+    let upstream: Response, answer: any;
     try {
+      const signal = AbortSignal.timeout(limit);
       upstream = await fetch(OPENROUTER_URL, {
         method: "POST",
         headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json", "HTTP-Referer": "https://prismclips.vercel.app", "X-Title": "Prism Clips" },
         body: JSON.stringify({ model, ...converted.request }),
         // Answer before Supabase stops the function at 150 s, so the app gets a clear "busy" and retries.
-        signal: AbortSignal.timeout(Math.min(MODEL_TIMEOUT_MS, left)),
+        signal,
       });
+      // The timeout covers reading the body too: OpenRouter sends headers at once and the answer only when it's done.
+      answer = await upstream.text().then(parseOpenRouter).catch((error) => { if (signal.aborted) throw error; return {}; });
     } catch {
       status = 504;
-      failures.push(`${model}: no answer within ${MODEL_TIMEOUT_MS / 1000} s`);
-      console.error(failures.at(-1));
-      break;
+      failures.push(`${model}: no answer within ${Math.round(limit / 1000)} s`);
+      await failure("timeout");
+      continue;
     }
-    const answer = await upstream.text().then(parseOpenRouter).catch(() => ({}));
     // Only answers count toward the cap, so a model that refuses or is down doesn't use up the person's allowance.
     if (upstream.ok && answer?.choices?.length) {
       try { await recordSpend(session, answer); } catch { return fail(503, "Prism could not record usage. Please try again later."); }
       reply = answer; break;
     }
-    status = upstream.status;
+    // A 200 without a choice is an empty answer; treat it like a provider error so the next model gets a turn.
+    status = upstream.ok ? 502 : upstream.status;
     // The provider's own explanation is in error.metadata.raw; without it every refusal reads "Provider returned error".
     const raw = typeof answer?.error?.metadata?.raw === "string" ? ` (${answer.error.metadata.raw.slice(0, 200)})` : "";
     const message = `${model}: ${answer?.error?.message ?? `HTTP ${upstream.status}`}${raw}`;
     failures.push(message);
-    console.error(message);
+    await failure(upstream.ok ? "empty_answer" : errorType(upstream.status), {
+      status: upstream.status, provider: answer?.error?.metadata?.provider_name ?? null, message: message.slice(0, 500),
+    });
     // A bad key fails every model alike; anything else may work on the next one.
     if (status === 401) break;
   }
   // Pass the last status through so the app's retry and "model busy" handling still works.
   // Every model that was tried is named, so the first choice's refusal isn't hidden behind the last fallback's.
-  if (!reply) return fail(status, failures.join(" · ") || "No model answered.");
+  if (!reply) {
+    await logFailure(session, { model: "all", kind: converted.kind, attempt: models.length, error_type: "gave_up", status, ms: Date.now() - started });
+    return fail(status, failures.join(" · ") || "No model answered.");
+  }
 
   const choice = reply.choices[0];
   const raw: string = choice?.message?.content ?? "";

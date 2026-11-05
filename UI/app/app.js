@@ -1135,7 +1135,8 @@ function confirmRerun(media, options, usage) {
   });
 }
 
-async function runShorts(media, options, key, minutes) {
+// A Retry reuses the run id, so the server doesn't count it as a new analysis of the video.
+async function runShorts(media, options, key, minutes, run = uuid()) {
   if (state.task) return;
   const source = await sourceFor(media);
   const project = state.project;
@@ -1145,9 +1146,11 @@ async function runShorts(media, options, key, minutes) {
   const saved = project.transcripts?.[media.id] ?? null;
   const configuration = {
     accessToken,
-    usage: { video: key, minutes, day: localDay(), run: uuid() },
+    usage: { video: key, minutes, day: localDay(), run },
     onRetry: (message) => setTask(message),
   };
+  let missed = 0;
+  const retry = (count) => runShorts(media, { ...options, count }, key, minutes, run);
   try {
     // The server refuses an over-limit run too; checking first spares a request that can't succeed.
     const { data: allowed } = await db().rpc('usage_allowed', { p_video: key, p_day: localDay(), p_minutes: minutes });
@@ -1164,6 +1167,7 @@ async function runShorts(media, options, key, minutes) {
       customEnd: options.region === 'custom' ? options.customEnd : null, excluding: usedRanges, videoType: options.videoType, cachedTranscript: saved,
       signal: task.controller.signal,
       onTranscript: (transcript) => { project.transcripts ??= {}; project.transcripts[media.id] = transcript; },
+      onMissed: (n) => { missed = n; },
       progress: (fraction, stage) => setTask(stage, fraction),
     });
     const podcast = (r) => r.videoType === 'podcast';
@@ -1191,11 +1195,17 @@ async function runShorts(media, options, key, minutes) {
     state.selectedId = created[0].id;
     renderEditor();
     selectShort(state.selectedId);
+    // The finished Shorts are saved above; the ones Prism AI couldn't make are offered again instead of silently lost.
+    if (missed > 0) {
+      showError(`${missed} ${missed === 1 ? 'Short' : 'Shorts'} couldn’t be made`,
+        `Prism AI couldn’t finish part of the video. Your ${plural(created.length, 'new Short')} ${created.length === 1 ? 'is' : 'are'} saved. Retry to make the rest.`,
+        '', () => retry(missed));
+    }
     await refreshUsage();
   } catch (error) {
     if (task.controller.signal.aborted) return endTask(task);
     endTask(task);
-    reportGenerationError(error);
+    reportGenerationError(error, () => retry(options.count));
   }
 }
 
@@ -1204,13 +1214,13 @@ function localDay() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 }
 
-function reportGenerationError(error) {
+function reportGenerationError(error, retry) {
   const cause = error instanceof StageFailure ? error.underlying : error;
   if (cause instanceof GeminiError) {
     if (cause.failure === 'noStrongClips' || cause.failure === 'noDistinctClips') return showError('No Shorts found', cause.message);
     if (cause.failure === 'signIn' || cause.status === 401 || cause.status === 403) return showError('Check your sign-in', cause.message);
     if (cause.failure === 'usageLimit') { track('limit_reached'); return showError('You’ve reached your beta limit', cause.message, 'limit'); }
-    if (cause.failure === 'request' && [429, 500, 502, 503, 504, 546].includes(cause.status)) return showError('Prism AI is unavailable right now', cause.message, 'temporary');
+    if (cause.failure === 'request' && [429, 500, 502, 503, 504, 546].includes(cause.status)) return showError('Prism AI is unavailable right now', cause.message, 'temporary', retry);
   }
   if (error instanceof ShortMakerError) return showError('Couldn’t make Shorts', error.message);
   showError('Couldn’t make Shorts', error instanceof StageFailure ? error.message : error?.message || 'Something went wrong. Your existing clips were kept.');
@@ -1279,9 +1289,12 @@ function closeDialog() {
   $('#dialog').hidden = true;
   $('#dialog').innerHTML = '';
 }
-function showError(title, message, kind = '') {
+function showError(title, message, kind = '', retry = null) {
   openDialog(`<div class="stack"><h2>${esc(title)}</h2><p>${esc(message)}</p>
-    <div class="row end">${kind === 'limit' ? '<button class="button ghost" data-action="usage">Usage</button>' : ''}<button class="button primary" data-action="close">OK</button></div></div>`);
+    <div class="row end">${kind === 'limit' ? '<button class="button ghost" data-action="usage">Usage</button>' : ''}${retry
+      ? '<button class="button ghost" data-action="close">Not now</button><button class="button primary" id="dialog-retry">Retry</button>'
+      : '<button class="button primary" data-action="close">OK</button>'}</div></div>`);
+  $('#dialog-retry')?.addEventListener('click', () => { closeDialog(); retry(); });
 }
 
 // MARK: Editor

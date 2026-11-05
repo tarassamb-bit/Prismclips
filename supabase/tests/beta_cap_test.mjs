@@ -150,5 +150,14 @@ await assert.rejects(asUser(google, 'update public.profiles set user_id = $1 whe
 assert.equal(await available('google_person'), false);
 console.log('PASS profiles: name and unique username from sign-up, live availability, own profile only');
 
+const failures = fs.readFileSync(new URL('../migrations/202611050001_ai_failures.sql', import.meta.url), 'utf8');
+for (const sql of [failures, failures]) await admin.query(sql);
+await admin.query("insert into public.ai_failures (user_id, source, model, kind, attempt, error_type, ms) values ($1, 'web', 'xiaomi/mimo-v2.6-flash', 'audio', 1, 'timeout', 80000)", [google]);
+assert.equal((await admin.query('select failures from public.ai_failures_daily')).rows[0].failures, '1');
+await assert.rejects(asUser(google, 'select * from public.ai_failures'), /permission denied/);
+await assert.rejects(asRole(a, 'anon', 'select * from public.ai_failures_daily'), /permission denied/);
+await assert.rejects(asRole(a, 'authenticated', "insert into public.ai_failures (source, model, error_type) values ('web', 'x', 'timeout')"), /permission denied/);
+console.log('PASS ai_failures: the servers log, nobody else reads or writes');
+
 await admin.query('delete from auth.users');
 await Promise.all([admin, a, b].map((client) => client.end()));
