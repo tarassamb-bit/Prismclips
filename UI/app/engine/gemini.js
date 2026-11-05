@@ -133,7 +133,9 @@ async function send(token, body, configuration, signal) {
       const status = response.status;
       if (canRetry && [500, 502, 503, 504, 546].includes(status)) {
         const pause = Math.min(60, Math.max(wait, retryDelay(response, responseText) ?? 0));
-        configuration.onRetry?.(`Prism AI is busy (HTTP ${status}) · retrying in ${Math.round(pause)} s`);
+        // The server's own reason (or the platform's, e.g. Vercel's error code), so a screenshot says what went wrong.
+        const reason = serverError(responseText).message ?? response.headers.get('x-vercel-error') ?? responseText.trim().slice(0, 80);
+        configuration.onRetry?.(`Prism AI is busy (HTTP ${status}${reason ? `: ${reason}` : ''}) · retrying in ${Math.round(pause)} s`);
         await sleep(pause, signal);
         continue;
       }
