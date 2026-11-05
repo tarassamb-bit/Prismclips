@@ -3,8 +3,9 @@
 
 export const PROJECT_URL = 'https://isdplhahgggundbohmlr.supabase.co/';
 export const PUBLISHABLE_KEY = 'sb_publishable_ATTcp2-mrca0swMStHHdYQ_Le851b8l';
-// On localhost the call goes through the dev server's /gateway, which forwards it; the function itself allows browsers once deployed.
-export const GATEWAY_URL = ['localhost', '127.0.0.1'].includes(globalThis.location?.hostname) ? '/gateway' : PROJECT_URL + 'functions/v1/gemini';
+// On localhost the call goes through the dev server's /gateway, which forwards it. On the website it goes to the site's own
+// Vercel function (api/gemini.js), which may run 300 s; Supabase's function stops at 150 s, too soon for slow Mimo answers.
+export const GATEWAY_URL = ['localhost', '127.0.0.1'].includes(globalThis.location?.hostname) ? '/gateway' : '/api/gemini';
 
 const MESSAGES = {
   signIn: 'Sign in to your Prism account to use Prism AI.',
@@ -118,7 +119,7 @@ async function send(token, body, configuration, signal) {
     const canRetry = attempt < waits.length;
     // A little randomness keeps the batches that run side by side from retrying in lockstep.
     const wait = canRetry ? waits[attempt] * (1 + Math.random() * 0.25) : 0;
-    const timeout = AbortSignal.timeout(180_000);
+    const timeout = AbortSignal.timeout(310_000);
     try {
       const headers = {
         'Content-Type': 'application/json', Authorization: `Bearer ${token}`, apikey: PUBLISHABLE_KEY,
@@ -148,7 +149,7 @@ async function send(token, body, configuration, signal) {
       if (signal?.aborted) throw error;
       // The browser says only "Failed to fetch"; give the person something they can act on.
       if (attempt >= 2) throw new GeminiError('request', 0, 'Could not reach Prism AI. Check your internet connection and try again.');
-      // Requests may run three minutes before timing out, so lost connections get only two more tries.
+      // Requests may run five minutes before timing out, so lost connections get only two more tries.
       configuration.onRetry?.(`Connection to Prism AI dropped · retrying in ${Math.round(wait)} s`);
       await sleep(wait, signal);
     }

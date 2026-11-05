@@ -313,7 +313,8 @@ export async function transcribeSentences(source, interval, configuration, progr
 /** Transcribes the interval in fixed chunks, a few at a time. `finished` receives the transcribed stretch from the start each
  * time it grows, so a run that fails later can resume instead of paying for it again. */
 export async function transcribe(source, interval, configuration, { progress, granularity = 'words', reference = [], finished, signal } = {}) {
-  const chunkSize = granularity === 'sentences' ? 120 : 15;
+  // One minute of 16 kHz WAV is about 2.6 MB as base64: under Vercel's 4.5 MB request limit, and Mimo answers well within its time.
+  const chunkSize = granularity === 'sentences' ? 60 : 15;
   const total = interval.end - interval.start;
   if (total <= 0.001) return [];
   const chunks = [];
