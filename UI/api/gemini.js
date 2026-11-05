@@ -95,7 +95,9 @@ async function rpc(name, args) {
     method: 'POST', headers: serviceHeaders(), body: JSON.stringify(args), signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) throw new Error(`${name}: HTTP ${response.status}`);
-  return response.json();
+  // Functions that return nothing (prism_record_beta_spend) answer with an empty body.
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
 }
 
 /** Verifies the caller and reserves usage; returns the user id, or null after answering with a refusal. */
