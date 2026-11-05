@@ -522,7 +522,7 @@ const LENGTHS = [[0, 'Auto'], [15, '15 seconds'], [30, '30 seconds'], [45, '45 s
 function startCreate({ project = null, media = null, file = null } = {}) {
   setScreen('create');
   state.create = {
-    step: media ? 2 : 1, project, media, count: 4, duration: 45, region: 'entireVideo', customStart: 0,
+    step: media ? 2 : 1, project, media, count: 0, duration: 0, region: 'entireVideo', customStart: 0,
     customEnd: media ? Math.round(media.duration / 6) / 10 : 0, style: 'auto', videoType: 'auto', busy: false, error: '',
   };
   if (file) chooseVideo(file);

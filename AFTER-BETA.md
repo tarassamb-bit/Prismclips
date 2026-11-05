@@ -5,10 +5,10 @@ and who found it. Tick them off (`- [x]`) when fixed.
 
 ## Web app: Create Shorts screen
 
-- [ ] **"How many" is confusing** (owner, 2026-11-04). The − Auto + stepper doesn't make clear that Auto is a choice, and it
+- [ ] **"How many" is confusing** (Auto is now the default, 2026-11-05; the picker redesign is still open) (owner, 2026-11-04). The − Auto + stepper doesn't make clear that Auto is a choice, and it
   jumps to 4 every time a video is chosen. Make it a picker you click (like "Approx. length"), with **Auto** as a visible
   option, and keep Auto unless the person changes it.
-- [ ] **"Approx. length" starts at 45 seconds** (owner, 2026-11-04). It should start at **Auto**, like the rest of the
+- [x] **"Approx. length" starts at 45 seconds** (owner, 2026-11-04). It should start at **Auto**, like the rest of the
   settings.
 
 ## Web app: sidebar
