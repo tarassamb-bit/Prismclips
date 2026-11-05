@@ -13,7 +13,8 @@ export const autoCount = (seconds) => Math.min(MAX_SHORTS, Math.max(1, Math.floo
 const truncate = (value, length) => (value.length > length ? value.slice(0, length) : value);
 
 /**
- * @param options { duration, count, region, customStart, customEnd, excluding, videoType, cachedTranscript, onTranscript, onMissed, progress, signal }
+ * @param options { duration, count, region, customStart, customEnd, excluding, videoType, language, cachedTranscript, onTranscript, onMissed, progress, signal }
+ *   language is a name ("Ukrainian") or 'auto'; Auto detects it once and saves it with the transcript.
  *   onMissed(n) hears how many Shorts couldn't be made because Prism AI failed on part of the video, after every retry.
  * @returns Shorts as { start, duration, captions, cropKeyframes, speechWords, warning, title, reason, fit, videoType, score, description }
  */
@@ -30,6 +31,14 @@ export async function analyze(source, configuration_, options) {
   // A count of 0 means Auto: room for one Short per minute, and only clips Prism AI scores as strong fill it.
   const targetCount = options.count > 0 ? Math.min(options.count, MAX_SHORTS) : autoCount(interval.end - interval.start);
   progress(0, 'Preparing audio for Prism AI');
+  // One language for the whole video, chosen or detected once, so no piece of it is transcribed in another one.
+  const chosen = options.language && options.language !== 'auto' ? options.language : null;
+  configuration.language = chosen ?? cachedTranscript?.language ?? null;
+  if (!configuration.language && source.hasAudio) {
+    progress(0, 'Prism AI · recognizing the language');
+    configuration.language = await S.detectLanguage(source, interval, configuration, signal);
+  }
+  const language = configuration.language ?? undefined;
   let transcript;
   const saved = T.cuesCovering(cachedTranscript, interval.start, interval.end);
   if (!source.hasAudio) transcript = [];
@@ -47,9 +56,9 @@ export async function analyze(source, configuration_, options) {
     const fresh = await S.transcribeSentences(source, { start: from, end: interval.end }, configuration, (fraction) => {
       const overall = (from - interval.start + fraction * (interval.end - from)) / (interval.end - interval.start);
       progress(0.55 * overall, `Prism AI · transcribing audio · ${Math.floor(overall * 100)}%`);
-    }, (cues, end) => onTranscript({ start: interval.start, end, cues: [...keptCues, ...cues] }), signal);
+    }, (cues, end) => onTranscript({ start: interval.start, end, cues: [...keptCues, ...cues], language }), signal);
     transcript = [...keptCues, ...fresh];
-    onTranscript({ start: interval.start, end: interval.end, cues: transcript });
+    onTranscript({ start: interval.start, end: interval.end, cues: transcript, language });
   }
   progress(0.55, 'Selecting distinct moments');
   if (videoType === 'auto') {
@@ -66,7 +75,9 @@ export async function analyze(source, configuration_, options) {
   // Screens and gameplay lose their edges in a vertical crop, whatever the picker suggested.
   // Only screens and gameplay are forced to the whole frame. The picker's own 'fit' guess is ignored: from a few sparse frames it
   // calls too many talking heads "slides". Framing looks at every second and still shows the whole frame when it really is a screen.
-  const picks = clips.map((c) => ({ ...c, duration: c.end - c.start, fit: forcesFit(videoType) }));
+  // A video that is already vertical keeps its whole frame: no zoom or crop that could cut off burned-in text.
+  const vertical = source.height / source.width >= 1.6;
+  const picks = clips.map((c) => ({ ...c, duration: c.end - c.start, fit: vertical || forcesFit(videoType) }));
   let steps = 0;
   const reportStep = (stage) => { steps++; progress(0.7 + 0.29 * Math.min(1, steps / (targetCount * 2)), stage); };
   // Picks are prepared a wave at a time; a pick that now overlaps an earlier one gives way to the next backup.
@@ -103,7 +114,7 @@ export async function analyze(source, configuration_, options) {
     return {
       start, duration, captions, cropKeyframes, speechWords: words,
       warning: shot.referenceCues.length === 0 || shot.words.length > 0 ? null : S.SENTENCE_TIMING_NOTICE,
-      title: candidate.title ? truncate(candidate.title, 100) : captions[0] ? truncate(captions[0].text, 100) : null,
+      title: groundedTitle(candidate.title, captions),
       reason: candidate.reason ? truncate(candidate.reason, 400) : null, fit: candidate.fit, videoType,
       score: Math.round(candidate.score * 10), description: candidate.description ? truncate(candidate.description, 1000) : null,
     };
@@ -116,6 +127,17 @@ export async function analyze(source, configuration_, options) {
   if (missed > 0) options.onMissed?.(Math.min(missed, Math.max(0, targetCount - results.length)));
   progress(1, 'Shorts ready');
   return results.sort((a, b) => a.start - b.start);
+}
+
+/** The AI's title when it is built from the clip's own words; otherwise a short quote from the clip, so a title never carries an
+ * invented or misspelled word: every word of four letters or more must be heard in the clip, ignoring case and punctuation. */
+export function groundedTitle(title, captions) {
+  const words = (value) => (value.toLocaleLowerCase().match(/[\p{L}\p{N}'’]+/gu) ?? []).filter((w) => w.length >= 4);
+  const spoken = new Set(captions.flatMap((c) => words(c.text)));
+  const proposed = words(title ?? '');
+  if (proposed.length > 0 && proposed.every((w) => spoken.has(w))) return truncate(title.trim(), 100);
+  const quote = captions.map((c) => c.text).join(' ').trim().split(/\s+/).slice(0, 8).join(' ').replace(/[,;:–-]+$/, '');
+  return quote ? truncate(quote, 100) : title ? truncate(title, 100) : null;
 }
 
 /** Turns a rough clip into exact boundaries: whole sentences, no filler at the edges, breathing room, no cut word, a strong first

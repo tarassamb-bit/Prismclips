@@ -517,12 +517,15 @@ document.addEventListener('drop', (event) => {
 
 // MARK: Create Shorts (five steps: video, settings, captions, content type, then the run)
 
+// Names as Prism AI is told them; Auto detects the language once per video.
+const LANGUAGES = ['auto', 'English', 'Ukrainian', 'Polish', 'German', 'French', 'Spanish', 'Italian', 'Portuguese', 'Dutch', 'Czech',
+  'Lithuanian', 'Latvian', 'Estonian', 'Romanian', 'Turkish', 'Russian', 'Arabic', 'Hindi', 'Japanese', 'Korean', 'Chinese'];
 const LENGTHS = [[0, 'Auto'], [15, '15 seconds'], [30, '30 seconds'], [45, '45 seconds'], [60, '60 seconds'], [90, '90 seconds']];
 
 function startCreate({ project = null, media = null, file = null } = {}) {
   setScreen('create');
   state.create = {
-    step: media ? 2 : 1, project, media, count: 0, duration: 0, region: 'entireVideo', customStart: 0,
+    step: media ? 2 : 1, project, media, count: 0, duration: 0, region: 'entireVideo', customStart: 0, language: 'auto',
     customEnd: media ? Math.round(media.duration / 6) / 10 : 0, style: 'auto', videoType: 'auto', busy: false, error: '',
   };
   if (file) chooseVideo(file);
@@ -585,6 +588,7 @@ function renderCreate() {
           <div><span class="muted small">How many</span>
             <span class="stepper"><button class="button ghost" data-create="less" aria-label="Fewer Shorts">−</button><strong>${c.count > 0 ? `${c.count} ${c.count === 1 ? 'Short' : 'Shorts'}` : 'Auto'}</strong><button class="button ghost" data-create="more" aria-label="More Shorts">+</button></span></div>
           <label>Approx. length <select id="length">${LENGTHS.map(([v, t]) => `<option value="${v}" ${v === c.duration ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+          <label>Language <select id="language">${LANGUAGES.map((l) => `<option value="${l}" ${l === c.language ? 'selected' : ''}>${l === 'auto' ? 'Auto' : l}</option>`).join('')}</select></label>
           <label>Take clips from <select id="region">${Object.entries(REGION_TITLES).map(([k, t]) => `<option value="${k}" ${k === c.region ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
         </div>
         ${c.region === 'custom' ? `<div class="settings-row"><label>Start (minutes) <input id="from" type="number" min="0" step="0.1" value="${c.customStart}"></label>
@@ -606,6 +610,7 @@ function renderCreate() {
   $('#pick')?.addEventListener('change', (event) => event.target.files[0] && chooseVideo(event.target.files[0]));
   $('#length')?.addEventListener('change', (event) => { c.duration = Number(event.target.value); renderCreate(); });
   $('#region')?.addEventListener('change', (event) => { c.region = event.target.value; renderCreate(); });
+  $('#language')?.addEventListener('change', (event) => { c.language = event.target.value; });
   for (const [id, key] of [['#from', 'customStart'], ['#to', 'customEnd']]) {
     $(id)?.addEventListener('change', (event) => { c[key] = Number(event.target.value) || 0; renderCreate(); });
   }
@@ -625,7 +630,7 @@ async function createAction(action) {
   } else if (action === 'make') {
     state.project = c.project;
     makeShorts(c.media, {
-      count: c.count, duration: c.duration, region: c.region, videoType: c.videoType, captionStyle: c.style,
+      count: c.count, duration: c.duration, region: c.region, videoType: c.videoType, captionStyle: c.style, language: c.language,
       customStart: c.customStart * 60, customEnd: c.customEnd * 60,
     });
     return;
@@ -1164,7 +1169,7 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
     track('analysis_started', { length: lengthBucket(minutes) });
     const results = await Shorts.analyze(source, configuration, {
       duration: options.duration, count: options.count, region: options.region, customStart: options.region === 'custom' ? options.customStart : null,
-      customEnd: options.region === 'custom' ? options.customEnd : null, excluding: usedRanges, videoType: options.videoType, cachedTranscript: saved,
+      customEnd: options.region === 'custom' ? options.customEnd : null, excluding: usedRanges, videoType: options.videoType, language: options.language, cachedTranscript: saved,
       signal: task.controller.signal,
       onTranscript: (transcript) => { project.transcripts ??= {}; project.transcripts[media.id] = transcript; },
       onMissed: (n) => { missed = n; },
@@ -1175,10 +1180,11 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
     for (const r of results) {
       const segment = {
         id: uuid(), mediaId: media.id, start: r.start, duration: r.duration, caption: '', isMuted: false, captionStart: 0, captionDuration: null,
-        fitToFrame: r.fit, captions: r.captions, cropZoom: 1.08, cropPosition: 0.5, cropKeyframes: r.cropKeyframes,
+        fitToFrame: r.fit, captions: r.captions, cropZoom: r.fit ? 1 : 1.08, cropPosition: 0.5, cropKeyframes: r.cropKeyframes,
         cropTrackingVersion: Framing.VERSION, speechWords: r.speechWords, score: r.score, suggestedTitle: r.title, selectionReason: r.reason,
         suggestedDescription: r.description, captionNotice: r.warning, captionStyle: options.captionStyle, videoType: r.videoType,
-        splitScreen: podcast(r) ? true : false, captionPosition: podcast(r) ? 'middle' : 'bottom', captionSize: 'medium', captionAnimated: false,
+        // A whole-frame Short (a vertical source, a screen) is never split into two halves.
+        splitScreen: podcast(r) && !r.fit, captionPosition: podcast(r) && !r.fit ? 'middle' : 'bottom', captionSize: 'medium', captionAnimated: false,
       };
       if (segment.splitScreen) {
         setTask(`Prism AI · finding both speakers · Short ${created.length + 1} of ${results.length}`);

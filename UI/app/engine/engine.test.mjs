@@ -239,3 +239,13 @@ console.log('engine checks passed');
   assert.deepEqual(T.alignToSpeech(guessed, []), guessed, 'no speech found: timings unchanged');
 }
 console.log('word timing checks passed');
+
+// Titles come from the clip's own words; an invented or misspelled title becomes a short quote from the clip.
+{
+  const captions = [{ text: 'Я так люблю тебе, моя земля,' }, { text: 'і небо над тобою синє.' }];
+  assert.equal(Shorts.groundedTitle('Люблю тебе, моя земля', captions), 'Люблю тебе, моя земля');
+  assert.equal(Shorts.groundedTitle('Mylėk savo žemę', captions), 'Я так люблю тебе, моя земля, і небо');
+  assert.equal(Shorts.groundedTitle('Люблю тебе, моя зимля мила', captions), 'Я так люблю тебе, моя земля, і небо', 'misspelled words fail');
+  assert.equal(Shorts.groundedTitle(null, []), null);
+}
+console.log('title grounding checks passed');

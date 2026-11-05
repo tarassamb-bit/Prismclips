@@ -163,7 +163,7 @@ details.insp-section:not([open]) { gap: 0; }
 .panel { background: var(--surface1); border: 1px solid var(--border); border-radius: 14px; padding: 16px; text-align: left; display: grid; gap: 10px; justify-items: start; }
 .panel > * { max-width: 100%; }
 .file-line { margin: 0; font-weight: 500; } .tick { color: var(--sky); }
-.settings-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; width: 100%; align-items: end; }
+.settings-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px; width: 100%; align-items: end; }
 .settings-row > div { display: grid; gap: 4px; }
 .stepper { display: flex; align-items: center; gap: 10px; }
 .stepper .button { padding: 2px 10px; }
