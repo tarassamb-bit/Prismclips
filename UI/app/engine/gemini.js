@@ -86,14 +86,13 @@ export async function generate(parts, schema, configuration, signal) {
 export async function generateText(parts, schema, configuration, signal) {
   // Every request names its video, so the server can count it against the limit. No video, no request.
   if (!configuration.usage.video) throw new GeminiError('signIn');
-  const token = await configuration.accessToken();
-  if (!token) throw new GeminiError('signIn');
+  if (!(await configuration.accessToken())) throw new GeminiError('signIn');
   const body = JSON.stringify({
     contents: [{ role: 'user', parts }],
     generationConfig: { temperature: 0.2, responseMimeType: 'application/json', responseSchema: schema },
   });
   if (body.length > 19_000_000) throw new GeminiError('requestTooLarge');
-  const response = await send(token, body, configuration, signal);
+  const response = await send(body, configuration, signal);
   signal?.throwIfAborted();
   if (!response) throw new GeminiError('invalidResponse');
   if (response.status !== 200) {
@@ -111,7 +110,7 @@ export async function generateText(parts, schema, configuration, signal) {
 }
 
 /** Server errors and short rate-limit waits are retried; the last response is returned as is. */
-async function send(token, body, configuration, signal) {
+async function send(body, configuration, signal) {
   const { usage } = configuration;
   const waits = retry.waits;
   for (let attempt = 0; attempt <= waits.length; attempt++) {
@@ -121,6 +120,9 @@ async function send(token, body, configuration, signal) {
     const wait = canRetry ? waits[attempt] * (1 + Math.random() * 0.25) : 0;
     const timeout = AbortSignal.timeout(310_000);
     try {
+      // Fresh on every attempt: retries can run longer than a sign-in token lasts (1 hour), and Safari may skip the auto-refresh.
+      const token = await configuration.accessToken();
+      if (!token) throw new GeminiError('signIn');
       const headers = {
         'Content-Type': 'application/json', Authorization: `Bearer ${token}`, apikey: PUBLISHABLE_KEY,
         'x-prism-video': usage.video, 'x-prism-minutes': String(usage.minutes), 'x-prism-day': usage.day,
@@ -148,7 +150,7 @@ async function send(token, body, configuration, signal) {
       }
       return { status, body: responseText };
     } catch (error) {
-      if (signal?.aborted) throw error;
+      if (signal?.aborted || error instanceof GeminiError) throw error;
       // The browser says only "Failed to fetch"; give the person something they can act on.
       if (attempt >= 2) throw new GeminiError('request', 0, 'Could not reach Prism AI. Check your internet connection and try again.');
       // Requests may run five minutes before timing out, so lost connections get only two more tries.
