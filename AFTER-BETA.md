@@ -33,6 +33,13 @@ and who found it. Tick them off (`- [x]`) when fixed.
   test them before their next release.
 - [ ] **Domain**: the site lives at prismclips.vercel.app; `prismclips.app` isn't owned yet.
 
+## Brand
+
+- [ ] **Rename everything from Prism to Relio** (owner, 2026-11-05). The whole website and company become **Relio** /
+  **relioclips**: site text, logo and app name, page titles, emails, `llms.txt`, legal pages, the Vercel project and
+  domain (prismclips.vercel.app → a relioclips address), the OpenRouter app name ("Prism Clips"), the Mac, Windows and
+  Linux apps, and the GitHub repos. Old addresses should redirect to the new ones.
+
 ## Found by testers
 
 <!-- - [ ] **What happened** (tester, date). Device and browser. What they expected. -->
