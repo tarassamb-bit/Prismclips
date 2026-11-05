@@ -122,8 +122,6 @@ details.insp-section:not([open]) { gap: 0; }
 .side-button.prominent { background: var(--sky); color: #0e0f14; }
 .side-button:disabled { opacity: .45; cursor: default; }
 .side-bottom { margin-top: auto; display: grid; gap: 14px; }
-.res-line { display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; }
-.res-line .mono { font-size: 11px; }
 .meter { height: 8px; background: var(--surface2); border-radius: 99px; overflow: hidden; }
 .meter.thin { height: 4px; }
 .meter > div { height: 100%; background: var(--sky); border-radius: 99px; width: 0; }
