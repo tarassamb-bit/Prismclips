@@ -3,7 +3,7 @@
 // (visit any page once with ?notrack to stop counting your own visits; ?track turns it back on).
 // Project addresses carry the project's title, so they're grouped by page type before they're sent.
 (() => {
-  const LIVE = ['relioclips.com', 'www.relioclips.com', 'prismclips.vercel.app'];
+  const LIVE = ['relioclips.com', 'www.relioclips.com'];
   const flags = location.search + location.hash;
   try {
     if (/[?&#]notrack\b/.test(flags)) localStorage.setItem('prism-no-analytics', '1');

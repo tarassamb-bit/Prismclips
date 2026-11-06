@@ -7,17 +7,6 @@
   },
   "redirects": [
     {
-      "source": "/:path((?!api/|updates/).*)",
-      "has": [
-        {
-          "type": "host",
-          "value": "prismclips.vercel.app"
-        }
-      ],
-      "destination": "https://relioclips.com/:path",
-      "permanent": true
-    },
-    {
       "source": "/account",
       "destination": "/login",
       "permanent": true
