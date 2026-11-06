@@ -19,7 +19,7 @@ Try it free · See how it works
 
 Free beta · Runs in your browser, nothing to install · Mac app also available
 
-THE GOOD PART STARTS HERE 01 / PRISM EDITOR
+THE GOOD PART STARTS HERE 01 / RELIO EDITOR
 
 YOUR NEXT CREATIVE SHORTCUTONE IN. MANY OUT.
 
@@ -228,7 +228,7 @@ Check the project documentation ↗ or share your feedback on GitHub ↗.
 URL: https://relioclips.com/about
 Title: About — Relio
 
-ABOUT PRISM
+ABOUT RELIO
 
 # One video in. Many Shorts out.
 Relio is a desktop app that turns long videos into vertical Shorts with captions.
