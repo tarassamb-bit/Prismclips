@@ -31,11 +31,11 @@ and who found it. Tick them off (`- [x]`) when fixed.
   and a redeploy of `signup-guard`.
 - [ ] **Windows and Linux apps** weren't compiled after their "Create account" change (it now opens the website). Build and
   test them before their next release.
-- [ ] **Domain**: the site lives at prismclips.vercel.app; `prismclips.app` isn't owned yet.
+- [x] **Domain**: the site lives at relioclips.com (2026-11-06). prismclips.vercel.app no longer exists, so desktop builds that link there need an update.
 
 ## Brand
 
-- [ ] **Rename everything from Prism to Relio** (owner, 2026-11-05). The whole website and company become **Relio** /
+- [ ] **Rename everything from Prism to Relio** (owner, 2026-11-05; website, web app, emails, AI server and relioclips.com done 2026-11-06; desktop apps, GitHub repos and OpenRouter app name still open). The whole website and company become **Relio** /
   **relioclips**: site text, logo and app name, page titles, emails, `llms.txt`, legal pages, the Vercel project and
   domain (prismclips.vercel.app → a relioclips address), the OpenRouter app name ("Prism Clips"), the Mac, Windows and
   Linux apps, and the GitHub repos. Old addresses should redirect to the new ones.
