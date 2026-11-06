@@ -256,42 +256,61 @@ Title: Changelog — Relio
 RELEASE NOTES
 
 # Changelog
-What changed in each Relio build. Downloads live on GitHub Releases.
+What's new in Relio Clips, newest first.
 
-### Unreleased
-NEXT
+### 0.1
+2026-11-06 · CURRENT
 
-#### New
-
-- Optional Relio account. Sign in on the website to see your exports, Shorts made and minutes of Shorts.
-
-### v0.2.0-beta.2
-2026-10-21 · BETA
+Relio Clips now runs in your browser at relioclips.com. Nothing to install.
 
 #### New
 
-- Installers for macOS (.dmg), Windows (.exe) and Linux (.AppImage), built on every release tag.
+- A new name: Prism is now Relio Clips, at relioclips.com.
+- Make Shorts in the browser: upload a video, pick settings and captions, review the picks, and export MP4s.
+- Your projects and videos follow your account to any computer (1 GB of cloud storage per account).
+- Choose the language of the video, or leave it on Auto. Relio keeps one language for the whole video, sung lyrics included.
+- How many Shorts and how long each one is start at Auto.
+- A bigger video player in the editor.
+- New sign-up and sign-in pages, with password reset.
 
-- Native Windows and Linux workspaces on a shared engine. Both are untested on real devices.
+#### Improved
+
+- Relio AI no longer stops at busy times: it retries quietly and switches to a backup model when needed.
+- Every Short that's ready is saved. If some couldn't be made, Relio says how many and offers Retry.
+- Titles use words actually spoken in the clip.
+- Vertical videos keep their whole frame.
+- Settings › Usage shows which videos are only on this device, and why.
+- Clearer error messages, without technical codes.
 
 #### Fixed
 
-- Gemini timeouts now fail the run instead of silently dropping results.
+- Pages taller than the window now scroll.
+- Captions no longer leave gaps between phrases.
+- Exporting works in Safari.
 
-- Crops stay inside frames with odd pixel sizes.
+### 0.0.1
+2026-10-26 · BETA
 
-- macOS release builds with the newest Xcode and its own SQLite.
+The first public beta, as desktop apps.
 
-### Earlier builds
+#### New
+
+- Installers for macOS, Windows and Linux.
+- A guided tutorial for your first video, with an optional editor tour. Replay it from Settings › Account.
+- Sign in with a Relio account.
+
+#### Fixed
+
+- Email confirmation links open the Relio website.
+- AI timeouts show an error instead of silently losing Shorts.
+- Crops stay inside the frame for every video size.
+
+### Early build
 2026-10-18 – 10-20
 
-- First Relio video-to-Shorts editor for Mac.
-
-- Gemini became the only AI pipeline for picking Shorts and framing.
-
-- Better Shorts selection, caption customization and editing.
-
-- Shared rendering engine with tests.
+- The first Relio editor for Mac: long video in, vertical Shorts out.
+- AI picks the moments and frames the speaker.
+- Caption styles and a timeline editor.
 
 ---
 
