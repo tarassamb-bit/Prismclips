@@ -2,7 +2,7 @@
 // metadata `turnstile`; the signup-guard hook (supabase/functions/signup-guard) verifies it and refuses sign-ups without one.
 // Sign-in never needs it. The widget only asks for a click when Cloudflare isn't sure (appearance: interaction-only).
 window.prismTurnstile = (() => {
-  // The widget's site key (public; Cloudflare → Turnstile → Prism). Empty: no widget, sign-ups carry no token.
+  // The widget's site key (public; Cloudflare → Turnstile → Relio). Empty: no widget, sign-ups carry no token.
   const SITE_KEY = '0x4AAAAAAFzgmODMQZteUhwA';
   let loading = null;
 

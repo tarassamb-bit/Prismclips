@@ -15,7 +15,7 @@ const truncate = (value, length) => (value.length > length ? value.slice(0, leng
 /**
  * @param options { duration, count, region, customStart, customEnd, excluding, videoType, language, cachedTranscript, onTranscript, onMissed, progress, signal }
  *   language is a name ("Ukrainian") or 'auto'; Auto detects it once and saves it with the transcript.
- *   onMissed(n) hears how many Shorts couldn't be made because Prism AI failed on part of the video, after every retry.
+ *   onMissed(n) hears how many Shorts couldn't be made because Relio AI failed on part of the video, after every retry.
  * @returns Shorts as { start, duration, captions, cropKeyframes, speechWords, warning, title, reason, fit, videoType, score, description }
  */
 export async function analyze(source, configuration_, options) {
@@ -26,16 +26,16 @@ export async function analyze(source, configuration_, options) {
   let videoType = options.videoType ?? 'general';
   const interval = regionInterval(options.region, source.duration, options.customStart, options.customEnd);
   if (excluding.some((e) => e.start <= interval.start && e.end >= interval.end)) throw new GeminiError('noDistinctClips');
-  // 0 is Auto length; Prism AI sizes each clip within lengthRange.
+  // 0 is Auto length; Relio AI sizes each clip within lengthRange.
   const clipDuration = options.duration > 0 ? Math.min(Math.max(1, options.duration), interval.end - interval.start) : 0;
-  // A count of 0 means Auto: room for one Short per minute, and only clips Prism AI scores as strong fill it.
+  // A count of 0 means Auto: room for one Short per minute, and only clips Relio AI scores as strong fill it.
   const targetCount = options.count > 0 ? Math.min(options.count, MAX_SHORTS) : autoCount(interval.end - interval.start);
-  progress(0, 'Preparing audio for Prism AI');
+  progress(0, 'Preparing audio for Relio AI');
   // One language for the whole video, chosen or detected once, so no piece of it is transcribed in another one.
   const chosen = options.language && options.language !== 'auto' ? options.language : null;
   configuration.language = chosen ?? cachedTranscript?.language ?? null;
   if (!configuration.language && source.hasAudio) {
-    progress(0, 'Prism AI · recognizing the language');
+    progress(0, 'Relio AI · recognizing the language');
     configuration.language = await S.detectLanguage(source, interval, configuration, signal);
   }
   const language = configuration.language ?? undefined;
@@ -55,21 +55,21 @@ export async function analyze(source, configuration_, options) {
     const keptCues = kept ?? [];
     const fresh = await S.transcribeSentences(source, { start: from, end: interval.end }, configuration, (fraction) => {
       const overall = (from - interval.start + fraction * (interval.end - from)) / (interval.end - interval.start);
-      progress(0.55 * overall, `Prism AI · transcribing audio · ${Math.floor(overall * 100)}%`);
+      progress(0.55 * overall, `Relio AI · transcribing audio · ${Math.floor(overall * 100)}%`);
     }, (cues, end) => onTranscript({ start: interval.start, end, cues: [...keptCues, ...cues], language }), signal);
     transcript = [...keptCues, ...fresh];
     onTranscript({ start: interval.start, end: interval.end, cues: transcript, language });
   }
   progress(0.55, 'Selecting distinct moments');
   if (videoType === 'auto') {
-    progress(0.55, 'Prism AI · recognizing the kind of video');
+    progress(0.55, 'Relio AI · recognizing the kind of video');
     videoType = transcript.length === 0 ? 'general' : await S.detectVideoType(transcript, configuration, signal);
-    progress(0.55, `Prism AI · ${VIDEO_TYPE_TITLES[videoType]}`);
+    progress(0.55, `Relio AI · ${VIDEO_TYPE_TITLES[videoType]}`);
   }
-  progress(0.55, 'Prism AI · choosing complete stories and layouts');
+  progress(0.55, 'Relio AI · choosing complete stories and layouts');
   let clips = await S.select(source, transcript, interval, clipDuration, targetCount, configuration, excluding, SELECTION_GUIDANCE[videoType] ?? '',
     (fraction, stage) => progress(0.55 + 0.15 * fraction, stage), signal);
-  // Auto keeps only strong picks; when Prism AI found none, the single best weaker one beats failing.
+  // Auto keeps only strong picks; when Relio AI found none, the single best weaker one beats failing.
   const strong = clips.filter((c) => !c.reason?.startsWith('Weaker pick'));
   if (!(options.count > 0)) clips = strong.length === 0 ? clips.slice(0, 1) : strong;
   // Screens and gameplay lose their edges in a vertical crop, whatever the picker suggested.
@@ -110,7 +110,7 @@ export async function analyze(source, configuration_, options) {
     const cropKeyframes = candidate.fit
       ? [{ time: 0, position: 0.5, preserveWholeFrame: true }, { time: duration, position: 0.5, preserveWholeFrame: true }]
       : await Framing.analyze(source, start, duration, 1.08, configuration, captions, token);
-    reportStep('Prism AI · framing the subject');
+    reportStep('Relio AI · framing the subject');
     return {
       start, duration, captions, cropKeyframes, speechWords: words,
       warning: shot.referenceCues.length === 0 || shot.words.length > 0 ? null : S.SENTENCE_TIMING_NOTICE,
@@ -120,7 +120,7 @@ export async function analyze(source, configuration_, options) {
     };
   }, signal);
   // Keep existing edits intact and ask for another range instead of silently inventing a selection.
-  // Nothing made because Prism AI kept failing is a temporary failure the person can retry, not "no strong moments".
+  // Nothing made because Relio AI kept failing is a temporary failure the person can retry, not "no strong moments".
   if (results.length === 0 && missed > 0) throw new GeminiError('request', 503);
   if (results.length === 0) throw new GeminiError(excluding.length > 0 ? 'noDistinctClips' : 'noStrongClips');
   signal?.throwIfAborted();

@@ -206,7 +206,7 @@ merged = resolveConflict({ id: 'p', changedAt: T0, media: [{ id: 'v1' }] }, ther
 assert.deepEqual([merged.winner, merged.changed], ['cloud', false], 'nothing newer here: take the cloud copy as is');
 assert.equal(here.media[0].cloud.removed, true, 'the inputs are not changed');
 
-// Audio for Prism AI: 16 kHz mono WAV with a correct header; resampling keeps the duration and clamps nothing out of range.
+// Audio for Relio AI: 16 kHz mono WAV with a correct header; resampling keeps the duration and clamps nothing out of range.
 const tone = Float32Array.from({ length: 48000 }, (_, i) => Math.sin(i / 20));
 const speech = resample(tone, 48000, 16000);
 assert.equal(speech.length, 16000);

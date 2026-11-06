@@ -30,14 +30,14 @@
   });
 
   // The pages are written for visitors: "Sign in" and "Try it free" (sign-up). Signed in (Supabase keeps the session in
-  // localStorage), the header shows only "Open Prism" and the main buttons go straight into the app, which re-checks the session.
+  // localStorage), the header shows only "Open Relio" and the main buttons go straight into the app, which re-checks the session.
   try {
     const session = JSON.parse(localStorage.getItem('sb-isdplhahgggundbohmlr-auth-token') || 'null');
     if (session?.user?.id) {
       document.querySelectorAll('.nav-signin').forEach((link) => { link.hidden = true; });
       document.querySelectorAll('.nav-download, [data-cta]').forEach((link) => {
         link.href = '/app/';
-        link.firstChild.textContent = 'Open Prism ';
+        link.firstChild.textContent = 'Open Relio ';
       });
     }
   } catch {}
@@ -111,10 +111,10 @@
     moments: {
       kicker: 'THE STORY COMES FIRST',
       title: ['More than a clip.', 'A complete thought.'],
-      description: 'Prism looks for a hook, the context, and a payoff. Cuts land on whole sentences, so your best ideas get the room they need.',
+      description: 'Relio looks for a hook, the context, and a payoff. Cuts land on whole sentences, so your best ideas get the room they need.',
       points: ['Moments from across your selected range', 'Review and refine every suggested Short'],
       image: 'assets/create.webp', width: 1200, height: 750,
-      alt: "Prism's create screen with controls for number of Shorts, clip length, source range, and caption style.",
+      alt: "Relio's create screen with controls for number of Shorts, clip length, source range, and caption style.",
       caption: 'Your footage. Your brief. Your call.'
     },
     framing: {
@@ -123,7 +123,7 @@
       description: 'Give a widescreen story a vertical point of view. Follow the subject with Fill, keep the full picture with Fit, or stack two views with Split.',
       points: ['AI subject framing with a smoothed camera path', 'Fine-tune the crop yourself in the editor'],
       image: 'assets/layouts.webp', width: 1600, height: 999,
-      alt: 'Prism layout examples showing Fill with a tracked crop, Fit with a blurred background, and Split with two stacked speakers.',
+      alt: 'Relio layout examples showing Fill with a tracked crop, Fit with a blurred background, and Split with two stacked speakers.',
       caption: 'Fill. Fit. Split. Find your angle.'
     },
     captions: {
@@ -132,7 +132,7 @@
       description: 'Make your words part of the picture. Choose from seven caption styles, then adjust the size and position to match your voice.',
       points: ['Word highlighting when verified timing is available', 'Caption styles you can change before export'],
       image: 'assets/captions.webp', width: 1600, height: 846,
-      alt: 'Seven Prism caption styles including Simple, Viral highlight, Highlight box, Bold caps, Minimal, One word, and Podcast treatments.',
+      alt: 'Seven Relio caption styles including Simple, Viral highlight, Highlight box, Bold caps, Minimal, One word, and Podcast treatments.',
       caption: 'Different styles. Still your voice.'
     }
   };

@@ -5,18 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0E0F14" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
-  <title>Privacy — Prism</title>
-  <meta name="description" content="What Prism sends for AI processing, what stays on your computer, and what the web app saves to the cloud.">
+  <title>Privacy — Relio Clips</title>
+  <meta name="description" content="What Relio sends for AI processing, what stays on your computer, and what the web app saves to the cloud.">
   <link rel="canonical" href="https://prismclips.vercel.app/privacy">
   <meta property="og:type" content="website">
-  <meta property="og:site_name" content="Prism">
-  <meta property="og:title" content="Privacy — Prism">
-  <meta property="og:description" content="What Prism sends for AI processing, what stays on your computer, and what the web app saves to the cloud.">
+  <meta property="og:site_name" content="Relio Clips">
+  <meta property="og:title" content="Privacy — Relio">
+  <meta property="og:description" content="What Relio sends for AI processing, what stays on your computer, and what the web app saves to the cloud.">
   <meta property="og:url" content="https://prismclips.vercel.app/privacy">
   <meta property="og:image" content="https://prismclips.vercel.app/og-image.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="Prism — Long video. Short-form magic.">
+  <meta property="og:image:alt" content="Relio — Long video. Short-form magic.">
   <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" href="/favicon.ico" sizes="32x32">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -48,7 +48,7 @@
   </defs></svg>
   <header class="site-header">
     <div class="container header-inner">
-      <a class="brand" href="index.html" aria-label="Prism home"><img src="icon.png" width="33" height="33" alt=""><span>Prism<span class="brand-dot">.</span></span></a>
+      <a class="brand" href="index.html" aria-label="Relio Clips home"><img src="icon.png" width="33" height="33" alt=""><span>Relio Clips<span class="brand-dot">.</span></span></a>
       <nav id="main-nav" aria-label="Main navigation">
         <a href="features.html">Features</a>
         <a href="how-it-works.html">How it works</a>
@@ -67,10 +67,10 @@
 
     <section class="page-hero container"><p class="eyebrow">PRIVACY</p><h1>Your footage<br><span class="muted-heading">stays yours.</span></h1><p>Plain-language summary of where your data goes. Last updated 2026-11-04.</p></section>
     <section class="container prose">
-<h2>On your computer</h2><ul><li>Mac, Windows and Linux apps: your source videos, projects, previews and rendered MP4s stay on your computer. Prism copies videos into a project and never changes the originals.</li><li>Web app: your browser keeps a copy of your videos and projects in its own storage for this site. Exported Shorts are downloaded to your computer.</li></ul>
-<h2>Sent for AI processing</h2><p>Prism has no offline mode. On Mac, requests go through Prism’s server (Supabase) to OpenRouter; in the web app, through Prism’s server on Vercel and an AI model provider. Windows and Linux send requests directly to Google’s Gemini API using your own API key. The relevant providers’ terms apply to this data:</p><ul><li>Audio of the part of the video you selected, in chunks.</li><li>Transcripts.</li><li>Sampled frames: up to 12 per refinement batch, and about 1 per second of each tracked Short.</li><li>Editor chat messages, with recent conversation and a short edit summary (Mac app).</li></ul><p>Temporary audio files are deleted after each request. The server logs may include portions of model responses for diagnostics. See <a href="https://openrouter.ai/privacy">OpenRouter’s Privacy Policy</a> and <a href="https://openrouter.ai/terms">Terms</a>, and <a href="https://policies.google.com/privacy">Google’s Privacy Policy</a> and <a href="https://ai.google.dev/gemini-api/terms">Gemini API terms</a>.</p>
-<h2>Saved to the cloud (web app)</h2><p>So you can open your work on any device you sign in on, the web app saves it to your account:</p><ul><li><strong>Projects and folders</strong>, in Supabase: project and folder names, the name, size, length, resolution and fingerprint of each video, transcripts, and your Shorts with their titles, captions, scores, edits and small preview images.</li><li><strong>Your videos</strong>, in Cloudflare R2: the video files you add, up to 1 GB per account. The same video is stored once. Only your signed-in account can get them, through links that expire after a short time.</li></ul><p>Deleting a project deletes it here and in the cloud, including its video unless another of your projects uses the same video. When a new video doesn’t fit in your 1 GB, Prism asks before deleting your oldest videos from the cloud.</p>
-<h2>Your Prism account</h2><p>Your Prism account is stored with our database provider, Supabase. Prism is free during the current beta and takes no payments. Besides the cloud copy above, the account stores:</p><ul><li>Your email address and password. The password is stored hashed by Supabase Auth.</li><li>Your name and username, if you gave them. Your username is unique, so the sign-up form can tell anyone whether a username is already taken; your name and username are not shown to other people.</li><li>One record per finished export: the date, number of Shorts, total length in seconds and export quality.</li><li>One record per video you make Shorts from: a fingerprint of the file’s name and length (not the video), the day and its length in minutes.</li><li>The total cost of your AI requests and any promo codes you redeemed, to enforce your allowance.</li></ul><p>Database rules let each user read only their own records.</p>
+<h2>On your computer</h2><ul><li>Mac, Windows and Linux apps: your source videos, projects, previews and rendered MP4s stay on your computer. Relio copies videos into a project and never changes the originals.</li><li>Web app: your browser keeps a copy of your videos and projects in its own storage for this site. Exported Shorts are downloaded to your computer.</li></ul>
+<h2>Sent for AI processing</h2><p>Relio has no offline mode. On Mac, requests go through Relio’s server (Supabase) to OpenRouter; in the web app, through Relio’s server on Vercel and an AI model provider. Windows and Linux send requests directly to Google’s Gemini API using your own API key. The relevant providers’ terms apply to this data:</p><ul><li>Audio of the part of the video you selected, in chunks.</li><li>Transcripts.</li><li>Sampled frames: up to 12 per refinement batch, and about 1 per second of each tracked Short.</li><li>Editor chat messages, with recent conversation and a short edit summary (Mac app).</li></ul><p>Temporary audio files are deleted after each request. The server logs may include portions of model responses for diagnostics. See <a href="https://openrouter.ai/privacy">OpenRouter’s Privacy Policy</a> and <a href="https://openrouter.ai/terms">Terms</a>, and <a href="https://policies.google.com/privacy">Google’s Privacy Policy</a> and <a href="https://ai.google.dev/gemini-api/terms">Gemini API terms</a>.</p>
+<h2>Saved to the cloud (web app)</h2><p>So you can open your work on any device you sign in on, the web app saves it to your account:</p><ul><li><strong>Projects and folders</strong>, in Supabase: project and folder names, the name, size, length, resolution and fingerprint of each video, transcripts, and your Shorts with their titles, captions, scores, edits and small preview images.</li><li><strong>Your videos</strong>, in Cloudflare R2: the video files you add, up to 1 GB per account. The same video is stored once. Only your signed-in account can get them, through links that expire after a short time.</li></ul><p>Deleting a project deletes it here and in the cloud, including its video unless another of your projects uses the same video. When a new video doesn’t fit in your 1 GB, Relio asks before deleting your oldest videos from the cloud.</p>
+<h2>Your Relio account</h2><p>Your Relio account is stored with our database provider, Supabase. Relio is free during the current beta and takes no payments. Besides the cloud copy above, the account stores:</p><ul><li>Your email address and password. The password is stored hashed by Supabase Auth.</li><li>Your name and username, if you gave them. Your username is unique, so the sign-up form can tell anyone whether a username is already taken; your name and username are not shown to other people.</li><li>One record per finished export: the date, number of Shorts, total length in seconds and export quality.</li><li>One record per video you make Shorts from: a fingerprint of the file’s name and length (not the video), the day and its length in minutes.</li><li>The total cost of your AI requests and any promo codes you redeemed, to enforce your allowance.</li></ul><p>Database rules let each user read only their own records.</p>
 <h2>Website analytics</h2><p>The website and web app use Vercel Web Analytics and Speed Insights to count page views and measure how fast pages load. They use no cookies and don’t identify you; Vercel records the page address, referrer, browser, device type and country. Project addresses are shortened before they’re sent, so project titles never reach Vercel.</p><p>The web app also counts a few product steps (signing up, choosing a video, starting and finishing an analysis, how many Shorts were made, each export and its quality, re-analyses and reaching the limit) in our database, with only rough video lengths (such as “10–30 min”) and counts. These records hold no account, title or anything you wrote.</p><h2>Bot protection and the waitlist</h2><p>The sign-up form uses <a href="https://www.cloudflare.com/turnstile-privacy-policy/">Cloudflare Turnstile</a> to check that a person, not a bot, is signing up. Cloudflare sees your browser and IP address for that check; the one-time result is checked when your account is created and not kept. If the beta is full and you join the waitlist, we keep only your email address, to tell you when a spot opens, plus a short-lived scrambled form of your IP address to limit spam.</p>
 <h2>Deleting your account</h2><p>In the web app, open Settings › Account › Delete account. It deletes your account at once and for good: every video in Cloudflare R2, your projects, folders, Shorts, exports, usage records, promo codes, name and username, and the copy in the browser you use. A copy in another browser’s storage stays there until you clear that browser’s data for this site. This can’t be undone.</p>
 <h2>Questions</h2><p>Open an issue on <a href="https://github.com/tarassamb-bit/Prismclips/issues">GitHub</a> to ask a question.</p>
@@ -80,10 +80,10 @@
   </main>
   <footer class="site-footer">
     <div class="container footer-main">
-      <div class="footer-brand"><a class="brand" href="index.html" aria-label="Prism home"><img src="icon.png" width="28" height="28" alt=""><span>Prism<span class="brand-dot">.</span></span></a><p>One in. Many out.</p></div>
+      <div class="footer-brand"><a class="brand" href="index.html" aria-label="Relio Clips home"><img src="icon.png" width="28" height="28" alt=""><span>Relio Clips<span class="brand-dot">.</span></span></a><p>One in. Many out.</p></div>
       <nav aria-label="Footer navigation"><a href="download.html">Download</a><a href="about.html">About</a><a href="login.html">Your account</a><a href="faq.html">Help & FAQs</a><a href="https://github.com/tarassamb-bit/Prismclips/issues">Feedback ↗</a><a href="privacy.html">Privacy</a><a href="terms.html">Terms</a></nav>
     </div>
-    <div class="container footer-bottom"><span>Built for creators. Open to everyone.</span><span>© 2026 Prismclips <span class="separator">/</span> Prism beta</span></div>
+    <div class="container footer-bottom"><span>Built for creators. Open to everyone.</span><span>© 2026 Prismclips <span class="separator">/</span> Relio beta</span></div>
   </footer>
 </body>
 </html>

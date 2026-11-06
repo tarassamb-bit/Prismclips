@@ -1,5 +1,5 @@
-// Prism AI requests (Gemini's generateContent shape) with structured JSON output and retries, a port of Shared/Prism.Core/Gemini.cs.
-// Requests go through Prism's server with the signed-in person's session; the server holds the AI key and picks the model.
+// Relio AI requests (Gemini's generateContent shape) with structured JSON output and retries, a port of Shared/Prism.Core/Gemini.cs.
+// Requests go through Relio's server with the signed-in person's session; the server holds the AI key and picks the model.
 
 export const PROJECT_URL = 'https://isdplhahgggundbohmlr.supabase.co/';
 export const PUBLISHABLE_KEY = 'sb_publishable_ATTcp2-mrca0swMStHHdYQ_Le851b8l';
@@ -8,21 +8,21 @@ export const PUBLISHABLE_KEY = 'sb_publishable_ATTcp2-mrca0swMStHHdYQ_Le851b8l';
 export const GATEWAY_URL = ['localhost', '127.0.0.1'].includes(globalThis.location?.hostname) ? '/gateway' : '/api/gemini';
 
 const MESSAGES = {
-  signIn: 'Sign in to your Prism account to use Prism AI.',
+  signIn: 'Sign in to your Relio account to use Relio AI.',
   usageLimit: "You've reached your beta usage limit. Ask for a promo code to get more, then enter it in Settings › Usage.",
-  audioExport: 'Could not prepare audio for Prism AI. Your existing Shorts were kept.',
-  requestTooLarge: 'This Prism AI request exceeds the safe upload size. Choose a shorter source region.',
+  audioExport: 'Could not prepare audio for Relio AI. Your existing Shorts were kept.',
+  requestTooLarge: 'This Relio AI request exceeds the safe upload size. Choose a shorter source region.',
   noDistinctClips: 'No new distinct moments were found in this range. Try another region or length. Your existing clips were kept.',
-  noStrongClips: 'Prism could not find a strong, self-contained Short in this part of the video. Try another part of the video or a different clip length.',
-  invalidTiming: 'Prism AI returned speech timestamps that could not be aligned safely.',
-  invalidResponse: 'Prism AI returned an incomplete or invalid response. Your existing edits were kept.',
+  noStrongClips: 'Relio could not find a strong, self-contained Short in this part of the video. Try another part of the video or a different clip length.',
+  invalidTiming: 'Relio AI returned speech timestamps that could not be aligned safely.',
+  invalidResponse: 'Relio AI returned an incomplete or invalid response. Your existing edits were kept.',
 };
 
 function requestMessage(status) {
-  if (status === 401 || status === 403) return 'Your Prism sign-in was not accepted. Sign in again in Settings › Account.';
-  if (status === 429) return 'Prism AI is handling too many requests right now. Wait a moment, then try again.';
-  if (status === 503) return 'Prism AI is overloaded right now. Wait a moment, then try again.';
-  return 'Prism AI could not complete the request. Please try again.';
+  if (status === 401 || status === 403) return 'Your Relio sign-in was not accepted. Sign in again in Settings › Account.';
+  if (status === 429) return 'Relio AI is handling too many requests right now. Wait a moment, then try again.';
+  if (status === 503) return 'Relio AI is overloaded right now. Wait a moment, then try again.';
+  return 'Relio AI could not complete the request. Please try again.';
 }
 
 export class GeminiError extends Error {
@@ -149,9 +149,9 @@ async function send(body, configuration, signal) {
     } catch (error) {
       if (signal?.aborted || error instanceof GeminiError) throw error;
       // The browser says only "Failed to fetch"; give the person something they can act on.
-      if (attempt >= 2) throw new GeminiError('request', 0, 'Could not reach Prism AI. Check your internet connection and try again.');
+      if (attempt >= 2) throw new GeminiError('request', 0, 'Could not reach Relio AI. Check your internet connection and try again.');
       // Requests may run five minutes before timing out, so lost connections get only two more tries.
-      configuration.onRetry?.(`Connection to Prism AI dropped · retrying in ${Math.round(wait)} s`);
+      configuration.onRetry?.(`Connection to Relio AI dropped · retrying in ${Math.round(wait)} s`);
       await sleep(wait, signal);
     }
   }

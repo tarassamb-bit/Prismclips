@@ -201,7 +201,7 @@
       if (byId('minutes')) byId('minutes').textContent = minuteFormat.format(totalSeconds / 60);
       account.dataset.state = 'signed-in';
       say(totalExports === 0
-        ? 'No exports yet. Sign in to Prism for Mac and export your first Short.'
+        ? 'No exports yet. Sign in to Relio for Mac and export your first Short.'
         : totalExports > 50 ? 'Showing your latest 50 exports. Totals include your full history.' : 'Your export history is up to date.');
     } catch (error) {
       if (request !== statsRequest) return;
@@ -257,7 +257,7 @@
     signedIn.hidden = !userId;
     if (pageTitle) pageTitle.textContent = userId ? 'Your export history' : signedOutTitle;
     if (pageDescription) pageDescription.textContent = userId
-      ? 'Track your exports, Shorts, and time created with Prism for Mac.'
+      ? 'Track your exports, Shorts, and time created with Relio for Mac.'
       : signedOutDescription;
     document.querySelectorAll('.nav-signin').forEach((link) => { link.textContent = userId ? 'Your account' : 'Sign in'; });
     if (!changed) {
@@ -271,7 +271,7 @@
       say('');
       return;
     }
-    if (byId('who')) byId('who').textContent = user.email || 'Your Prism account';
+    if (byId('who')) byId('who').textContent = user.email || 'Your Relio account';
     void loadStats();
   }
 

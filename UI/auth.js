@@ -59,11 +59,11 @@ window.prismAuth = (() => {
       root.innerHTML = `
         <div class="auth">
           <aside class="auth-brand">
-            <a class="auth-logo" href="/"><img src="/icon.png" width="36" height="36" alt=""><span>Prism</span></a>
+            <a class="auth-logo" href="/"><img src="/icon.png" width="36" height="36" alt=""><span>Relio Clips</span></a>
             <div class="auth-pitch">
               <h2>Long video in.<br><span>Shorts out.</span></h2>
               <ul>
-                <li>Prism AI finds the moments worth sharing</li>
+                <li>Relio AI finds the moments worth sharing</li>
                 <li>Captions, framing and export in your browser</li>
                 <li>Your projects follow you to any device</li>
               </ul>

@@ -1,4 +1,4 @@
-// OpenShorts' score → shortlist → detail pipeline on Prism AI, a port of Shared/Prism.Core/Selection.cs (GeminiSelection).
+// OpenShorts' score → shortlist → detail pipeline on Relio AI, a port of Shared/Prism.Core/Selection.cs (GeminiSelection).
 import { generate, generateText, text, inline, map, GeminiError, StageFailure } from './gemini.js';
 import * as T from './transcript.js';
 import { frameJpeg, audioChunk, audioLevels } from './media.js';
@@ -112,9 +112,9 @@ export async function select(source, cues, interval, targetDuration, count, conf
     return strongestOrBest(clips, interval, targetDuration, count, excluding);
   }
   const batches = T.batches(windows.map((_, index) => index), 6);
-  progress(0, `Prism AI · scoring story windows · 0 of ${batches.length}`);
+  progress(0, `Relio AI · scoring story windows · 0 of ${batches.length}`);
   let scored = 0, failed = null;
-  // A batch Prism AI couldn't score ranks last and is reported as missed, instead of stopping the whole run.
+  // A batch Relio AI couldn't score ranks last and is reported as missed, instead of stopping the whole run.
   const scoredBatches = await map(batches, async (ids, token) => {
     try {
       return await scoreBatch(ids, windows, guidance, excluding, configuration, token);
@@ -126,7 +126,7 @@ export async function select(source, cues, interval, targetDuration, count, conf
     }
   }, signal, PARALLEL_REQUESTS, () => {
     scored++;
-    progress(0.45 * scored / batches.length, `Prism AI · scoring story windows · ${scored} of ${batches.length}`);
+    progress(0.45 * scored / batches.length, `Relio AI · scoring story windows · ${scored} of ${batches.length}`);
   });
   if (failed && scoredBatches.flat().every((s) => s.score === 0)) throw failed;
   const ranked = rankedWindowIds(scoredBatches.flat(), windows.map((_, index) => index));
@@ -165,7 +165,7 @@ async function refine(ranked, windows, source, cues, interval, targetDuration, c
   // Long recordings need a deeper shortlist, or good moments ranked just below the cap are never refined.
   const target = Math.min(windows.length, Math.max(count + 2, Math.min(16, Math.floor((interval.end - interval.start) / 90) + 2)));
   const detailBatches = T.batches(ranked.slice(0, target), 3);
-  progress(0.45, `Prism AI · refining hooks and endings · 0 of ${detailBatches.length}`);
+  progress(0.45, `Relio AI · refining hooks and endings · 0 of ${detailBatches.length}`);
   let finished = 0;
   // One failed batch costs only its own candidates, not the whole run.
   const outcomes = await map(detailBatches, async (ids, token) => {
@@ -181,7 +181,7 @@ async function refine(ranked, windows, source, cues, interval, targetDuration, c
     }
   }, signal, PARALLEL_REQUESTS, () => {
     finished++;
-    progress(0.45 + 0.45 * finished / detailBatches.length, `Prism AI · refining hooks and endings · ${finished} of ${detailBatches.length}`);
+    progress(0.45 + 0.45 * finished / detailBatches.length, `Relio AI · refining hooks and endings · ${finished} of ${detailBatches.length}`);
   });
   const allClips = outcomes.flatMap((o) => o.clips);
   const failures = outcomes.filter((o) => o.error).map((o) => o.error);
@@ -189,7 +189,7 @@ async function refine(ranked, windows, source, cues, interval, targetDuration, c
   if (allClips.length === 0) throw new GeminiError(excluding.length === 0 ? 'noStrongClips' : 'noDistinctClips');
   const pool = strongestOrBest(allClips, interval, targetDuration, Math.min(20, count * 2 + 2), excluding);
   if (pool.length <= 1) return pool;
-  progress(0.95, 'Prism AI · final edit: picking the best distinct stories');
+  progress(0.95, 'Relio AI · final edit: picking the best distinct stories');
   const chosen = await finalCut(pool, cues, count, guidance, configuration, signal);
   // The final pass failed, so no editorial decision was made; score-ranked backups remain.
   if (chosen === null) return pool;

@@ -1,5 +1,5 @@
 // Reading the source video in the browser with WebCodecs (Mediabunny): probe, frames, gray grids for cut detection, audio
-// for Prism AI and audio levels. The browser counterpart of Shared/Prism.Core/Media.cs; the video never leaves the computer.
+// for Relio AI and audio levels. The browser counterpart of Shared/Prism.Core/Media.cs; the video never leaves the computer.
 import { Input, ALL_FORMATS, BlobSource, CanvasSink, AudioSampleSink } from '../../vendor/mediabunny-1.61.5.min.mjs';
 import { ShortMakerError, GeminiError } from './gemini.js';
 
@@ -153,7 +153,7 @@ export async function grayGrids(source, start, duration) {
 
 const SPEECH_RATE = 16000;
 
-/** A stretch of audio for Prism AI as 16 kHz mono 16-bit WAV: { mime, bytes }. Plain PCM needs no encoder, so it is identical in every
+/** A stretch of audio for Relio AI as 16 kHz mono 16-bit WAV: { mime, bytes }. Plain PCM needs no encoder, so it is identical in every
  * browser and every AI provider can read it. Throws audioExport when it can't be prepared. */
 export async function audioChunk(source, start, length, signal) {
   if (!source.audio) throw new GeminiError('audioExport');

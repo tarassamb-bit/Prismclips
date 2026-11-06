@@ -1,19 +1,19 @@
-# Prism — full text of prismclips.vercel.app
+# Relio Clips — full text of prismclips.vercel.app
 
 > Every main page of prismclips.vercel.app as plain text. Summary and links: https://prismclips.vercel.app/llms.txt
 
-Prism is in beta. On Mac, sign in to try it; AI usage limits apply. Windows and Linux use your own Gemini API key. Paid plans are not available yet.
+Relio is in beta. On Mac, sign in to try it; AI usage limits apply. Windows and Linux use your own Gemini API key. Paid plans are not available yet.
 
 ---
 
 URL: https://prismclips.vercel.app/
-Title: Prism — Long video. Short-form magic.
+Title: Relio — Long video. Short-form magic.
 
 A fresh perspective on short-form BETA
 
 # Long video. Short-form magic.
 
-Your next great Short is already in your video. Prism finds the moments, frames the story, and adds the captions. You make the final cut.
+Your next great Short is already in your video. Relio finds the moments, frames the story, and adds the captions. You make the final cut.
 
 Try it free · See how it works
 
@@ -35,7 +35,7 @@ Explore clip selection, framing, and captions.
 02 / THE BETA
 ### Try it free.
 
-Prism runs in your browser. Sign up for the free beta: 60 minutes of video per account.
+Relio runs in your browser. Sign up for the free beta: 60 minutes of video per account.
 
 03 / THE DETAILS
 ### A few good questions.
@@ -45,7 +45,7 @@ Get answers before you make your first Short.
 ---
 
 URL: https://prismclips.vercel.app/features
-Title: Features — Prism
+Title: Features — Relio
 
 THE CREATIVE TOOLKIT
 
@@ -58,7 +58,7 @@ Make every word count03
 
 THE STORY COMES FIRST
 #### More than a clip. A complete thought.
-Prism looks for a hook, the context, and a payoff. Cuts land on whole sentences, so your best ideas get the room they need.
+Relio looks for a hook, the context, and a payoff. Cuts land on whole sentences, so your best ideas get the room they need.
 
 - Moments from across your selected range
 
@@ -85,12 +85,12 @@ ONE IN. MANY OUT.
 
 ### Give your footage a new perspective.
 
-Get Prism
+Get Relio
 
 ---
 
 URL: https://prismclips.vercel.app/how-it-works
-Title: How it works — Prism
+Title: How it works — Relio
 
 FROM THE FULL STORY TO THE GOOD PART
 
@@ -104,14 +104,14 @@ The long takeOne video. Plenty of potential.
 +
 
 #### Drop in your video.
-A podcast, a lecture, your latest stream. Choose your source and tell Prism what you’re looking for.
+A podcast, a lecture, your latest stream. Choose your source and tell Relio what you’re looking for.
 
 02FIND THE GOOD PART
 
 00:00 THE MOMENTS THAT MATTER 42:18
 
 #### Let the moments find you.
-AI finds standalone stories, then Prism cuts, reframes, and captions them for the small screen.
+AI finds standalone stories, then Relio cuts, reframes, and captions them for the small screen.
 
 03MAKE IT YOURS
 Ready for the spotlight.1080 × 1920 · MP4
@@ -120,7 +120,7 @@ Ready for the spotlight.1080 × 1920 · MP4
 Fine-tune the timing, framing, and captions. Export your favorites as vertical MP4s, ready to share.
 
 ### Before your first Short
-You’ll need a video and an internet connection. On Mac, sign in to your Prism account; on Windows and Linux, supply your own Gemini API key. Your source files and rendered videos stay on your computer. Audio, transcripts and sampled frames are sent for AI processing. See how your data is used
+You’ll need a video and an internet connection. On Mac, sign in to your Relio account; on Windows and Linux, supply your own Gemini API key. Your source files and rendered videos stay on your computer. Audio, transcripts and sampled frames are sent for AI processing. See how your data is used
 
 YOUR NEXT CREATIVE SHORTCUT
 
@@ -131,10 +131,10 @@ Choose your platform
 ---
 
 URL: https://prismclips.vercel.app/app
-Title: Web app — Prism
+Title: Web app — Relio
 
 # Make Shorts in your browser.
-Prism runs in the browser: choose a video, let Prism AI suggest Shorts, edit captions and framing, and export MP4s. Nothing to install. Projects and videos are saved to your account and open on any device you sign in on.
+Relio runs in the browser: choose a video, let Relio AI suggest Shorts, edit captions and framing, and export MP4s. Nothing to install. Projects and videos are saved to your account and open on any device you sign in on.
 
 **How does beta access work?**
 Sign up at https://prismclips.vercel.app/signup. The free beta is open to 100 accounts; when it's full, you can join the waitlist. Each account gets 60 minutes of video to make Shorts from and 1 GB of cloud storage for videos. There are no payments or paid plans.
@@ -143,12 +143,12 @@ Sign up at https://prismclips.vercel.app/signup. The free beta is open to 100 ac
 Current Chrome, Edge, Safari and Firefox on a computer.
 
 **Which languages do captions support?**
-Prism transcribes speech and writes captions in the language spoken in your video. Automatic filler-word cleanup currently works for English only.
+Relio transcribes speech and writes captions in the language spoken in your video. Automatic filler-word cleanup currently works for English only.
 
 ---
 
 URL: https://prismclips.vercel.app/download
-Title: Download — Prism
+Title: Download — Relio
 
 YOUR NEXT CREATIVE SHORTCUT
 
@@ -162,7 +162,7 @@ RECOMMENDED
 macOS 14+ · Apple Silicon
 Download for Mac .dmg · Native macOS app
 **Installation notes **
-Open the DMG and drag Prism to Applications. This beta is not notarized. For first-launch help, see the release notes.
+Open the DMG and drag Relio to Applications. This beta is not notarized. For first-launch help, see the release notes.
 
 UNTESTED
 
@@ -170,7 +170,7 @@ UNTESTED
 Windows 10 or 11 · 64-bit
 Download for Windows .exe · ffmpeg included
 **Installation notes **
-Run the setup file to install Prism. Desktop playback and platform services still need testing on Windows. Check the release notes before installing.
+Run the setup file to install Relio. Desktop playback and platform services still need testing on Windows. Check the release notes before installing.
 
 UNTESTED
 
@@ -192,33 +192,33 @@ Read the FAQs
 ---
 
 URL: https://prismclips.vercel.app/faq
-Title: Help & FAQs — Prism
+Title: Help & FAQs — Relio
 
 A FEW GOOD QUESTIONS
 
 # A little clarity. Then, create.
 Everything to know before your first Short.
 
-**How much does Prism cost?**
-Prism is in beta and paid plans are not available yet. AI usage limits apply; check Settings in the app for your allowance. About beta access.
+**How much does Relio cost?**
+Relio is in beta and paid plans are not available yet. AI usage limits apply; check Settings in the app for your allowance. About beta access.
 
 **What happens to my footage?**
-Your source files, projects, preview, and rendering stay on your computer. Audio chunks, transcripts, sampled frames, and editor chat messages are sent for AI processing. On Mac, they go through Prism’s server and OpenRouter to an AI model; on Windows and Linux, they go to Google Gemini. Prism needs an internet connection; it has no offline AI mode.
+Your source files, projects, preview, and rendering stay on your computer. Audio chunks, transcripts, sampled frames, and editor chat messages are sent for AI processing. On Mac, they go through Relio’s server and OpenRouter to an AI model; on Windows and Linux, they go to Google Gemini. Relio needs an internet connection; it has no offline AI mode.
 
-**Can I change the Shorts Prism picks?**
+**Can I change the Shorts Relio picks?**
 Yes. Review and adjust every Short before export. Change the timing, choose Fill, Fit, or Split framing, try seven caption styles, or ask the editor chat to help with edits.
 
 **Where can I post my exports?**
-Prism exports vertical MP4 files at up to 1080 × 1920. Upload them yourself to your favorite short-form platforms, including YouTube Shorts, Instagram Reels, and TikTok. Direct publishing isn’t built in.
+Relio exports vertical MP4 files at up to 1080 × 1920. Upload them yourself to your favorite short-form platforms, including YouTube Shorts, Instagram Reels, and TikTok. Direct publishing isn’t built in.
 
 **Is this ready for my daily workflow?**
-Prism is an early beta. The Mac pipeline works end to end, but you should review every clip and expect rough edges. Windows and Linux ports are available but still need verification on real devices. Read the current limits.
+Relio is an early beta. The Mac pipeline works end to end, but you should review every clip and expect rough edges. Windows and Linux ports are available but still need verification on real devices. Read the current limits.
 
-**Do I need a Prism account?**
-On Mac, sign in to the app with your Prism account to use the AI service. Your dashboard also shows your export stats and history. Windows and Linux use your own Gemini API key instead. Create an account.
+**Do I need a Relio account?**
+On Mac, sign in to the app with your Relio account to use the AI service. Your dashboard also shows your export stats and history. Windows and Linux use your own Gemini API key instead. Create an account.
 
 **How do I get started?**
-Download Prism, sign in on Mac or add your Gemini API key on Windows or Linux, and import a video. See the three-step workflow for a quick tour.
+Download Relio, sign in on Mac or add your Gemini API key on Windows or Linux, and import a video. See the three-step workflow for a quick tour.
 
 ### Something else on your mind?
 Check the project documentation ↗ or share your feedback on GitHub ↗.
@@ -226,44 +226,44 @@ Check the project documentation ↗ or share your feedback on GitHub ↗.
 ---
 
 URL: https://prismclips.vercel.app/about
-Title: About — Prism
+Title: About — Relio
 
 ABOUT PRISM
 
 # One video in. Many Shorts out.
-Prism is a desktop app that turns long videos into vertical Shorts with captions.
+Relio is a desktop app that turns long videos into vertical Shorts with captions.
 
-### What Prism does
-Import a podcast, lecture, interview or stream. Prism transcribes it, finds moments that stand on their own, and cuts them into vertical Shorts. It reframes each one for the small screen and adds captions in the language spoken in your video. You review every Short and make the final cut before you export.
+### What Relio does
+Import a podcast, lecture, interview or stream. Relio transcribes it, finds moments that stand on their own, and cuts them into vertical Shorts. It reframes each one for the small screen and adds captions in the language spoken in your video. You review every Short and make the final cut before you export.
 
 ### Who it’s for
 Creators, podcasters and streamers who want more short-form videos from the long recordings they already make, without spending hours in an editor.
 
 ### Where it runs
-Prism is an early beta for macOS 14 or later on Apple Silicon. Windows and Linux ports have not yet been tested on real devices. Your source files and finished videos stay on your machine. See Privacy for what is sent for AI processing.
+Relio is an early beta for macOS 14 or later on Apple Silicon. Windows and Linux ports have not yet been tested on real devices. Your source files and finished videos stay on your machine. See Privacy for what is sent for AI processing.
 
 ### Beta access
-Sign in to try Prism during the beta. AI usage limits apply; check Settings in the app for your allowance. About beta access.
+Sign in to try Relio during the beta. AI usage limits apply; check Settings in the app for your allowance. About beta access.
 
 ### Learn more
-See features, how it works and the FAQs, or download Prism.
+See features, how it works and the FAQs, or download Relio.
 
 ---
 
 URL: https://prismclips.vercel.app/changelog
-Title: Changelog — Prism
+Title: Changelog — Relio
 
 RELEASE NOTES
 
 # Changelog
-What changed in each Prism build. Downloads live on GitHub Releases.
+What changed in each Relio build. Downloads live on GitHub Releases.
 
 ### Unreleased
 NEXT
 
 #### New
 
-- Optional Prism account. Sign in on the website to see your exports, Shorts made and minutes of Shorts.
+- Optional Relio account. Sign in on the website to see your exports, Shorts made and minutes of Shorts.
 
 ### v0.2.0-beta.2
 2026-10-21 · BETA
@@ -285,7 +285,7 @@ NEXT
 ### Earlier builds
 2026-10-18 – 10-20
 
-- First Prism video-to-Shorts editor for Mac.
+- First Relio video-to-Shorts editor for Mac.
 
 - Gemini became the only AI pipeline for picking Shorts and framing.
 
@@ -296,7 +296,7 @@ NEXT
 ---
 
 URL: https://prismclips.vercel.app/privacy
-Title: Privacy — Prism
+Title: Privacy — Relio
 
 PRIVACY
 
@@ -305,12 +305,12 @@ Plain-language summary of where your data goes. Last updated 2026-10-27.
 
 ### On your computer
 
-- Your source video files. Prism copies them into a project and never changes the originals.
+- Your source video files. Relio copies them into a project and never changes the originals.
 
 - Projects, previews and rendered MP4s.
 
 ### Sent for AI processing
-Prism has no offline mode. On Mac, requests go through Prism’s server (Supabase) to OpenRouter; in the web app, through Prism’s server on Vercel and an AI model provider. Windows and Linux send requests directly to Google’s Gemini API using your own API key. The relevant providers’ terms apply to this data:
+Relio has no offline mode. On Mac, requests go through Relio’s server (Supabase) to OpenRouter; in the web app, through Relio’s server on Vercel and an AI model provider. Windows and Linux send requests directly to Google’s Gemini API using your own API key. The relevant providers’ terms apply to this data:
 
 - Audio chunks of the part of the video you selected.
 
@@ -321,8 +321,8 @@ Prism has no offline mode. On Mac, requests go through Prism’s server (Supabas
 - Editor chat messages, with recent conversation and a short edit summary.
 Temporary audio files are deleted after each request. The Mac server logs may include portions of model responses for diagnostics. See OpenRouter’s Privacy Policy and Terms, and Google’s Privacy Policy and Gemini API terms.
 
-### Your Prism account
-Your Prism account is stored with our database provider, Supabase. Paid plans are not available during the current beta. The account stores:
+### Your Relio account
+Your Relio account is stored with our database provider, Supabase. Paid plans are not available during the current beta. The account stores:
 
 - Your email address and password. The password is stored hashed by Supabase Auth.
 
@@ -343,29 +343,29 @@ This page describes how the software works. It is not legal advice.
 ---
 
 URL: https://prismclips.vercel.app/terms
-Title: Terms — Prism
+Title: Terms — Relio
 
 TERMS
 
 # Terms of use
-The short version: Prism is beta software, provided as is. Last updated 2026-10-27.
+The short version: Relio is beta software, provided as is. Last updated 2026-10-27.
 
 ### The software
-Prism is provided “as is”, without warranty of any kind.
+Relio is provided “as is”, without warranty of any kind.
 
 ### Beta status
-Prism is early beta software. Review every Short before you publish it, and keep your own backups. The Windows and Linux versions have not been tested on real devices yet.
+Relio is early beta software. Review every Short before you publish it, and keep your own backups. The Windows and Linux versions have not been tested on real devices yet.
 
 ### Your content
 You keep all rights to your videos and exports. You are responsible for having the rights to the footage you process and the Shorts you publish.
 
 ### AI processing
-On Mac, Prism sends audio, transcripts and sampled frames through its server to OpenRouter, which passes them to an AI model provider. Windows and Linux send requests to Google’s Gemini API using your own API key. The relevant providers’ terms apply.
+On Mac, Relio sends audio, transcripts and sampled frames through its server to OpenRouter, which passes them to an AI model provider. Windows and Linux send requests to Google’s Gemini API using your own API key. The relevant providers’ terms apply.
 
 ### Your account
 Keep your password safe and don’t use the account to break the service or access other people’s data. Accounts may be removed if they are abused. See the Privacy page for what the account stores.
 
 ### Changes
-These terms may change as Prism grows. The date at the top shows the latest version.
+These terms may change as Relio grows. The date at the top shows the latest version.
 
 This is a plain-language draft, not legal advice.

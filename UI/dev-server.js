@@ -37,7 +37,7 @@ const server = http.createServer(async (req, res) => {
   // Never serve dotfiles (.env.local holds secret keys) or step outside this folder.
   if (pathname.split('/').some((part) => part.startsWith('.'))) return notFound(res);
 
-  // Local stand-in for the AI call: the browser can't reach Prism's AI function directly until it allows browser requests (CORS),
+  // Local stand-in for the AI call: the browser can't reach Relio's AI function directly until it allows browser requests (CORS),
   // so on localhost the app posts here and this server forwards the request, headers and all.
   if (pathname === '/gateway' && req.method === 'POST') {
     const chunks = [];
@@ -52,7 +52,7 @@ const server = http.createServer(async (req, res) => {
       res.end(Buffer.from(await upstream.arrayBuffer()));
     } catch (error) {
       res.statusCode = 502;
-      res.end(JSON.stringify({ error: { message: `The local server could not reach Prism AI: ${error.message}` } }));
+      res.end(JSON.stringify({ error: { message: `The local server could not reach Relio AI: ${error.message}` } }));
     }
     return;
   }
@@ -104,4 +104,4 @@ server.on('error', (error) => {
   process.exit(1);
 });
 // Only this Mac can connect: the api/ functions run with the secret keys from .env.local.
-server.listen(port, '127.0.0.1', () => console.log(`Prism site: http://localhost:${port}`));
+server.listen(port, '127.0.0.1', () => console.log(`Relio site: http://localhost:${port}`));

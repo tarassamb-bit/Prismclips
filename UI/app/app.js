@@ -1,4 +1,4 @@
-// Prism in the browser: projects, Shorts, the editor and export. The screens follow the macOS app's flows; the engine is in ./engine.
+// Relio in the browser: projects, Shorts, the editor and export. The screens follow the macOS app's flows; the engine is in ./engine.
 import { GeminiError, StageFailure, ShortMakerError } from './engine/gemini.js';
 import { openSource, thumbnail, frameImage } from './engine/media.js';
 import * as Shorts from './engine/shortmaker.js';
@@ -109,8 +109,8 @@ const SCREEN_TITLES = { home: 'Home', create: 'Create Shorts', settings: 'Settin
 
 async function boot() {
   if (!('VideoDecoder' in window && 'VideoEncoder' in window && 'OffscreenCanvas' in window)) {
-    $('#app').innerHTML = `<section class="card auth"><h1>Open Prism in another browser</h1>
-      <p class="muted">Prism reads and renders video in your browser with WebCodecs, which this browser doesn’t have. Use a current Chrome, Edge, Safari or Firefox.</p></section>`;
+    $('#app').innerHTML = `<section class="card auth"><h1>Open Relio in another browser</h1>
+      <p class="muted">Relio reads and renders video in your browser with WebCodecs, which this browser doesn’t have. Use a current Chrome, Edge, Safari or Firefox.</p></section>`;
     return;
   }
   configureSync({
@@ -150,7 +150,7 @@ function setScreen(screen) {
     heading.querySelector('input').value = state.project?.title ?? '';
   } else heading.textContent = title;
   $('#export-button').hidden = screen !== 'editor';
-  document.title = `${title} · Prism`;
+  document.title = `${title} · Relio`;
   // The editor keeps only what editing needs, so the theme switch lives on the other screens.
   $('.theme-toggle').hidden = screen === 'editor';
   for (const button of document.querySelectorAll('.side-button')) {
@@ -277,7 +277,7 @@ async function showHome(view = null) {
     const loose = live.filter((p) => !folders.some((f) => f.id === p.folderId));
     html = `<button class="start-card" data-action="create">
         <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/></svg>
-        <span class="start-text"><strong>Start creating</strong><span>One in. Many out. Choose a video and Prism finds the moments worth sharing.</span></span>
+        <span class="start-text"><strong>Start creating</strong><span>One in. Many out. Choose a video and Relio finds the moments worth sharing.</span></span>
         <span class="start-arrow" aria-hidden="true">→</span></button>
       <div class="row between"><h2>Projects</h2><button class="link new-folder" data-action="new-folder">${folderIcon}New folder</button></div>
       ${tiles ? `<div class="folders">${tiles}</div>` : ''}
@@ -503,7 +503,7 @@ document.addEventListener('drop', (event) => {
 
 // MARK: Create Shorts (five steps: video, settings, captions, content type, then the run)
 
-// Names as Prism AI is told them; Auto detects the language once per video.
+// Names as Relio AI is told them; Auto detects the language once per video.
 const LANGUAGES = ['auto', 'English', 'Ukrainian', 'Polish', 'German', 'French', 'Spanish', 'Italian', 'Portuguese', 'Dutch', 'Czech',
   'Lithuanian', 'Latvian', 'Estonian', 'Romanian', 'Turkish', 'Russian', 'Arabic', 'Hindi', 'Japanese', 'Korean', 'Chinese'];
 const LENGTHS = [[0, 'Auto'], [15, '15 seconds'], [30, '30 seconds'], [45, '45 seconds'], [60, '60 seconds'], [90, '90 seconds']];
@@ -553,7 +553,7 @@ function renderCreate() {
   let html;
   if (c.step === 1) {
     html = `${eyebrow(1, 'Choose video')}<h2 class="big">Choose a video</h2>
-      <p class="muted">Prism keeps the video in this browser and saves it to your account, so the project opens on any device you sign in on. Prism AI reads its audio and some frames.</p>
+      <p class="muted">Relio keeps the video in this browser and saves it to your account, so the project opens on any device you sign in on. Relio AI reads its audio and some frames.</p>
       <label class="drop-card ${c.busy ? 'busy' : ''}"><input id="pick" type="file" accept="video/*" hidden ${c.busy ? 'disabled' : ''}>
         <span class="drop-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 16V4m-5 5 5-5 5 5M5 20h14"/></svg></span>
         <strong>${c.busy ? 'Reading the video…' : 'Drop a video here'}</strong>
@@ -580,14 +580,14 @@ function renderCreate() {
         ${c.region === 'custom' ? `<div class="settings-row"><label>Start (minutes) <input id="from" type="number" min="0" step="0.1" value="${c.customStart}"></label>
           <label>End (minutes) <input id="to" type="number" min="0" step="0.1" value="${c.customEnd}"></label></div>
           <p class="muted small">${problem ? esc(problem) : `Analyze ${clock(c.customStart * 60)} to ${clock(c.customEnd * 60)} · ${clock((c.customEnd - c.customStart) * 60)} selected`}</p>` : ''}
-        <p class="muted small">Prism will analyze frames and available speech, then suggest ${many} ${long} in ${where}. Review every pick before exporting.</p></div>
+        <p class="muted small">Relio will analyze frames and available speech, then suggest ${many} ${long} in ${where}. Review every pick before exporting.</p></div>
       <button class="button primary" data-create="next" ${problem ? 'disabled' : ''}>Next: Choose captions →</button>${back}`;
   } else if (c.step === 3) {
     html = `${eyebrow(3, 'Choose captions')}<h2 class="big">Choose your captions</h2><p class="muted">Pick how spoken words appear. You can change this for each Short later.</p>
       <div class="cards">${CAPTION_STYLES.map((s) => `<button class="choice ${s === c.style ? 'on' : ''}" data-style="${s}"><canvas class="style-preview" data-preview="${s}" aria-hidden="true"></canvas><strong>${STYLE_TITLES[s]}</strong><span class="muted small">${STYLE_DETAILS[s]}</span></button>`).join('')}</div>
       <div class="row"><button class="button primary" data-create="next">Next: Choose content type →</button><button class="link" data-create="prev">← Back</button></div>`;
   } else {
-    html = `${eyebrow(4, 'Choose content type')}<h2 class="big">What kind of video is it?</h2><p class="muted">This tunes how Prism picks moments and frames them.</p>
+    html = `${eyebrow(4, 'Choose content type')}<h2 class="big">What kind of video is it?</h2><p class="muted">This tunes how Relio picks moments and frames them.</p>
       <div class="cards">${VIDEO_TYPES.map((t) => `<button class="choice ${t === c.videoType ? 'on' : ''}" data-type="${t}"><strong>${VIDEO_TYPE_TITLES[t]}</strong><span class="muted small">${VIDEO_TYPE_DETAILS[t]}</span></button>`).join('')}</div>
       <div class="row"><button class="button primary" data-create="make">Make Shorts</button><button class="link" data-create="prev">← Back</button></div>`;
   }
@@ -664,8 +664,8 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
   const email = state.session?.user?.email;
   const used = u ? `${Math.ceil(u.used)} of ${Math.floor(u.allowance)} min used` : 'Minutes used';
   const NAV = [
-    ['account', 'Account', email ?? 'Sign in to track your stats', '<path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0"/>', 'Your Prism account.'],
-    ['overview', 'Overview', 'Stats and exports', '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>', 'What you have made with Prism, and your exports.'],
+    ['account', 'Account', email ?? 'Sign in to track your stats', '<path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0"/>', 'Your Relio account.'],
+    ['overview', 'Overview', 'Stats and exports', '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>', 'What you have made with Relio, and your exports.'],
     ['usage', 'Usage', used, '<path d="M5 18a8 8 0 1 1 14 0M12 18l4-6"/>', 'Minutes of video you can make Shorts from, and your space for videos in the cloud.'],
   ];
   const nav = NAV.map(([id, title, detail, icon]) => `<button class="settings-item" data-action="settings-tab" data-tab="${id}" ${tab === id ? 'aria-current="page"' : ''}>
@@ -681,7 +681,7 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
         <p class="muted small">Every account gets 60 minutes of video to make Shorts from. A video you already used doesn't count again; making Shorts from it again uses half of its length.</p>
       </div>
       ${email ? `<div class="box"><strong>Videos in the cloud</strong><p id="cloud-video-text">Checking…</p><div class="meter"><div id="cloud-video-bar"></div></div>
-        <p class="muted small">Videos you add are saved to your account too, so a project opens on any device without choosing the file again. The same video is stored once, however many projects use it. When a new video doesn’t fit, Prism asks before deleting your oldest cloud videos. A video bigger than all your space stays on its device.</p>
+        <p class="muted small">Videos you add are saved to your account too, so a project opens on any device without choosing the file again. The same video is stored once, however many projects use it. When a new video doesn’t fit, Relio asks before deleting your oldest cloud videos. A video bigger than all your space stays on its device.</p>
         <button class="button ghost" id="retry-upload" data-action="retry-upload" hidden>Try uploading again</button></div>` : ''}
       <form id="promo-form" class="box">
         <label for="promo-code"><strong>Promo code</strong><span class="muted small">Need more minutes? Ask for a promo code, then enter it here.</span></label>
@@ -987,7 +987,7 @@ async function askRoom(media, file, evict, cap) {
   }
   return new Promise((resolve) => {
     openDialog(`<div class="stack"><h2>Not enough cloud space</h2>
-      <p>Your cloud space is ${bytes(cap)}. To keep <strong>${esc(media.name)}</strong> (${bytes(file.size)}) in the cloud, Prism has to delete your oldest videos from it:</p>
+      <p>Your cloud space is ${bytes(cap)}. To keep <strong>${esc(media.name)}</strong> (${bytes(file.size)}) in the cloud, Relio has to delete your oldest videos from it:</p>
       <ul class="evict-list">${evict.map((v) => `<li><span>${esc(names.get(v.mediaId) ?? 'An older video')}</span><span class="muted small">${bytes(v.bytes)}</span></li>`).join('')}</ul>
       <p class="muted small">Only the cloud copies are deleted. Projects stay, and devices that already have these videos keep them; other devices will need the file again.</p>
       <div class="row end"><button class="button ghost" id="room-keep">Keep them</button><button class="button primary" id="room-delete">Delete them and upload</button></div></div>`);
@@ -1027,7 +1027,7 @@ async function fillCloudVideo() {
     const local = media.filter((m) => !m.cloud?.uploaded);
     const why = (m) => m.cloud?.tooBig ? 'bigger than your cloud space' : m.cloud?.declined ? 'you kept older videos instead' : uploading ? 'uploading now' : 'waiting to upload';
     const notes = local.map((m) => `“${m.name}” stays on this device: ${why(m)}.`);
-    if (uploadProblem) notes.unshift(`Upload paused: ${uploadProblem} Prism tries again every minute.`);
+    if (uploadProblem) notes.unshift(`Upload paused: ${uploadProblem} Relio tries again every minute.`);
     text.textContent = `${bytes(used)} of ${bytes(cap)} used${notes.length ? ` · ${notes.join(' ')}` : ''}`;
     $('#cloud-video-bar').style.width = `${Math.min(100, cap ? used / cap * 100 : 0)}%`;
   } catch (error) {
@@ -1065,7 +1065,7 @@ async function persist() {
   if (state.project) await store.saveProject(state.project);
 }
 
-/** The video's name on Prism's server: its SHA-256 (the same value as on the Mac), else a hash of its name and length. */
+/** The video's name on Relio's server: its SHA-256 (the same value as on the Mac), else a hash of its name and length. */
 async function serverKey(media) {
   if (media.contentHash) return media.contentHash;
   if (media.size <= 1.5e9) {
@@ -1077,7 +1077,7 @@ async function serverKey(media) {
   }
   return hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${media.name}|${Math.round(media.duration)}`)));
 }
-/** The allowance fields every Prism AI request carries, for a video that isn't starting a run. */
+/** The allowance fields every Relio AI request carries, for a video that isn't starting a run. */
 async function usageFor(media, source) {
   return { video: await serverKey(media), minutes: source.duration / 60, day: localDay() };
 }
@@ -1104,7 +1104,7 @@ async function makeShorts(media, options) {
   } catch (error) {
     endTask(task);
     if (task.controller.signal.aborted) return;
-    return showError('Prism couldn’t check your usage right now', 'Try again in a moment.', 'temporary');
+    return showError('Relio couldn’t check your usage right now', 'Try again in a moment.', 'temporary');
   }
   endTask(task);
   if (check.runs === 0) return runShorts(media, options, key, minutes);
@@ -1181,7 +1181,7 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
         splitScreen: podcast(r) && !r.fit, captionPosition: podcast(r) && !r.fit ? 'middle' : 'bottom', captionSize: 'medium', captionAnimated: false,
       };
       if (segment.splitScreen) {
-        setTask(`Prism AI · finding both speakers · Short ${created.length + 1} of ${results.length}`);
+        setTask(`Relio AI · finding both speakers · Short ${created.length + 1} of ${results.length}`);
         segment.splitCenters = await Framing.findSplitCenters(source, r.start, r.duration, configuration, task.controller.signal).catch(() => null) ?? undefined;
       }
       created.push(segment);
@@ -1195,10 +1195,10 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
     state.selectedId = created[0].id;
     renderEditor();
     selectShort(state.selectedId);
-    // The finished Shorts are saved above; the ones Prism AI couldn't make are offered again instead of silently lost.
+    // The finished Shorts are saved above; the ones Relio AI couldn't make are offered again instead of silently lost.
     if (missed > 0) {
       showError(`${missed} ${missed === 1 ? 'Short' : 'Shorts'} couldn’t be made`,
-        `Prism AI couldn’t finish part of the video. Your ${plural(created.length, 'new Short')} ${created.length === 1 ? 'is' : 'are'} saved. Retry to make the rest.`,
+        `Relio AI couldn’t finish part of the video. Your ${plural(created.length, 'new Short')} ${created.length === 1 ? 'is' : 'are'} saved. Retry to make the rest.`,
         '', () => retry(missed));
     }
     await refreshUsage();
@@ -1220,7 +1220,7 @@ function reportGenerationError(error, retry) {
     if (cause.failure === 'noStrongClips' || cause.failure === 'noDistinctClips') return showError('No Shorts found', cause.message);
     if (cause.failure === 'signIn' || cause.status === 401 || cause.status === 403) return showError('Check your sign-in', cause.message);
     if (cause.failure === 'usageLimit') { track('limit_reached'); return showError('You’ve reached your beta limit', cause.message, 'limit'); }
-    if (cause.failure === 'request' && [429, 500, 502, 503, 504, 546].includes(cause.status)) return showError('Prism AI is unavailable right now', cause.message, 'temporary', retry);
+    if (cause.failure === 'request' && [429, 500, 502, 503, 504, 546].includes(cause.status)) return showError('Relio AI is unavailable right now', cause.message, 'temporary', retry);
   }
   if (error instanceof ShortMakerError) return showError('Couldn’t make Shorts', error.message);
   showError('Couldn’t make Shorts', error instanceof StageFailure ? error.message : error?.message || 'Something went wrong. Your existing clips were kept.');
@@ -1773,7 +1773,7 @@ document.addEventListener('change', async (event) => {
   if (event.target.id === 'title' && state.project) {
     state.project.title = event.target.value.trim() || state.project.title;
     event.target.value = state.project.title;
-    document.title = `${state.project.title} · Prism`;
+    document.title = `${state.project.title} · Relio`;
     await persist();
     setUrl(projectPath(state.project) + (location.pathname.match(/\/short-\d+$/)?.[0] ?? ''), true);
     return;
@@ -1817,7 +1817,7 @@ async function regenerateCaptions() {
   const segment = selected();
   if (!segment) return;
   const media = state.project.media.find((m) => m.id === segment.mediaId);
-  const task = beginTask('Prism AI · regenerating subtitles…');
+  const task = beginTask('Relio AI · regenerating subtitles…');
   try {
     const source = await sourceFor(media);
     // The saved sentence transcript is in source seconds, as the engine expects.

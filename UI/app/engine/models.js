@@ -9,7 +9,7 @@ export const STYLE_TITLES = {
 };
 
 export const STYLE_DETAILS = {
-  auto: 'Prism picks the style that fits this video.', classic: 'White text with a black outline.', viral: 'Each spoken word turns yellow.',
+  auto: 'Relio picks the style that fits this video.', classic: 'White text with a black outline.', viral: 'Each spoken word turns yellow.',
   highlightBox: 'The spoken word sits on a yellow box.', boldCaps: 'Big all-caps text, three words at a time.',
   minimal: 'Smaller text on a soft dark band.', oneWord: 'One big word at a time.', podcast: 'Soft-shadowed text; the spoken word turns green.',
 };
@@ -37,7 +37,7 @@ export const VIDEO_TYPE_TITLES = {
 };
 
 export const VIDEO_TYPE_DETAILS = {
-  auto: 'Prism decides from what is said in the video.',
+  auto: 'Relio decides from what is said in the video.',
   general: 'No special rules. Good for mixed content.',
   informational: 'Facts and explanations. Each Short keeps one idea with its setup and payoff.',
   podcast: 'Two people talking. Split screen: one person on top, one on the bottom, captions in the middle.',

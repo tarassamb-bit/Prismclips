@@ -1,4 +1,4 @@
-// Vercel function: Prism AI for the web app. A port of supabase/functions/gemini/index.ts (the Mac app still uses that one),
+// Vercel function: Relio AI for the web app. A port of supabase/functions/gemini/index.ts (the Mac app still uses that one),
 // moved here because Vercel lets a function run 300 s and Supabase stops at 150 s, too soon for slow Mimo answers.
 // The app sends Gemini-format requests signed in with its Supabase session; this forwards them to OpenRouter and answers
 // in the same format. Vercel environment variables: OPENROUTER_API_KEY, SUPABASE_SERVICE_ROLE_KEY, optional OPENROUTER_MODEL
@@ -110,30 +110,30 @@ async function checkVideoLimit(req, res) {
   const video = req.headers['x-prism-video'] ?? '';
   const minutes = Number(req.headers['x-prism-minutes']);
   if (!/^[0-9a-f]{64}$/.test(video) || !Number.isFinite(minutes) || !(minutes > 0 && minutes <= 600)) {
-    return fail(res, 400, 'Prism AI needs the video it is working on. Make Shorts from a video in the app.'), null;
+    return fail(res, 400, 'Relio AI needs the video it is working on. Make Shorts from a video in the app.'), null;
   }
   const run = req.headers['x-prism-run'] ?? null;
-  if (run !== null && !UUID.test(run)) return fail(res, 400, 'Prism AI got an invalid analysis run. Update Prism and try again.'), null;
+  if (run !== null && !UUID.test(run)) return fail(res, 400, 'Relio AI got an invalid analysis run. Update Relio and try again.'), null;
   const auth = req.headers.authorization ?? '';
   const apikey = req.headers.apikey ?? '';
-  if (!auth.startsWith('Bearer ') || !apikey) return fail(res, 401, 'Sign in to your Prism account to continue.'), null;
+  if (!auth.startsWith('Bearer ') || !apikey) return fail(res, 401, 'Sign in to your Relio account to continue.'), null;
   let identity;
   try {
     identity = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: { Authorization: auth, apikey }, signal: AbortSignal.timeout(10_000) });
   } catch {
-    return fail(res, 503, 'Prism could not verify your sign-in right now.'), null;
+    return fail(res, 503, 'Relio could not verify your sign-in right now.'), null;
   }
-  if (identity.status === 401 || identity.status === 403) return fail(res, 401, 'Sign in to your Prism account to continue.'), null;
-  if (!identity.ok) return fail(res, 503, 'Prism could not verify your sign-in right now.'), null;
+  if (identity.status === 401 || identity.status === 403) return fail(res, 401, 'Sign in to your Relio account to continue.'), null;
+  if (!identity.ok) return fail(res, 503, 'Relio could not verify your sign-in right now.'), null;
   const user = (await identity.json().catch(() => null))?.id;
-  if (typeof user !== 'string' || !UUID.test(user)) return fail(res, 401, 'Sign in to your Prism account to continue.'), null;
+  if (typeof user !== 'string' || !UUID.test(user)) return fail(res, 401, 'Sign in to your Relio account to continue.'), null;
   try {
     let allowed = (await rpc('prism_reserve_beta_usage', { p_user: user, p_video: video, p_minutes: minutes })) === true;
     // The first run is covered by the reservation; the database charges each re-analysis a share of the minutes.
     if (allowed && run !== null) allowed = (await rpc('prism_begin_analysis_run', { p_user: user, p_video: video, p_run: run, p_minutes: minutes })) === true;
     if (!allowed) return send(res, 429, { error: { code: 'usage_limit', message: LIMIT_MESSAGE } }), null;
   } catch {
-    return fail(res, 503, 'Prism could not check your allowance right now. Try again shortly.'), null;
+    return fail(res, 503, 'Relio could not check your allowance right now. Try again shortly.'), null;
   }
   return user;
 }
@@ -170,7 +170,7 @@ async function recordSpend(user, answer) {
 async function handler(req, res) {
   if (req.method !== 'POST') return fail(res, 405, 'Use POST.');
   const key = process.env.OPENROUTER_API_KEY;
-  if (!key || !process.env.SUPABASE_SERVICE_ROLE_KEY) return fail(res, 500, 'Prism AI is not configured on the server.');
+  if (!key || !process.env.SUPABASE_SERVICE_ROLE_KEY) return fail(res, 500, 'Relio AI is not configured on the server.');
   const body = req.body;
   if (!body || typeof body !== 'object' || !Array.isArray(body.contents)) return fail(res, 400, 'The request is not valid JSON.');
   let converted;
@@ -201,7 +201,7 @@ async function handler(req, res) {
       const signal = AbortSignal.timeout(limit);
       upstream = await fetch(OPENROUTER_URL, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://prismclips.vercel.app', 'X-Title': 'Prism Clips' },
+        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://prismclips.vercel.app', 'X-Title': 'Relio Clips' },
         body: JSON.stringify({ model, ...converted.request }),
         signal,
       });
@@ -213,7 +213,7 @@ async function handler(req, res) {
       continue;
     }
     if (upstream.ok && answer?.choices?.length) {
-      try { await recordSpend(user, answer); } catch { return fail(res, 503, 'Prism could not record usage. Please try again later.'); }
+      try { await recordSpend(user, answer); } catch { return fail(res, 503, 'Relio could not record usage. Please try again later.'); }
       reply = answer; break;
     }
     // A 200 without a choice is an empty answer; treat it like a provider error so the next model gets a turn.

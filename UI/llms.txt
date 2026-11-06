@@ -1,6 +1,6 @@
-# Prism
+# Relio Clips
 
-> Prism ("Prism Clips") turns long videos into vertical Shorts with captions. It runs in the browser at https://prismclips.vercel.app/app, with nothing to install; desktop apps also exist. Prism AI finds moments that stand on their own; you review them, adjust captions and framing, and export MP4s. Captions are written in the language spoken in the video.
+> Relio Clips turns long videos into vertical Shorts with captions. It runs in the browser at https://prismclips.vercel.app/app, with nothing to install; desktop apps also exist. Relio AI finds moments that stand on their own; you review them, adjust captions and framing, and export MP4s. Captions are written in the language spoken in the video.
 
 - Who it's for: creators, podcasters and streamers who want short-form clips from long recordings.
 - Web app: free beta for up to 100 accounts. Each account gets 60 minutes of video to make Shorts from and 1 GB of cloud storage for videos; projects sync across devices. Works in current Chrome, Edge, Safari and Firefox on a computer.
@@ -10,14 +10,14 @@
 
 ## Pages
 
-- [Home](https://prismclips.vercel.app/): Overview of Prism and what it makes.
+- [Home](https://prismclips.vercel.app/): Overview of Relio and what it makes.
 - [Features](https://prismclips.vercel.app/features): Finding complete stories, reframing for vertical video, and caption styles.
 - [How it works](https://prismclips.vercel.app/how-it-works): The three steps from a long recording to a finished Short.
 - [Web app](https://prismclips.vercel.app/app): Make Shorts in the browser.
 - [Sign up](https://prismclips.vercel.app/signup): Create a free beta account, or join the waitlist.
 - [Download](https://prismclips.vercel.app/download): Installers for macOS, Windows and Linux.
 - [FAQ](https://prismclips.vercel.app/faq): Answers about plans, privacy, editing and getting started.
-- [About](https://prismclips.vercel.app/about): What Prism is and who it's for.
+- [About](https://prismclips.vercel.app/about): What Relio is and who it's for.
 
 ## Optional
 

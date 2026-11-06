@@ -10,7 +10,7 @@
 
   const ACTIVE = ['active', 'trialing', 'past_due', 'paused'];
   const STATUS = { active: 'Active', trialing: 'Free trial', past_due: 'Payment due', paused: 'Paused' };
-  const tierName = (priceId) => window.PRISM_TIERS?.find((tier) => tier.priceId === priceId)?.name ?? 'Prism';
+  const tierName = (priceId) => window.PRISM_TIERS?.find((tier) => tier.priceId === priceId)?.name ?? 'Relio';
   const date = (iso) => (iso ? new Date(iso).toLocaleDateString() : '');
 
   function show(message, kind = 'info') {

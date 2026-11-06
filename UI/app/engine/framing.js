@@ -1,4 +1,4 @@
-// Prism AI locates the subject in frames sampled across the Short; luminance cut detection and `plan` turn those positions into
+// Relio AI locates the subject in frames sampled across the Short; luminance cut detection and `plan` turn those positions into
 // a smooth camera path with hard changes on scene cuts. A port of Shared/Prism.Core/Framing.cs. Keyframes are
 // { time, position, isSceneCut?, preserveWholeFrame? }.
 import { generate, text, inline } from './gemini.js';
