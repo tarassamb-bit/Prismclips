@@ -26,7 +26,7 @@ and who found it. Tick them off (`- [x]`) when fixed.
 - [ ] **Sign-up emails** come from "Supabase Auth" with Supabase's plain text, and its built-in sender only sends a few per
   hour. Supabase only lets you edit the email text with your own sender (custom SMTP). Fix: a free sender such as Brevo
   (single verified sender, no domain needed) or an own domain + Resend, then paste the branded templates from
-  `supabase/email-templates/` (subjects: "Confirm your email for Prism", "Reset your Prism password").
+  `supabase/email-templates/` (subjects: "Confirm your email for Relio Clips", "Reset your Relio Clips password").
 - [ ] **Google sign-in** is built but switched off (`GOOGLE_SIGN_IN` in `UI/auth.js`). Needs a Google OAuth client in Supabase
   and a redeploy of `signup-guard`.
 - [ ] **Windows and Linux apps** weren't compiled after their "Create account" change (it now opens the website). Build and

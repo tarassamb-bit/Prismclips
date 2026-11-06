@@ -1,4 +1,4 @@
-// Prism's AI server. The app sends Gemini-format requests here, signed in with its Supabase session; this function
+// Relio's AI server. The app sends Gemini-format requests here, signed in with its Supabase session; this function
 // forwards them to OpenRouter with the OPENROUTER_API_KEY secret and answers in the same Gemini format.
 // The key lives only in Supabase's secrets, never in the app. Set it with Project Settings → Edge Functions → Secrets.
 // OPENROUTER_MODEL (default Mimo) is tried first, then one paid fallback (OPENROUTER_FALLBACK_MODEL) that takes audio,
@@ -104,26 +104,26 @@ async function checkVideoLimit(request: Request): Promise<{ refused: Response | 
   const video = request.headers.get("x-prism-video") ?? "";
   const minutes = Number(request.headers.get("x-prism-minutes"));
   if (!/^[0-9a-f]{64}$/.test(video) || !Number.isFinite(minutes) || !(minutes > 0 && minutes <= 600)) {
-    return stop(fail(400, "Prism AI needs the video it is working on. Make Shorts from a video in the app."));
+    return stop(fail(400, "Relio AI needs the video it is working on. Make Shorts from a video in the app."));
   }
   // Each analysis run sends one id with all its requests, so the server counts re-analyses per video.
   // Other requests (framing at export, chat, descriptions) send none and are not runs.
   const run = request.headers.get("x-prism-run");
   if (run !== null && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(run)) {
-    return stop(fail(400, "Prism AI got an invalid analysis run. Update Prism and try again."));
+    return stop(fail(400, "Relio AI got an invalid analysis run. Update Relio and try again."));
   }
   const url = Deno.env.get("SUPABASE_URL");
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   const auth = request.headers.get("Authorization") ?? "";
   const apikey = request.headers.get("apikey") ?? "";
-  if (!url || !serviceKey) return stop(fail(503, "Prism AI is not configured for secure usage tracking."));
-  if (!auth.startsWith("Bearer ") || !apikey) return stop(fail(401, "Sign in to your Prism account to continue."));
+  if (!url || !serviceKey) return stop(fail(503, "Relio AI is not configured for secure usage tracking."));
+  if (!auth.startsWith("Bearer ") || !apikey) return stop(fail(401, "Sign in to your Relio account to continue."));
   const identity = await fetch(`${url}/auth/v1/user`, { headers: { "Authorization": auth, "apikey": apikey } });
-  if (identity.status === 401 || identity.status === 403) return stop(fail(401, "Sign in to your Prism account to continue."));
-  if (!identity.ok) return stop(fail(503, "Prism could not verify your sign-in right now."));
+  if (identity.status === 401 || identity.status === 403) return stop(fail(401, "Sign in to your Relio account to continue."));
+  if (!identity.ok) return stop(fail(503, "Relio could not verify your sign-in right now."));
   const user = await identity.json().catch(() => null);
   if (typeof user?.id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(user.id)) {
-    return stop(fail(401, "Sign in to your Prism account to continue."));
+    return stop(fail(401, "Sign in to your Relio account to continue."));
   }
   const headers = { "Authorization": `Bearer ${serviceKey}`, "apikey": serviceKey, "Content-Type": "application/json" };
   const session: Session = { url, headers, user: user.id };
@@ -132,7 +132,7 @@ async function checkVideoLimit(request: Request): Promise<{ refused: Response | 
     headers,
     body: JSON.stringify({ p_user: user.id, p_video: video, p_minutes: minutes }),
   });
-  if (!record.ok) return stop(fail(503, "Prism could not check your allowance right now. Try again shortly."));
+  if (!record.ok) return stop(fail(503, "Relio could not check your allowance right now. Try again shortly."));
   if ((await record.json()) !== true) return stop(limitReached());
   if (run !== null) {
     // The first run is covered by the reservation above; the database charges each re-analysis a share of the minutes.
@@ -141,7 +141,7 @@ async function checkVideoLimit(request: Request): Promise<{ refused: Response | 
       headers,
       body: JSON.stringify({ p_user: user.id, p_video: video, p_run: run, p_minutes: minutes }),
     });
-    if (!begun.ok) return stop(fail(503, "Prism could not check your allowance right now. Try again shortly."));
+    if (!begun.ok) return stop(fail(503, "Relio could not check your allowance right now. Try again shortly."));
     if ((await begun.json()) !== true) return stop(limitReached());
   }
   return { refused: null, session };
@@ -231,7 +231,7 @@ Deno.serve(async (request) => {
   }
 
   const { refused, session } = await checkVideoLimit(request);
-  if (refused || !session) return refused ?? fail(401, "Sign in to your Prism account to continue.");
+  if (refused || !session) return refused ?? fail(401, "Sign in to your Relio account to continue.");
 
   const models = [Deno.env.get("OPENROUTER_MODEL") || DEFAULT_MODEL, Deno.env.get("OPENROUTER_FALLBACK_MODEL") || DEFAULT_FALLBACK];
   let status = 503, reply: any = null;
@@ -255,7 +255,7 @@ Deno.serve(async (request) => {
       const signal = AbortSignal.timeout(limit);
       upstream = await fetch(OPENROUTER_URL, {
         method: "POST",
-        headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json", "HTTP-Referer": "https://prismclips.vercel.app", "X-Title": "Prism Clips" },
+        headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json", "HTTP-Referer": "https://prismclips.vercel.app", "X-Title": "Relio Clips" },
         body: JSON.stringify({ model, ...converted.request }),
         // Answer before Supabase stops the function at 150 s, so the app gets a clear "busy" and retries.
         signal,
@@ -270,7 +270,7 @@ Deno.serve(async (request) => {
     }
     // Only answers count toward the cap, so a model that refuses or is down doesn't use up the person's allowance.
     if (upstream.ok && answer?.choices?.length) {
-      try { await recordSpend(session, answer); } catch { return fail(503, "Prism could not record usage. Please try again later."); }
+      try { await recordSpend(session, answer); } catch { return fail(503, "Relio could not record usage. Please try again later."); }
       reply = answer; break;
     }
     // A 200 without a choice is an empty answer; treat it like a provider error so the next model gets a turn.
