@@ -1,11 +1,11 @@
 # Supabase email confirmation
 
-Production website: https://prismclips.vercel.app
+Production website: https://relioclips.com
 
 In [Supabase Authentication → URL Configuration](https://supabase.com/dashboard/project/isdplhahgggundbohmlr/auth/url-configuration), keep these settings:
 
-- **Site URL:** `https://prismclips.vercel.app/login`. Existing desktop builds omit a redirect URL, so their new confirmation emails use this default.
-- **Redirect URLs:** `https://prismclips.vercel.app/login`, `https://prismclips.vercel.app/signup`, `https://prismclips.vercel.app/login.html`, and `https://prismclips.vercel.app/signup.html`. The signup paths also support the currently deployed website's return URL.
+- **Site URL:** `https://relioclips.com/login`. Existing desktop builds omit a redirect URL, so their new confirmation emails use this default.
+- **Redirect URLs:** `https://relioclips.com/login`, `https://relioclips.com/signup`, `https://relioclips.com/login.html`, and `https://relioclips.com/signup.html`. Also keep the four `https://prismclips.vercel.app/...` versions: old desktop builds still request them, and that address redirects to relioclips.com. The signup paths also support the currently deployed website's return URL.
 
 The website sends users to `/login` on its current origin after confirmation. The desktop apps explicitly request `https://prismclips.vercel.app/login`. That page consumes the Supabase session and opens the user's dashboard. Desktop users must then sign in inside Relio with the same credentials.
 

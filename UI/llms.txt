@@ -1,27 +1,27 @@
 # Relio Clips
 
-> Relio Clips turns long videos into vertical Shorts with captions. It runs in the browser at https://prismclips.vercel.app/app, with nothing to install; desktop apps also exist. Relio AI finds moments that stand on their own; you review them, adjust captions and framing, and export MP4s. Captions are written in the language spoken in the video.
+> Relio Clips turns long videos into vertical Shorts with captions. It runs in the browser at https://relioclips.com/app, with nothing to install; desktop apps also exist. Relio AI finds moments that stand on their own; you review them, adjust captions and framing, and export MP4s. Captions are written in the language spoken in the video.
 
 - Who it's for: creators, podcasters and streamers who want short-form clips from long recordings.
 - Web app: free beta for up to 100 accounts. Each account gets 60 minutes of video to make Shorts from and 1 GB of cloud storage for videos; projects sync across devices. Works in current Chrome, Edge, Safari and Firefox on a computer.
 - Desktop apps: macOS 14 or later on Apple Silicon (sign in, same beta allowance). Windows and Linux builds use your own Gemini API key and have not yet been tested on real devices.
-- Access: sign up at https://prismclips.vercel.app/signup. When the beta is full, the page offers a waitlist. No payments or paid plans.
+- Access: sign up at https://relioclips.com/signup. When the beta is full, the page offers a waitlist. No payments or paid plans.
 - Status: beta. Review every Short before publishing.
 
 ## Pages
 
-- [Home](https://prismclips.vercel.app/): Overview of Relio and what it makes.
-- [Features](https://prismclips.vercel.app/features): Finding complete stories, reframing for vertical video, and caption styles.
-- [How it works](https://prismclips.vercel.app/how-it-works): The three steps from a long recording to a finished Short.
-- [Web app](https://prismclips.vercel.app/app): Make Shorts in the browser.
-- [Sign up](https://prismclips.vercel.app/signup): Create a free beta account, or join the waitlist.
-- [Download](https://prismclips.vercel.app/download): Installers for macOS, Windows and Linux.
-- [FAQ](https://prismclips.vercel.app/faq): Answers about plans, privacy, editing and getting started.
-- [About](https://prismclips.vercel.app/about): What Relio is and who it's for.
+- [Home](https://relioclips.com/): Overview of Relio and what it makes.
+- [Features](https://relioclips.com/features): Finding complete stories, reframing for vertical video, and caption styles.
+- [How it works](https://relioclips.com/how-it-works): The three steps from a long recording to a finished Short.
+- [Web app](https://relioclips.com/app): Make Shorts in the browser.
+- [Sign up](https://relioclips.com/signup): Create a free beta account, or join the waitlist.
+- [Download](https://relioclips.com/download): Installers for macOS, Windows and Linux.
+- [FAQ](https://relioclips.com/faq): Answers about plans, privacy, editing and getting started.
+- [About](https://relioclips.com/about): What Relio is and who it's for.
 
 ## Optional
 
-- [Changelog](https://prismclips.vercel.app/changelog): What changed in each release.
-- [Privacy](https://prismclips.vercel.app/privacy): What stays on your computer and what is sent for AI processing.
-- [Terms](https://prismclips.vercel.app/terms): Terms of use.
-- [Full text](https://prismclips.vercel.app/llms-full.txt): All main pages in one file.
+- [Changelog](https://relioclips.com/changelog): What changed in each release.
+- [Privacy](https://relioclips.com/privacy): What stays on your computer and what is sent for AI processing.
+- [Terms](https://relioclips.com/terms): Terms of use.
+- [Full text](https://relioclips.com/llms-full.txt): All main pages in one file.

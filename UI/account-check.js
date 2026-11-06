@@ -90,7 +90,7 @@ function page(initial, query, { origin = 'https://example.test', pathname = '/da
   await flush();
   assert.equal(login.location.replacements.at(-1), '/app/settings/overview');
 
-  for (const origin of ['https://prismclips.vercel.app', 'http://localhost:4173']) {
+  for (const origin of ['https://relioclips.com', 'http://localhost:4173']) {
     const signup = page(Promise.resolve({ data: { session: null }, error: null }), async () => ({ data: [], error: null }), {
       origin, pathname: '/signup', authPage: 'login',
     });

@@ -201,7 +201,7 @@ async function handler(req, res) {
       const signal = AbortSignal.timeout(limit);
       upstream = await fetch(OPENROUTER_URL, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://prismclips.vercel.app', 'X-Title': 'Relio Clips' },
+        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://relioclips.com', 'X-Title': 'Relio Clips' },
         body: JSON.stringify({ model, ...converted.request }),
         signal,
       });
