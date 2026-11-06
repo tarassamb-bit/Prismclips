@@ -108,12 +108,12 @@ details.insp-section:not([open]) { gap: 0; }
 .collapsed .side-button { justify-content: center; padding-inline: 0; }
 .collapsed .side-nav { margin-top: 14px; }
 .sidebar { background: var(--surface1); border-right: 1px solid var(--border); padding: 18px 14px; display: flex; flex-direction: column; gap: 6px; overflow: auto; }
-.brand-row { display: flex; align-items: center; gap: 10px; padding: 0 6px; }
+.brand-row { display: flex; align-items: center; gap: 8px; padding: 0 6px; }
 .collapse-button { margin-left: auto; width: 30px; height: 28px; border: 0; border-radius: 8px; background: transparent; color: var(--text2); cursor: pointer; display: grid; place-items: center; }
 .collapse-button:hover { background: var(--surface2); color: var(--text); }
 .collapse-button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; }
 .brand-row img { border-radius: 8px; }
-.brand-name { font-family: var(--display); font-size: 24px; letter-spacing: -.02em; }
+.brand-name { font-family: var(--display); font-size: 19px; letter-spacing: -.02em; white-space: nowrap; }
 .tagline { margin: 2px 6px 14px; color: var(--text2); font-size: 12px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
 .side-nav { display: grid; gap: 10px; }
 .side-button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border-radius: 10px; border: 0; background: transparent; cursor: pointer; font-size: 14px; font-weight: 500; text-align: left; color: var(--text); }
