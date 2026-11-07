@@ -17,9 +17,9 @@ const LIMIT_MESSAGE = "You've reached your beta usage limit. Ask for a promo cod
 // A model reporting a cost of 0 would be free to use without limit; every answer counts at least this much.
 const MIN_ANSWER_USD = 0.002;
 // All models together must answer before Vercel stops the function at 300 s (maxDuration in vercel.json).
-// Mimo sometimes stalls on a request it answers in 10–30 s on a fresh try; after this long it gets that fresh try,
-// and the fallback gets what is left (at least 120 s).
-const MODEL_TIMEOUT_MS = 80_000;
+// Mimo answers text and images in 10–30 s; past this it gets no second try (a stalled request is rarely answered later),
+// and Gemini gets what is left.
+const MODEL_TIMEOUT_MS = 60_000;
 const REQUEST_BUDGET_MS = 280_000;
 const MIN_MODEL_TIME_MS = 20_000;
 
@@ -141,10 +141,11 @@ async function checkVideoLimit(req, res) {
 /** One row per failed model attempt, so the owner can see how often each model and provider fails. Never blocks the answer. */
 async function logFailure(row) {
   console.error(`${row.model}: ${row.error_type} ${row.message ?? ''}`);
-  await fetch(`${SUPABASE_URL}/rest/v1/ai_failures`, {
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/ai_failures`, {
     method: 'POST', headers: { ...serviceHeaders(), Prefer: 'return=minimal' }, body: JSON.stringify({ ...row, source: 'web' }),
     signal: AbortSignal.timeout(5_000),
-  }).catch(() => {});
+  }).catch((error) => ({ ok: false, status: error.message }));
+  if (!response.ok) console.error(`ai_failures row not saved (${response.status ?? 'no status'}):`, row.model, row.error_type);
 }
 
 function errorType(status) {
@@ -159,12 +160,13 @@ async function recordSpend(user, answer) {
   const reported = Number(answer?.usage?.cost ?? 0);
   await rpc('prism_record_beta_spend', { p_user: user, p_usd: Math.max(Number.isFinite(reported) ? reported : 0, MIN_ANSWER_USD) });
   // The real cost for the ai_cost_daily view; a failed write must not fail an answer that was already paid for.
-  await fetch(`${SUPABASE_URL}/rest/v1/ai_spend`, {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/ai_spend`, {
     method: 'POST', headers: { ...serviceHeaders(), Prefer: 'return=minimal' }, signal: AbortSignal.timeout(5_000),
     body: JSON.stringify({ user_id: user, source: 'web', model: answer?.model ?? null, provider: answer?.provider ?? null,
       usd: Number.isFinite(reported) && reported > 0 ? reported : 0, prompt_tokens: answer?.usage?.prompt_tokens ?? null,
       completion_tokens: answer?.usage?.completion_tokens ?? null }),
-  }).catch(() => {});
+  }).catch((error) => ({ ok: false, status: error.message }));
+  if (!response.ok) console.error(`ai_spend row not saved (${response.status ?? 'no status'}):`, answer?.model, answer?.provider);
 }
 
 async function handler(req, res) {
@@ -184,7 +186,7 @@ async function handler(req, res) {
 
   const chosen = process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
   // The chosen model twice: a stalled request usually answers on a second try.
-  const models = [chosen, chosen, process.env.OPENROUTER_FALLBACK_MODEL || DEFAULT_FALLBACK];
+  const models = [chosen, process.env.OPENROUTER_FALLBACK_MODEL || DEFAULT_FALLBACK];
   let status = 503, reply = null;
   const failures = [];
   const started = Date.now();
@@ -195,6 +197,8 @@ async function handler(req, res) {
     const limit = attempt === models.length - 1 ? left : Math.min(MODEL_TIMEOUT_MS, left);
     const tried = Date.now();
     const failure = (error_type, extra = {}) => logFailure({ user_id: user, model, kind: converted.kind, attempt: attempt + 1, error_type, ms: Date.now() - tried, ...extra });
+    // Every attempt, served or not, is logged with its model, time and provider when OpenRouter named one (never on a timeout).
+    const attemptLog = (outcome, provider = null) => console.log(JSON.stringify({ at: new Date().toISOString(), kind: converted.kind, model, attempt: attempt + 1, outcome, ms: Date.now() - tried, provider, limit_ms: limit }));
     let upstream, answer;
     try {
       // The timeout covers reading the body too: OpenRouter sends headers at once and the answer only when it's done.
@@ -209,10 +213,12 @@ async function handler(req, res) {
     } catch {
       status = 504;
       failures.push(`${model}: no answer within ${Math.round(limit / 1000)} s`);
+      attemptLog('timeout');
       await failure('timeout');
       continue;
     }
     if (upstream.ok && answer?.choices?.length) {
+      attemptLog('served', answer.provider ?? null);
       try { await recordSpend(user, answer); } catch { return fail(res, 503, 'Relio could not record usage. Please try again later.'); }
       reply = answer; break;
     }
@@ -220,6 +226,7 @@ async function handler(req, res) {
     status = upstream.ok ? 502 : upstream.status;
     const raw = typeof answer?.error?.metadata?.raw === 'string' ? ` (${answer.error.metadata.raw.slice(0, 200)})` : '';
     failures.push(`${model}: ${answer?.error?.message ?? `HTTP ${upstream.status}`}${raw}`);
+    attemptLog(upstream.ok ? 'empty_answer' : errorType(upstream.status), answer?.error?.metadata?.provider_name ?? null);
     await failure(upstream.ok ? 'empty_answer' : errorType(upstream.status), {
       status: upstream.status, provider: answer?.error?.metadata?.provider_name ?? null, message: failures.at(-1).slice(0, 500),
     });

@@ -165,12 +165,13 @@ export function parseOpenRouter(body: string): any {
 /// One row per failed model attempt, so the owner can see how often each model and provider fails. Never blocks the answer.
 async function logFailure(session: Session, row: Record<string, unknown>) {
   console.error(`${row.model}: ${row.error_type} ${row.message ?? ""}`);
-  await fetch(`${session.url}/rest/v1/ai_failures`, {
+  const response = await fetch(`${session.url}/rest/v1/ai_failures`, {
     method: "POST",
     headers: { ...session.headers, Prefer: "return=minimal" },
     body: JSON.stringify({ ...row, user_id: session.user, source: "desktop" }),
     signal: AbortSignal.timeout(5_000),
-  }).catch(() => {});
+  }).catch((error) => new Response(String(error), { status: 0 }));
+  if (!response.ok) console.error(`ai_failures row not saved (${response.status}):`, row.model, row.error_type);
 }
 
 function errorType(status: number): string {
@@ -192,7 +193,7 @@ async function recordSpend(session: Session, answer: any) {
   });
   if (!response.ok) throw new Error("Usage accounting failed");
   // The real cost for the ai_cost_daily view; a failed write must not fail an answer that was already paid for.
-  await fetch(`${session.url}/rest/v1/ai_spend`, {
+  const spendRow = await fetch(`${session.url}/rest/v1/ai_spend`, {
     method: "POST",
     headers: { ...session.headers, Prefer: "return=minimal" },
     signal: AbortSignal.timeout(5_000),
@@ -201,7 +202,8 @@ async function recordSpend(session: Session, answer: any) {
       usd: Number.isFinite(reported) && reported > 0 ? reported : 0, prompt_tokens: answer?.usage?.prompt_tokens ?? null,
       completion_tokens: answer?.usage?.completion_tokens ?? null,
     }),
-  }).catch(() => {});
+  }).catch((error) => new Response(String(error), { status: 0 }));
+  if (!spendRow.ok) console.error(`ai_spend row not saved (${spendRow.status}):`, answer?.model, answer?.provider);
 }
 
 function limitReached(): Response {
@@ -250,6 +252,9 @@ Deno.serve(async (request) => {
     const tried = Date.now();
     const failure = (error_type: string, extra: Record<string, unknown> = {}) =>
       logFailure(session, { model, kind: converted.kind, attempt: attempt + 1, error_type, ms: Date.now() - tried, ...extra });
+    // Every attempt, served or not, is logged with its model, time and provider when OpenRouter named one (never on a timeout).
+    const attemptLog = (outcome: string, provider: string | null = null) =>
+      console.log(JSON.stringify({ at: new Date().toISOString(), kind: converted.kind, model, attempt: attempt + 1, outcome, ms: Date.now() - tried, provider, limit_ms: limit }));
     let upstream: Response, answer: any;
     try {
       const signal = AbortSignal.timeout(limit);
@@ -265,11 +270,13 @@ Deno.serve(async (request) => {
     } catch {
       status = 504;
       failures.push(`${model}: no answer within ${Math.round(limit / 1000)} s`);
+      attemptLog("timeout");
       await failure("timeout");
       continue;
     }
     // Only answers count toward the cap, so a model that refuses or is down doesn't use up the person's allowance.
     if (upstream.ok && answer?.choices?.length) {
+      attemptLog("served", answer.provider ?? null);
       try { await recordSpend(session, answer); } catch { return fail(503, "Relio could not record usage. Please try again later."); }
       reply = answer; break;
     }
@@ -279,6 +286,7 @@ Deno.serve(async (request) => {
     const raw = typeof answer?.error?.metadata?.raw === "string" ? ` (${answer.error.metadata.raw.slice(0, 200)})` : "";
     const message = `${model}: ${answer?.error?.message ?? `HTTP ${upstream.status}`}${raw}`;
     failures.push(message);
+    attemptLog(upstream.ok ? "empty_answer" : errorType(upstream.status), answer?.error?.metadata?.provider_name ?? null);
     await failure(upstream.ok ? "empty_answer" : errorType(upstream.status), {
       status: upstream.status, provider: answer?.error?.metadata?.provider_name ?? null, message: message.slice(0, 500),
     });
