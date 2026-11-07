@@ -1712,16 +1712,18 @@ function openExportDialog(onlyId = null) {
 const STALL_MS = 45_000;
 
 async function exportShorts(ids, quality, folder = null) {
+  // The project is held from the start: the person may go Home while it exports, which clears the open project.
+  const project = state.project;
   const task = beginTask('Exporting…');
   const settings = exportSettings(quality);
   const seconds = [];
   let made = 0;
   try {
     for (const [index, id] of ids.entries()) {
-      const segment = state.project.segments.find((s) => s.id === id);
-      const media = state.project.media.find((m) => m.id === segment.mediaId);
+      const segment = project.segments.find((s) => s.id === id);
+      const media = project.media.find((m) => m.id === segment.mediaId);
       const source = await sourceFor(media);
-      const label = segment.suggestedTitle?.trim() || `${state.project.title} Short ${state.project.segments.indexOf(segment) + 1}`;
+      const label = segment.suggestedTitle?.trim() || `${project.title} Short ${project.segments.indexOf(segment) + 1}`;
       setTask(`Exporting ${index + 1} of ${ids.length} · ${label}`, index / ids.length);
       // A browser whose encoder or decoder stops answering would leave the export waiting forever; name the step instead.
       let lastStep = 'opening the video', lastActive = Date.now(), watchdog;
@@ -1755,8 +1757,13 @@ async function exportShorts(ids, quality, folder = null) {
     <p>${made} ${made === 1 ? 'Short' : 'Shorts'} ${folder ? `saved to the folder “${esc(folder.name)}”` : 'downloaded to your Downloads folder'}.</p>
     <div class="row end"><button class="button primary" data-action="close">OK</button></div></div>`);
   if (made > 0) {
-    state.project.exported = (state.project.exported ?? 0) + made;
-    persist();
+    // Saved by ID, not through the open project, so an export that ends after the person went Home still restarts the 7 days.
+    const saved = await store.loadProject(project.id);
+    if (saved) {
+      saved.exported = (saved.exported ?? 0) + made;
+      await store.saveProject(saved);
+      if (state.project?.id === project.id) state.project.exported = saved.exported;
+    }
     recordExport(made, seconds.reduce((a, b) => a + b, 0), quality);
   }
 }
