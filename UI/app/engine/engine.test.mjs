@@ -271,3 +271,9 @@ console.log('word timing checks passed');
   assert.equal(Shorts.groundedTitle(null, []), null);
 }
 console.log('title grounding checks passed');
+
+// Repeated lines within 20 s are dropped; the same line later on is kept.
+assert.deepEqual(Shorts.dropRepeats([{ text: 'Hello there.', start: 0 }, { text: 'hello there', start: 8 }, { text: 'hello there', start: 40 }]).map((c) => c.start), [0, 40]);
+
+// Lines with an impossible speaking rate are dropped; a normal line stays; too many removed means likely music.
+assert.deepEqual(Shorts.dropImpossibleRate([{ text: 'one two three', start: 0, duration: 2 }, { text: 'a b c d e f g h i j k l m n o p', start: 3, duration: 1 }]).map((c) => c.start), [0]);

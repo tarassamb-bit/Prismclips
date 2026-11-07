@@ -108,7 +108,10 @@ export async function analyze(source, configuration_, options) {
     // Verified word timing first, then words placed on the heard speech, then even spreading over each sentence.
     const timed = shot.words.length > 0 ? shot.words : shot.heard;
     const source_ = timed.length > 0 ? S.captionCues(timed, { start, end: start + duration }) : T.sentenceCaptionGroups(shot.referenceCues);
-    const captions = clipCaptions(source_, start, duration);
+    const raw = clipCaptions(source_, start, duration);
+    const captions = dropRepeats(dropImpossibleRate(raw));
+    // Many lines removed as impossible or repeated: most likely sung lyrics or music, which the speech model garbles.
+    const garbled = raw.length > 0 && (raw.length - captions.length) / raw.length >= 0.2;
     const words = timed.filter((w) => w.start >= start - 0.01 && w.start + w.duration <= start + duration + 0.01).map((w) => ({ ...w, start: w.start - start }));
     const cropKeyframes = candidate.fit
       ? [{ time: 0, position: 0.5, preserveWholeFrame: true }, { time: duration, position: 0.5, preserveWholeFrame: true }]
@@ -116,7 +119,7 @@ export async function analyze(source, configuration_, options) {
     reportStep('Relio AI · framing the subject');
     return {
       start, duration, captions, cropKeyframes, speechWords: words,
-      warning: shot.referenceCues.length === 0 || shot.words.length > 0 ? null : S.SENTENCE_TIMING_NOTICE,
+      warning: garbled ? MUSIC_NOTICE : shot.referenceCues.length === 0 || shot.words.length > 0 ? null : S.SENTENCE_TIMING_NOTICE,
       title: groundedTitle(candidate.title, captions),
       reason: candidate.reason ? truncate(candidate.reason, 400) : null, fit: candidate.fit, videoType,
       score: Math.round(candidate.score * 10), description: candidate.description ? truncate(candidate.description, 1000) : null,
@@ -217,6 +220,28 @@ export function orderedShorts(segments, byScore) {
 }
 
 /** Shift captions into the clip's timeline without extending them beyond its end. */
+export const MUSIC_NOTICE = 'Many caption lines looked wrong, so this may be sung or music-heavy audio. Captions are hidden; turn them on to check them.';
+/** Speech runs at about 2 to 4 words a second; a line with far more words than its time allows is invented text. */
+export function dropImpossibleRate(cues, maxWordsPerSecond = 5.5) {
+  return cues.filter((cue) => {
+    const words = cue.text.split(/\s+/).filter(Boolean).length;
+    return words / Math.max(cue.duration, 0.3) <= maxWordsPerSecond;
+  });
+}
+
+/** Speech models sometimes repeat a line they heard twice, or invent one: a line that repeats an earlier one within `window` seconds is dropped. */
+export function dropRepeats(cues, window = 20) {
+  const key = (text) => text.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const lastSeen = new Map();
+  return cues.filter((cue) => {
+    const text = key(cue.text);
+    if (!text) return true;
+    const previous = lastSeen.get(text);
+    lastSeen.set(text, cue.start);
+    return previous === undefined || cue.start - previous >= window;
+  });
+}
+
 export function clipCaptions(cues, start, duration) {
   return cues.map((c) => ({ text: c.text, from: Math.max(0, c.start - start), to: Math.min(duration, c.start + c.duration - start) }))
     .filter((c) => c.to > c.from).map((c) => ({ text: c.text, start: c.from, duration: c.to - c.from }));

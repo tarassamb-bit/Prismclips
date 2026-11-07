@@ -1203,7 +1203,9 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
         fitToFrame: r.fit, captions: r.captions, cropZoom: r.fit ? 1 : 1.08, cropPosition: 0.5, cropKeyframes: r.cropKeyframes,
         cropTrackingVersion: Framing.VERSION, speechWords: r.speechWords, score: r.score, suggestedTitle: r.title, selectionReason: r.reason,
         suggestedDescription: r.description, captionNotice: r.warning, videoType: r.videoType,
-        captionStyle: options.captionStyle === 'none' ? 'auto' : options.captionStyle, captionsHidden: options.captionStyle === 'none',
+        captionStyle: options.captionStyle === 'none' ? 'auto' : options.captionStyle,
+        // Captions whose timing couldn't be checked (often sung or music-heavy audio) stay hidden until the person turns them on.
+        captionsHidden: options.captionStyle === 'none' || Boolean(r.warning),
         // A whole-frame Short (a vertical source, a screen) is never split into two halves.
         splitScreen: podcast(r) && !r.fit, captionPosition: podcast(r) && !r.fit ? 'middle' : 'bottom', captionSize: 'medium', captionAnimated: true,
       };
