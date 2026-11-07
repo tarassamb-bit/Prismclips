@@ -151,7 +151,7 @@ function setScreen(screen) {
     heading.querySelector('input').value = state.project?.title ?? '';
   } else heading.textContent = title;
   $('#export-button').hidden = screen !== 'editor';
-  document.title = `${title} · Relio`;
+  document.title = `${title} · Relio Clips`;
   // The editor keeps only what editing needs, so the theme switch lives on the other screens.
   $('.theme-toggle').hidden = screen === 'editor';
   for (const button of document.querySelectorAll('.side-button')) {
@@ -1805,7 +1805,7 @@ document.addEventListener('change', async (event) => {
   if (event.target.id === 'title' && state.project) {
     state.project.title = event.target.value.trim() || state.project.title;
     event.target.value = state.project.title;
-    document.title = `${state.project.title} · Relio`;
+    document.title = `${state.project.title} · Relio Clips`;
     await persist();
     setUrl(projectPath(state.project) + (location.pathname.match(/\/short-\d+$/)?.[0] ?? ''), true);
     return;
