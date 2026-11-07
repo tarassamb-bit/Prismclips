@@ -361,3 +361,4 @@ details.insp-section:not([open]) { gap: 0; }
 .at-input { position: relative; display: block; }
 .at-input > span { position: absolute; left: 10px; top: 50%; translate: 0 -50%; color: var(--text2); }
 .at-input input { padding-left: 24px; }
+.dashboard > .notice { display: block; padding: 12px 14px; margin-bottom: 16px; border: 1px solid var(--amber); border-radius: 12px; line-height: 1.5; }

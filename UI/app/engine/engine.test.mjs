@@ -4,7 +4,7 @@ import * as T from './transcript.js';
 import * as Framing from './framing.js';
 import * as S from './selection.js';
 import * as Shorts from './shortmaker.js';
-import { pages, elements, estimatedWords, CAPTION_LEAD } from './captions.js';
+import { pages, elements, estimatedWords, CAPTION_LEAD, drawCaptions } from './captions.js';
 import { cropPositionAt, layoutAt, boxBlur } from './render.js';
 import { regionInterval } from './models.js';
 import { retryDelay } from './gemini.js';
@@ -285,4 +285,25 @@ assert.deepEqual(Shorts.dropImpossibleRate([{ text: 'one two three', start: 0, d
   const spread = T.spreadOverSpeech(drifting, runs);
   assert.deepEqual(spread.map((w) => w.start), [1, 2, 5, 6]);
   assert.ok(Math.abs(spread.at(-1).start + spread.at(-1).duration - 7) < 1e-9);
+}
+
+// Overlapping subtitle pages: only the newer one is drawn; the on-screen text overlay is always drawn.
+{
+  const drawn = [];
+  globalThis.OffscreenCanvas ??= class { getContext() { return new Proxy({}, { get: (t, k) => (k in t ? t[k] : k === 'measureText' ? () => ({ width: 10, fontBoundingBoxAscent: 10, fontBoundingBoxDescent: 3 }) : () => {}) }); } };
+  const ctx = { save() {}, restore() {}, translate() {}, scale() {}, drawImage: (canvas) => drawn.push(canvas) };
+  const layers = [
+    { text: 'and the', start: 0, duration: 2, y: 0, style: 'classic', scale: 1, highlighted: null },
+    { text: 'Maverick', start: 1, duration: 2, y: 0, style: 'classic', scale: 1, highlighted: null },
+    { text: 'Overlay', start: 0, duration: 5, y: 0, style: 'classic', scale: 1, highlighted: null, overlay: true },
+  ];
+  drawCaptions(ctx, layers, 1.5);
+  assert.equal(drawn.length, 2, 'one subtitle plus the overlay');
+}
+
+// Lines that arrive out of order still come out in time order, each closing when the next opens.
+{
+  const out = pages([cue('Top Gun', 5, 1), cue('Blu-ray disc', 1, 2)], [], 'classic');
+  assert.deepEqual(out.map((p) => p.text), ['Blu-ray disc', 'Top Gun']);
+  assert.ok(out[0].end <= out[1].start + 1e-9);
 }

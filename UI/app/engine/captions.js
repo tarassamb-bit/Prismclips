@@ -40,7 +40,10 @@ export function elements(segment) {
       add(page.text, from, Math.max(0.01, to - from), center, style, scale, index, pops && index === 0);
     });
   }
-  if (segment.caption) add(segment.caption, segment.captionStart ?? 0, segment.captionDuration ?? segment.duration, overlayCenter, 'classic', 1, null, false);
+  if (segment.caption) {
+    add(segment.caption, segment.captionStart ?? 0, segment.captionDuration ?? segment.duration, overlayCenter, 'classic', 1, null, false);
+    if (result.at(-1)?.text === segment.caption) result.at(-1).overlay = true;
+  }
   return result;
 }
 
@@ -70,6 +73,8 @@ export function pages(cues, words, style) {
     }
     flush();
   }
+  // In time order, so each page closes when the next opens and two lines never show at once.
+  result.sort((a, b) => a.start - b.start);
   // Each page stays up until the next one starts, so there is never a gap between captions; the last one lingers briefly.
   result.forEach((page, index) => {
     page.end = index + 1 < result.length ? Math.max(page.start + 0.05, result[index + 1].start) : page.end + 0.35;
@@ -119,8 +124,11 @@ export function popScale(element, time) {
 
 /** Draws the layers showing at `time` into a context already scaled to 1080×1920. */
 export function drawCaptions(ctx, layers, time) {
-  for (const element of layers) {
-    if (!(element.start <= time && time < element.start + element.duration)) continue;
+  const showing = layers.filter((element) => element.start <= time && time < element.start + element.duration);
+  // One subtitle at a time: when two pages overlap, the newer one wins, so lines never stack into a garbled word.
+  const subtitle = showing.filter((element) => !element.overlay).sort((a, b) => b.start - a.start)[0];
+  for (const element of showing) {
+    if (!element.overlay && element !== subtitle) continue;
     const height = layerHeight(element.style, element.scale);
     const scale = popScale(element, time);
     ctx.save();

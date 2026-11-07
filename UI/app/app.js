@@ -227,6 +227,12 @@ const folderIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 
 // A project nobody edited for this long is deleted with its video and Shorts, here and in the cloud. Editing restarts the clock.
 const UNTOUCHED_DAYS = 7;
 
+/** Whole days before an untouched project is deleted: 7 right after an edit, 1 on its last day. */
+function daysLeft(project) {
+  const edited = Date.parse(project.updated ?? project.created);
+  return Number.isFinite(edited) ? Math.max(1, UNTOUCHED_DAYS - Math.floor((Date.now() - edited) / 86_400_000)) : UNTOUCHED_DAYS;
+}
+
 /** Runs after each sync, so an edit made on another device arrives before anything is judged untouched. */
 async function expireUntouched() {
   const cutoff = Date.now() - UNTOUCHED_DAYS * 86_400_000;
@@ -247,7 +253,7 @@ function retentionNotice() {
   const key = `relio.retention-notice.${userId()}`;
   try { if (localStorage.getItem(key)) return; localStorage.setItem(key, '1'); } catch { /* storage blocked: show it each time */ }
   openDialog(`<div class="stack"><h2>Projects you don’t edit are deleted after ${UNTOUCHED_DAYS} days</h2>
-    <p>If you don’t change a project for ${UNTOUCHED_DAYS} days, Relio deletes it: the video, its Shorts and everything else in it, on this device and in the cloud. Any edit, like moving a clip on the timeline, starts a new ${UNTOUCHED_DAYS}-day period.</p>
+    <p>If you don’t change a project for ${UNTOUCHED_DAYS} days, Relio deletes it: the video, its Shorts and everything else in it, on this device and in the cloud. Any edit, re-analysis or export, like moving a clip on the timeline, starts a new ${UNTOUCHED_DAYS}-day period. You’ll see a warning on Home 2 days before.</p>
     <p class="muted small">Export the Shorts you want to keep. Exported files on your computer are never touched.</p>
     <div class="row end"><button class="button primary" data-action="close">Got it</button></div></div>`);
 }
@@ -284,9 +290,11 @@ async function showHome(view = null) {
   const card = (p) => {
     const poster = p.media.find((m) => m.thumbnail)?.thumbnail;
     const info = `${plural(p.segments.length, 'Short')} · ${dateText(p.updated ?? p.created)}`;
+    const left = daysLeft(p);
+    const expiry = left <= 2 ? `<span class="missing small">${left <= 1 ? 'Deleted tomorrow' : `Deleted in ${left} days`} unless you edit or export it</span>` : '';
     const away = noVideo.has(p.id) ? `<span class="missing small">${noVideo.get(p.id) ? 'Video downloads when you open it' : 'Video not on this device'}</span>` : '';
     const body = `<div class="poster">${poster ? `<img alt="" src="${poster}">` : ''}<span class="badge">${clock(p.media[0]?.duration ?? 0)}</span></div>
-          <strong class="p-title">${esc(p.title)}</strong><span class="muted small">${info}</span>${away}`;
+          <strong class="p-title">${esc(p.title)}</strong><span class="muted small">${info}</span>${expiry}${away}`;
     return `<div class="project-card" draggable="true" data-project="${esc(p.id)}">
           <button class="open" data-action="open" data-id="${esc(p.id)}">${body}</button>
           <button class="card-menu" data-action="project-menu" data-id="${esc(p.id)}" aria-label="Options for ${esc(p.title)}" aria-haspopup="menu">⋯</button></div>`;
@@ -313,7 +321,10 @@ async function showHome(view = null) {
       ${tiles ? `<div class="folders">${tiles}</div>` : ''}
       ${grid(loose) || (live.length === 0 ? '<div class="empty"><strong>Your projects will appear here</strong><span class="muted">Create a Short to start your first project.</span></div>' : '')}`;
   }
-  $('#app').innerHTML = `<section class="dashboard">${html}</section>`;
+  // Day 5 on: a banner names the projects about to go, so nobody loses one without warning.
+  const soon = all.filter((p) => daysLeft(p) <= 2).sort((a, b) => daysLeft(a) - daysLeft(b));
+  const warning = soon.length ? `<div class="notice" role="status"><strong>${soon.length === 1 ? `“${esc(soon[0].title)}” will be deleted ${daysLeft(soon[0]) <= 1 ? 'tomorrow' : `in ${daysLeft(soon[0])} days`}.` : `${soon.length} projects will be deleted within 2 days.`}</strong> Export your Shorts now, or make any edit to keep a project for another ${UNTOUCHED_DAYS} days.</div>` : '';
+  $('#app').innerHTML = `<section class="dashboard">${warning}${html}</section>`;
 }
 
 // MARK: Menus and the small dialogs behind them
