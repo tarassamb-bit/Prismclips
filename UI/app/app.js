@@ -119,7 +119,7 @@ async function boot() {
     // Something arrived from another device: Home shows it at once.
     onUpdated: () => { if (state.screen === 'home') showHome(state.homeView); },
     // With the projects in step, deleted projects' videos are removed from storage and new videos go up.
-    afterSync: () => { removePendingVideos(); uploadPending(); },
+    afterSync: () => { removePendingVideos(); uploadPending(); expireUntouched(); },
   });
   applyTheme(savedTheme());
   applyCollapsed(savedSidebar() === '1');
@@ -224,11 +224,40 @@ const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const folderIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>';
 
 /** `view` is null for Home, or { folderId } inside a folder. */
+// A project nobody edited for this long is deleted with its video and Shorts, here and in the cloud. Editing restarts the clock.
+const UNTOUCHED_DAYS = 7;
+
+/** Runs after each sync, so an edit made on another device arrives before anything is judged untouched. */
+async function expireUntouched() {
+  const cutoff = Date.now() - UNTOUCHED_DAYS * 86_400_000;
+  let removed = 0;
+  for (const project of (await store.listProjects()).filter(isMine)) {
+    // An unreadable date never counts as old, and the open project is never removed under the person.
+    if (project.id === state.project?.id || !(Date.parse(project.updated ?? project.created) < cutoff)) continue;
+    await store.deleteProject(project);
+    removed++;
+  }
+  if (!removed) return;
+  requestSync(0);
+  if (state.screen === 'home') showHome(state.homeView);
+}
+
+/** Once per account: the 7-day rule, before it can surprise anyone. */
+function retentionNotice() {
+  const key = `relio.retention-notice.${userId()}`;
+  try { if (localStorage.getItem(key)) return; localStorage.setItem(key, '1'); } catch { /* storage blocked: show it each time */ }
+  openDialog(`<div class="stack"><h2>Projects you don’t edit are deleted after ${UNTOUCHED_DAYS} days</h2>
+    <p>If you don’t change a project for ${UNTOUCHED_DAYS} days, Relio deletes it: the video, its Shorts and everything else in it, on this device and in the cloud. Any edit, like moving a clip on the timeline, starts a new ${UNTOUCHED_DAYS}-day period.</p>
+    <p class="muted small">Export the Shorts you want to keep. Exported files on your computer are never touched.</p>
+    <div class="row end"><button class="button primary" data-action="close">Got it</button></div></div>`);
+}
+
 async function showHome(view = null) {
   state.project = null;
   state.create = null;
   state.homeView = view;
   setScreen('home');
+  if (userId()) retentionNotice();
   const [everything, allFolders] = await Promise.all([store.listProjects(), store.listFolders()]);
   const all = everything.filter(isMine), folders = allFolders.filter(isMine);
   state.projects = all;
