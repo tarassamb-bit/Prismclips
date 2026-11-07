@@ -6,6 +6,7 @@ let handler;
 globalThis.Deno = { env: { get: (key) => env[key] }, serve: (fn) => { handler = fn; } };
 const calls = [];
 let providerFails = false, providerBody = null, slowAnswer = false;
+const providerBodies = [];
 let identityStatus = 200, reservationStatus = 200, allowed = true, spendStatus = 200, runAllowed = true;
 globalThis.fetch = async (url, options = {}) => {
   calls.push({ url, ...options });
@@ -16,6 +17,7 @@ globalThis.fetch = async (url, options = {}) => {
   if (url.endsWith('/rest/v1/ai_failures') || url.endsWith('/rest/v1/ai_spend')) return new Response(null, { status: 201 });
   if (url === 'https://openrouter.ai/api/v1/chat/completions') {
     providerBody = JSON.parse(options.body);
+    providerBodies.push(providerBody);
     if (providerFails) return Response.json({ error: { message: 'Provider returned error', metadata: { raw: 'unsupported audio data' } } }, { status: 400 });
     const body = JSON.stringify({ choices: [{ message: { content: 'ok' } }], usage: { cost: 0 } });
     // A slow answer: OpenRouter sends keep-alive comment lines before the JSON.
@@ -55,7 +57,11 @@ allowed = true;
 calls.length = 0;
 assert.equal((await handler(request())).status, 200);
 assert.equal(calls.length, 5);
-assert.deepEqual(JSON.parse(calls[4].body), { user_id: '12345678-1234-1234-1234-123456789abc', source: 'desktop', model: null, provider: null, usd: 0, prompt_tokens: null, completion_tokens: null }, 'the real cost is logged per answer');
+{
+  const { ms, ...row } = JSON.parse(calls[4].body);
+  assert.deepEqual(row, { user_id: '12345678-1234-1234-1234-123456789abc', source: 'desktop', model: null, provider: null, usd: 0, prompt_tokens: null, completion_tokens: null, kind: 'text' }, 'the real cost is logged per answer');
+  assert.ok(Number.isInteger(ms) && ms >= 0, 'answer time is logged');
+}
 assert.equal(calls[4].headers.Authorization, 'Bearer server-only-test-key');
 assert.deepEqual(providerBody.reasoning, { effort: 'low', exclude: true }, 'reasoning models must answer within the function time limit');
 assert.equal(calls[1].headers.Authorization, 'Bearer server-only-test-key');
@@ -122,7 +128,9 @@ assert.equal(refused.status, 400);
 const reason = (await refused.json()).error.message;
 assert.ok(reason.includes('mimo-v2.6-flash') && reason.includes('gemini-3.8-flash') && reason.includes('unsupported audio data'), reason);
 assert.ok(!providerBody.model.endsWith(':free'), 'no free models');
-assert.deepEqual(providerBody.provider, { zdr: true, data_collection: 'deny', sort: 'latency' }, 'only providers that keep no data');
+const audioTries = providerBodies.slice(-2);
+assert.deepEqual(audioTries[0].provider, { zdr: true, data_collection: 'deny', sort: 'latency', order: ['makora'], allow_fallbacks: false }, 'audio on MiMo: one no-retention provider');
+assert.deepEqual(audioTries[1].provider, { zdr: true, data_collection: 'deny', sort: 'latency' }, 'the fallback is not pinned');
 const logged = calls.filter((call) => call.url.endsWith('/rest/v1/ai_failures')).map((call) => JSON.parse(call.body));
 assert.deepEqual(logged.map((row) => [row.model, row.error_type, row.source]),
   [['xiaomi/mimo-v2.6-flash', 'bad_request', 'desktop'], ['google/gemini-3.8-flash', 'bad_request', 'desktop'], ['all', 'gave_up', 'desktop']]);

@@ -22,6 +22,8 @@ const MIN_ANSWER_USD = 0.002;
 const MODEL_TIMEOUT_MS = 60_000;
 // Audio tries are short: a model that hasn't answered audio in 30 s rarely does later, and Gemini gets the time.
 const AUDIO_TRY_MS = 30_000;
+// The MiMo provider with the most answers in ai_spend (Makora, 296 of 429 over 2 days to 2026-11-08).
+const AUDIO_PROVIDER = 'makora';
 const REQUEST_BUDGET_MS = 280_000;
 const MIN_MODEL_TIME_MS = 20_000;
 
@@ -158,7 +160,7 @@ function errorType(status) {
   return 'provider_error';
 }
 
-async function recordSpend(user, answer) {
+async function recordSpend(user, answer, kind, ms) {
   const reported = Number(answer?.usage?.cost ?? 0);
   await rpc('prism_record_beta_spend', { p_user: user, p_usd: Math.max(Number.isFinite(reported) ? reported : 0, MIN_ANSWER_USD) });
   // The real cost for the ai_cost_daily view; a failed write must not fail an answer that was already paid for.
@@ -166,7 +168,7 @@ async function recordSpend(user, answer) {
     method: 'POST', headers: { ...serviceHeaders(), Prefer: 'return=minimal' }, signal: AbortSignal.timeout(5_000),
     body: JSON.stringify({ user_id: user, source: 'web', model: answer?.model ?? null, provider: answer?.provider ?? null,
       usd: Number.isFinite(reported) && reported > 0 ? reported : 0, prompt_tokens: answer?.usage?.prompt_tokens ?? null,
-      completion_tokens: answer?.usage?.completion_tokens ?? null }),
+      completion_tokens: answer?.usage?.completion_tokens ?? null, kind, ms }),
   }).catch((error) => ({ ok: false, status: error.message }));
   if (!response.ok) console.error(`ai_spend row not saved (${response.status ?? 'no status'}):`, answer?.model, answer?.provider);
 }
@@ -200,6 +202,8 @@ async function handler(req, res) {
     const perTry = converted.kind === 'audio' ? AUDIO_TRY_MS : MODEL_TIMEOUT_MS;
     const limit = attempt === models.length - 1 ? left : Math.min(perTry, left);
     const tried = Date.now();
+    // Audio on MiMo goes to one provider only, so every attempt (a timeout too) names it.
+    const pinned = converted.kind === 'audio' && model === chosen ? (process.env.OPENROUTER_AUDIO_PROVIDER || AUDIO_PROVIDER) : null;
     const failure = (error_type, extra = {}) => logFailure({ user_id: user, model, kind: converted.kind, attempt: attempt + 1, error_type, ms: Date.now() - tried, ...extra });
     // Every attempt, served or not, is logged with its model, time and provider when OpenRouter named one (never on a timeout).
     const attemptLog = (outcome, provider = null) => console.log(JSON.stringify({ at: new Date().toISOString(), kind: converted.kind, model, attempt: attempt + 1, outcome, ms: Date.now() - tried, provider, limit_ms: limit }));
@@ -210,20 +214,20 @@ async function handler(req, res) {
       upstream = await fetch(OPENROUTER_URL, {
         method: 'POST',
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://relioclips.com', 'X-Title': 'Relio Clips' },
-        body: JSON.stringify({ model, ...converted.request }),
+        body: JSON.stringify({ model, ...converted.request, ...(pinned ? { provider: { ...converted.request.provider, order: [pinned], allow_fallbacks: false } } : {}) }),
         signal,
       });
       answer = await upstream.text().then(parseOpenRouter).catch((error) => { if (signal.aborted) throw error; return {}; });
     } catch {
       status = 504;
       failures.push(`${model}: no answer within ${Math.round(limit / 1000)} s`);
-      attemptLog('timeout');
-      await failure('timeout');
+      attemptLog('timeout', pinned);
+      await failure('timeout', { provider: pinned });
       continue;
     }
     if (upstream.ok && answer?.choices?.length) {
       attemptLog('served', answer.provider ?? null);
-      try { await recordSpend(user, answer); } catch { return fail(res, 503, 'Relio could not record usage. Please try again later.'); }
+      try { await recordSpend(user, answer, converted.kind, Date.now() - tried); } catch { return fail(res, 503, 'Relio could not record usage. Please try again later.'); }
       reply = answer; break;
     }
     // A 200 without a choice is an empty answer; treat it like a provider error so the next model gets a turn.

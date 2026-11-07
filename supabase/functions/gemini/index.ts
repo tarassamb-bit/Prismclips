@@ -154,6 +154,8 @@ const MIN_ANSWER_USD = 0.002;
 const MODEL_TIMEOUT_MS = 75_000;
 // Audio tries are short: a model that hasn't answered audio in 30 s rarely does later, and Gemini gets the time.
 const AUDIO_TRY_MS = 30_000;
+// The MiMo provider with the most answers in ai_spend (Makora, 296 of 429 over 2 days to 2026-11-08).
+const AUDIO_PROVIDER = "makora";
 // All models together must answer before Supabase stops the function at 150 s (the sign-in and usage checks come first).
 const REQUEST_BUDGET_MS = 135_000;
 // A fallback model gets tried only with at least this much of the budget left.
@@ -185,7 +187,7 @@ function errorType(status: number): string {
 }
 
 /// Adds what one model answer cost to the account. OpenRouter reports the cost in each response.
-async function recordSpend(session: Session, answer: any) {
+async function recordSpend(session: Session, answer: any, kind: string, ms: number) {
   const reported = Number(answer?.usage?.cost ?? 0);
   const usd = Math.max(Number.isFinite(reported) ? reported : 0, MIN_ANSWER_USD);
   const response = await fetch(`${session.url}/rest/v1/rpc/prism_record_beta_spend`, {
@@ -202,7 +204,7 @@ async function recordSpend(session: Session, answer: any) {
     body: JSON.stringify({
       user_id: session.user, source: "desktop", model: answer?.model ?? null, provider: answer?.provider ?? null,
       usd: Number.isFinite(reported) && reported > 0 ? reported : 0, prompt_tokens: answer?.usage?.prompt_tokens ?? null,
-      completion_tokens: answer?.usage?.completion_tokens ?? null,
+      completion_tokens: answer?.usage?.completion_tokens ?? null, kind, ms,
     }),
   }).catch((error) => new Response(String(error), { status: 0 }));
   if (!spendRow.ok) console.error(`ai_spend row not saved (${spendRow.status}):`, answer?.model, answer?.provider);
@@ -256,6 +258,8 @@ Deno.serve(async (request) => {
     const perTry = converted.kind === "audio" ? AUDIO_TRY_MS : MODEL_TIMEOUT_MS;
     const limit = attempt === models.length - 1 ? left : Math.min(perTry, left);
     const tried = Date.now();
+    // Audio on MiMo goes to one provider only, so every attempt (a timeout too) names it.
+    const pinned = converted.kind === "audio" && model === chosen ? (Deno.env.get("OPENROUTER_AUDIO_PROVIDER") || AUDIO_PROVIDER) : null;
     const failure = (error_type: string, extra: Record<string, unknown> = {}) =>
       logFailure(session, { model, kind: converted.kind, attempt: attempt + 1, error_type, ms: Date.now() - tried, ...extra });
     // Every attempt, served or not, is logged with its model, time and provider when OpenRouter named one (never on a timeout).
@@ -267,7 +271,7 @@ Deno.serve(async (request) => {
       upstream = await fetch(OPENROUTER_URL, {
         method: "POST",
         headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json", "HTTP-Referer": "https://relioclips.com", "X-Title": "Relio Clips" },
-        body: JSON.stringify({ model, ...converted.request }),
+        body: JSON.stringify({ model, ...converted.request, ...(pinned ? { provider: { ...converted.request.provider, order: [pinned], allow_fallbacks: false } } : {}) }),
         // Answer before Supabase stops the function at 150 s, so the app gets a clear "busy" and retries.
         signal,
       });
@@ -276,14 +280,14 @@ Deno.serve(async (request) => {
     } catch {
       status = 504;
       failures.push(`${model}: no answer within ${Math.round(limit / 1000)} s`);
-      attemptLog("timeout");
-      await failure("timeout");
+      attemptLog("timeout", pinned);
+      await failure("timeout", { provider: pinned });
       continue;
     }
     // Only answers count toward the cap, so a model that refuses or is down doesn't use up the person's allowance.
     if (upstream.ok && answer?.choices?.length) {
       attemptLog("served", answer.provider ?? null);
-      try { await recordSpend(session, answer); } catch { return fail(503, "Relio could not record usage. Please try again later."); }
+      try { await recordSpend(session, answer, converted.kind, Date.now() - tried); } catch { return fail(503, "Relio could not record usage. Please try again later."); }
       reply = answer; break;
     }
     // A 200 without a choice is an empty answer; treat it like a provider error so the next model gets a turn.
