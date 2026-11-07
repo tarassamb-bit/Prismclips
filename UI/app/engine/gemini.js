@@ -14,6 +14,7 @@ const MESSAGES = {
   requestTooLarge: 'This Relio AI request exceeds the safe upload size. Choose a shorter source region.',
   noDistinctClips: 'No new distinct moments were found in this range. Try another region or length. Your existing clips were kept.',
   noStrongClips: 'Relio could not find a strong, self-contained Short in this part of the video. Try another part of the video or a different clip length.',
+  musicVideo: 'This is a music video. Its words are sung, and music videos don’t have spoken captions, so Relio can’t make Shorts from it. Try a video with someone speaking.',
   invalidTiming: 'Relio AI returned speech timestamps that could not be aligned safely.',
   invalidResponse: 'Relio AI returned an incomplete or invalid response. Your existing edits were kept.',
 };

@@ -1195,6 +1195,8 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
       onMissed: (n) => { missed = n; },
       progress: (fraction, stage) => setTask(stage, fraction),
     });
+    // Every Short flagged as music: sung lyrics, not speech, so there's nothing to caption.
+    if (results.length > 0 && results.every((r) => r.warning === Shorts.MUSIC_NOTICE)) throw new GeminiError('musicVideo');
     const podcast = (r) => r.videoType === 'podcast';
     const created = [];
     for (const r of results) {
@@ -1205,7 +1207,7 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
         suggestedDescription: r.description, captionNotice: r.warning, videoType: r.videoType,
         captionStyle: options.captionStyle === 'none' ? 'auto' : options.captionStyle,
         // Captions whose timing couldn't be checked (often sung or music-heavy audio) stay hidden until the person turns them on.
-        captionsHidden: options.captionStyle === 'none' || Boolean(r.warning),
+        captionsHidden: options.captionStyle === 'none' || r.warning === Shorts.MUSIC_NOTICE,
         // A whole-frame Short (a vertical source, a screen) is never split into two halves.
         splitScreen: podcast(r) && !r.fit, captionPosition: podcast(r) && !r.fit ? 'middle' : 'bottom', captionSize: 'medium', captionAnimated: true,
       };
@@ -1247,6 +1249,7 @@ function reportGenerationError(error, retry) {
   const cause = error instanceof StageFailure ? error.underlying : error;
   if (cause instanceof GeminiError) {
     if (cause.failure === 'noStrongClips' || cause.failure === 'noDistinctClips') return showError('No Shorts found', cause.message);
+    if (cause.failure === 'musicVideo') return showError('This is a music video', cause.message);
     if (cause.failure === 'signIn' || cause.status === 401 || cause.status === 403) return showError('Check your sign-in', cause.message);
     if (cause.failure === 'usageLimit') { track('limit_reached'); return showError('You’ve reached your beta limit', cause.message, 'limit'); }
     if (cause.failure === 'request' && [429, 500, 502, 503, 504, 546].includes(cause.status)) return showError('Relio AI is unavailable right now', cause.message, 'temporary', retry);
