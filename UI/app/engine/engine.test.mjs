@@ -4,11 +4,11 @@ import * as T from './transcript.js';
 import * as Framing from './framing.js';
 import * as S from './selection.js';
 import * as Shorts from './shortmaker.js';
-import { pages, elements, estimatedWords } from './captions.js';
+import { pages, elements, estimatedWords, CAPTION_LEAD } from './captions.js';
 import { cropPositionAt, layoutAt, boxBlur } from './render.js';
 import { regionInterval } from './models.js';
 import { retryDelay } from './gemini.js';
-import { resample, wav, barsFromFrames } from './media.js';
+import { resample, wav, barsFromFrames, isQuiet } from './media.js';
 import { mergePlan, resolveConflict } from './syncplan.js';
 
 const cue = (text, start, duration) => ({ text, start, duration });
@@ -20,6 +20,17 @@ assert.ok(windows.length >= 3);
 assert.equal(windows[0].start, 0);
 assert.equal(windows.at(-1).end, 119);
 assert.deepEqual(T.batches([1, 2, 3, 4, 5], 4).map((b) => b.length), [3, 2]);
+
+// Little speech: clock windows cover the whole video, silent parts included, and carry the few words inside them.
+const sparse = [cue('Look at this.', 200, 3)];
+assert.ok(T.speechCoverage(sparse, { start: 0, end: 356 }) < S.SPARSE_SPEECH);
+assert.ok(T.speechCoverage(cues, { start: 0, end: 120 }) > S.SPARSE_SPEECH);
+const clock = T.timeWindows(sparse, { start: 0, end: 356 }, 90, 30);
+assert.equal(clock[0].start, 0);
+assert.equal(clock.at(-1).end, 356);
+assert.ok(clock.every((w, i) => i === 0 || w.start < clock[i - 1].end));
+assert.ok(clock.some((w) => w.text === 'Look at this.') && clock.some((w) => w.text === ''));
+assert.deepEqual(T.timeWindows([], { start: 0, end: 40 }, 90, 30), [{ start: 0, end: 40, text: '' }]);
 
 // Sentences: an edge in the middle of a sentence moves to its boundary.
 const sentences = [cue('One.', 0, 5), cue('Two.', 5, 5), cue('Three.', 10, 5)];
@@ -50,6 +61,13 @@ const picked = S.validate([clip(0, 30, 9), clip(10, 40, 8), clip(60, 90, 7.5), c
 assert.deepEqual(picked.map((c) => c.start), [0, 60]);
 assert.throws(() => S.validate([clip(0, 30, 3)], { start: 0, end: 200 }, 30, 1), { failure: 'noStrongClips' });
 assert.equal(S.strongestOrBest([clip(0, 30, 6)], { start: 0, end: 200 }, 30, 1, [])[0].reason.startsWith('Weaker pick'), true);
+// A 4 is still offered as a weaker pick; a 3 or lower is not, and a strong clip wins over weak ones.
+assert.equal(S.strongestOrBest([clip(0, 30, 4.2)], { start: 0, end: 200 }, 30, 1, [])[0].reason.startsWith('Weaker pick'), true);
+assert.throws(() => S.strongestOrBest([clip(0, 30, 3.5)], { start: 0, end: 200 }, 30, 1, []), { failure: 'noStrongClips' });
+assert.equal(S.strongestOrBest([clip(0, 30, 4.5), clip(60, 90, 8)], { start: 0, end: 200 }, 30, 1, [])[0].start, 60);
+// Silence is quiet; a tone is not.
+assert.equal(isQuiet(new Float32Array(1600), 16000), true);
+assert.equal(isQuiet(Float32Array.from({ length: 1600 }, (_, i) => 0.1 * Math.sin(i / 5)), 16000), false);
 assert.throws(() => S.validate([clip(0, 30, 9)], { start: 0, end: 200 }, 30, 1, [{ start: 0, end: 30 }]), { failure: 'noStrongClips' });
 assert.throws(() => S.validate([{ start: 0, end: 30, score: Number.NaN, layout: 'track' }], { start: 0, end: 200 }, 30, 1), { failure: 'invalidResponse' });
 
@@ -159,6 +177,10 @@ assert.ok(layers.some((l) => l.text === 'Overlay'));
 assert.ok(layers.some((l) => l.highlighted === 1));
 assert.ok(layers.every((l) => l.start >= 0 && l.start + l.duration <= 5 + 1e-9));
 assert.equal(elements({ duration: 5, captions: [], caption: '' }).length, 0);
+// Subtitles lead their words slightly; hidden subtitles leave only the overlay.
+const later = elements({ duration: 5, captions: [cue('Hello.', 2, 1)], speechWords: [], captionStyle: 'classic' });
+assert.ok(Math.abs(later[0].start - (2 - CAPTION_LEAD)) < 1e-9);
+assert.deepEqual(elements({ ...segment, captionsHidden: true }).map((l) => l.text), ['Overlay']);
 assert.ok(Math.abs(estimatedWords(cue('aa bbbb', 0, 6)).reduce((s, w) => s + w.duration, 0) - 6) < 1e-9);
 // No gaps: two lines with a 2 s pause between them still touch; each page ends where the next starts.
 const paused = pages([cue('First line.', 0, 1), cue('Second line.', 3, 1)], [], 'viral');

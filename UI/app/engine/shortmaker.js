@@ -63,7 +63,7 @@ export async function analyze(source, configuration_, options) {
   progress(0.55, 'Selecting distinct moments');
   if (videoType === 'auto') {
     progress(0.55, 'Relio AI · recognizing the kind of video');
-    videoType = transcript.length === 0 ? 'general' : await S.detectVideoType(transcript, configuration, signal);
+    videoType = await S.detectVideoType(transcript, configuration, signal, source, interval);
     progress(0.55, `Relio AI · ${VIDEO_TYPE_TITLES[videoType]}`);
   }
   progress(0.55, 'Relio AI · choosing complete stories and layouts');
@@ -82,19 +82,20 @@ export async function analyze(source, configuration_, options) {
   const reportStep = (stage) => { steps++; progress(0.7 + 0.29 * Math.min(1, steps / (targetCount * 2)), stage); };
   // Picks are prepared a wave at a time; a pick that now overlaps an earlier one gives way to the next backup.
   const accepted = [];
-  let aligning = true, next = 0;
+  // Word timing stops being requested only after two failures, so one bad request doesn't cost every later Short its timing.
+  let alignmentFailures = 0, next = 0;
   while (accepted.length < targetCount && next < picks.length) {
     signal?.throwIfAborted();
     const wave = [];
     for (let i = next; i < Math.min(picks.length, next + targetCount - accepted.length); i++) wave.push(i);
     next += wave.length;
     const prepared = await map(wave, async (index, token) => {
-      const shot = await prepareShort(source, picks[index].start, picks[index].duration, transcript, interval, clipDuration, aligning, configuration, token);
+      const shot = await prepareShort(source, picks[index].start, picks[index].duration, transcript, interval, clipDuration, alignmentFailures < 2, configuration, token);
       reportStep(`Aligning speech and pauses · Short ${index + 1}`);
       return { index, shot };
     }, signal);
     for (const { index, shot } of prepared) {
-      if (shot.alignmentFailed) aligning = false;
+      if (shot.alignmentFailed) alignmentFailures++;
       const clash = (other) => T.overlaps(shot.start, shot.duration, other.start, other.duration);
       if (excluding.some((e) => clash({ start: e.start, duration: e.end - e.start })) || accepted.some((a) => clash(a.shot))) continue;
       accepted.push({ index, shot });
@@ -104,9 +105,11 @@ export async function analyze(source, configuration_, options) {
   const results = await map(accepted, async ({ index, shot }, token) => {
     const candidate = picks[index];
     const { start, duration } = shot;
-    const source_ = shot.words.length > 0 ? S.captionCues(shot.words, { start, end: start + duration }) : T.sentenceCaptionGroups(shot.referenceCues);
+    // Verified word timing first, then words placed on the heard speech, then even spreading over each sentence.
+    const timed = shot.words.length > 0 ? shot.words : shot.heard;
+    const source_ = timed.length > 0 ? S.captionCues(timed, { start, end: start + duration }) : T.sentenceCaptionGroups(shot.referenceCues);
     const captions = clipCaptions(source_, start, duration);
-    const words = shot.words.filter((w) => w.start >= start - 0.01 && w.start + w.duration <= start + duration + 0.01).map((w) => ({ ...w, start: w.start - start }));
+    const words = timed.filter((w) => w.start >= start - 0.01 && w.start + w.duration <= start + duration + 0.01).map((w) => ({ ...w, start: w.start - start }));
     const cropKeyframes = candidate.fit
       ? [{ time: 0, position: 0.5, preserveWholeFrame: true }, { time: duration, position: 0.5, preserveWholeFrame: true }]
       : await Framing.analyze(source, start, duration, 1.08, configuration, captions, token);
@@ -167,7 +170,8 @@ export async function prepareShort(source, start, duration, transcript, interval
   const whole = speechSafeRange(phrase.start, phrase.duration, clipWords, interval);
   const safe = strongOpening(whole.start, whole.duration, clipWords, range.min);
   const quiet = await silenceSnapped(source, safe.start, safe.duration, interval, clipWords);
-  return { start: quiet.start, duration: quiet.duration, words: clipWords, referenceCues, alignmentFailed };
+  const heard = clipWords.length === 0 && referenceCues.length > 0 ? await S.heardWords(source, referenceCues, phrase.start, phrase.start + phrase.duration) : [];
+  return { start: quiet.start, duration: quiet.duration, words: clipWords, heard, referenceCues, alignmentFailed };
 }
 
 /** Moves a Short's start and end into the nearest pause in its audio, so it never opens or closes on a clipped sound. */

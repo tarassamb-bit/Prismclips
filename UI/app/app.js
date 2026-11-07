@@ -133,7 +133,8 @@ async function boot() {
     renderGate();
     if (session) { refreshUsage(); requestSync(0); }
   });
-  await Promise.all([document.fonts.load('700 66px Sora'), document.fonts.load('500 46px Sora')]);
+  // Captions draw on canvas, which never waits for a font: load the Latin and Cyrillic caption faces first.
+  await Promise.all([document.fonts.load('800 66px "Relio Captions"', 'Aa Яя ĄŁ'), document.fonts.load('500 46px Sora')]).catch(() => {});
   renderGate();
   await route();
   refreshUsage();
@@ -584,7 +585,8 @@ function renderCreate() {
       <button class="button primary" data-create="next" ${problem ? 'disabled' : ''}>Next: Choose captions →</button>${back}`;
   } else if (c.step === 3) {
     html = `${eyebrow(3, 'Choose captions')}<h2 class="big">Choose your captions</h2><p class="muted">Pick how spoken words appear. You can change this for each Short later.</p>
-      <div class="cards">${CAPTION_STYLES.map((s) => `<button class="choice ${s === c.style ? 'on' : ''}" data-style="${s}"><canvas class="style-preview" data-preview="${s}" aria-hidden="true"></canvas><strong>${STYLE_TITLES[s]}</strong><span class="muted small">${STYLE_DETAILS[s]}</span></button>`).join('')}</div>
+      <div class="cards">${CAPTION_STYLES.map((s) => `<button class="choice ${s === c.style ? 'on' : ''}" data-style="${s}"><canvas class="style-preview" data-preview="${s}" aria-hidden="true"></canvas><strong>${STYLE_TITLES[s]}</strong><span class="muted small">${STYLE_DETAILS[s]}</span></button>`).join('')}
+        <button class="choice ${c.style === 'none' ? 'on' : ''}" data-style="none"><span class="style-preview no-captions" aria-hidden="true">Aa</span><strong>No captions</strong><span class="muted small">Shorts start without captions. Turn them on for any Short later.</span></button></div>
       <div class="row"><button class="button primary" data-create="next">Next: Choose content type →</button><button class="link" data-create="prev">← Back</button></div>`;
   } else {
     html = `${eyebrow(4, 'Choose content type')}<h2 class="big">What kind of video is it?</h2><p class="muted">This tunes how Relio picks moments and frames them.</p>
@@ -783,8 +785,14 @@ async function fillAccountData(tab) {
 
 // MARK: Projects and media
 
+// Shorter videos rarely hold a whole story worth a Short, and an empty result reads as a broken app.
+const MIN_VIDEO_SECONDS = 5 * 60;
+
 async function importMedia(project, file) {
   const source = await openSource(file);
+  if (source.duration < MIN_VIDEO_SECONDS) {
+    throw new Error(`This video is ${clock(source.duration)} long. Relio needs at least ${MIN_VIDEO_SECONDS / 60} minutes of video to find Shorts in it.`);
+  }
   const media = {
     id: uuid(), name: file.name, mime: file.type, size: file.size, lastModified: file.lastModified, duration: source.duration,
     width: source.width, height: source.height, hasAudio: source.hasAudio, contentHash: null, thumbnail: null,
@@ -1176,9 +1184,10 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
         id: uuid(), mediaId: media.id, start: r.start, duration: r.duration, caption: '', isMuted: false, captionStart: 0, captionDuration: null,
         fitToFrame: r.fit, captions: r.captions, cropZoom: r.fit ? 1 : 1.08, cropPosition: 0.5, cropKeyframes: r.cropKeyframes,
         cropTrackingVersion: Framing.VERSION, speechWords: r.speechWords, score: r.score, suggestedTitle: r.title, selectionReason: r.reason,
-        suggestedDescription: r.description, captionNotice: r.warning, captionStyle: options.captionStyle, videoType: r.videoType,
+        suggestedDescription: r.description, captionNotice: r.warning, videoType: r.videoType,
+        captionStyle: options.captionStyle === 'none' ? 'auto' : options.captionStyle, captionsHidden: options.captionStyle === 'none',
         // A whole-frame Short (a vertical source, a screen) is never split into two halves.
-        splitScreen: podcast(r) && !r.fit, captionPosition: podcast(r) && !r.fit ? 'middle' : 'bottom', captionSize: 'medium', captionAnimated: false,
+        splitScreen: podcast(r) && !r.fit, captionPosition: podcast(r) && !r.fit ? 'middle' : 'bottom', captionSize: 'medium', captionAnimated: true,
       };
       if (segment.splitScreen) {
         setTask(`Relio AI · finding both speakers · Short ${created.length + 1} of ${results.length}`);
@@ -1465,6 +1474,7 @@ function renderInspector() {
       ${segment.captionNotice ? `<p class="notice small">${esc(segment.captionNotice)}</p>` : ''}
       <section class="insp-section">
         <h3>Captions</h3>
+        <label class="check"><input type="checkbox" data-field="captionsHidden" ${segment.captionsHidden ? '' : 'checked'}> Show captions</label>
         <canvas class="style-preview wide" id="inspector-style" aria-label="Caption style preview"></canvas>
         <label>Style <select data-field="captionStyle">${styleOptions}</select></label>
         <div class="insp-pair">
@@ -1797,6 +1807,7 @@ document.addEventListener('change', async (event) => {
     else if (field === 'fitToFrame') { s.fitToFrame = input.checked; s.cropKeyframes = null; }
     else if (field === 'isMuted') s.isMuted = input.checked;
     else if (field === 'captionAnimated') s.captionAnimated = input.checked;
+    else if (field === 'captionsHidden') s.captionsHidden = !input.checked;
     else s[field] = input.value;
     if (field === 'splitScreen' && input.checked && !s.splitCenters) {
       const source = await sourceFor(state.project.media.find((m) => m.id === s.mediaId));

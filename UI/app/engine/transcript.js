@@ -30,6 +30,27 @@ export function windows(cues, interval, seconds = 90, overlap = 30) {
   return result;
 }
 
+/** Share of the interval covered by speech, 0 to 1. */
+export function speechCoverage(cues, interval) {
+  const length = interval.end - interval.start;
+  if (!(length > 0)) return 0;
+  const spoken = cues.filter(finite).reduce((sum, c) => sum + Math.max(0, Math.min(end(c), interval.end) - Math.max(c.start, interval.start)), 0);
+  return Math.min(1, spoken / length);
+}
+
+/** Overlapping windows on the clock, for videos with little speech: every part is judged, with whatever words fall inside. */
+export function timeWindows(cues, interval, seconds = 90, overlap = 30) {
+  const size = Math.max(1, seconds), step = Math.max(1, size - Math.max(0, overlap));
+  const result = [];
+  for (let start = interval.start; start < interval.end - 0.001; start += step) {
+    const finish = Math.min(interval.end, start + size);
+    const text = cues.filter((c) => finite(c) && c.start >= start && end(c) <= finish && c.text.trim()).map((c) => c.text).join(' ');
+    result.push({ start, end: finish, text });
+    if (finish >= interval.end) break;
+  }
+  return result;
+}
+
 /** Near-equal batches avoid judging a trailing singleton on its own. */
 export function batches(values, size = 4) {
   if (values.length === 0) return [];

@@ -161,7 +161,20 @@ export async function audioChunk(source, start, length, signal) {
   const decoded = await monoSamples(source, start, Math.min(source.duration, start + length)).catch(() => null);
   signal?.throwIfAborted();
   if (!decoded) throw new GeminiError('audioExport');
-  return { mime: 'audio/wav', bytes: wav(resample(decoded.samples, decoded.sampleRate, SPEECH_RATE), SPEECH_RATE) };
+  return { mime: 'audio/wav', bytes: wav(resample(decoded.samples, decoded.sampleRate, SPEECH_RATE), SPEECH_RATE), quiet: isQuiet(decoded.samples, decoded.sampleRate) };
+}
+
+/** True when no 10 ms stretch is louder than about -46 dBFS: nothing a person could be saying. Audio models sometimes
+ *  invent words for silence, so such audio is never sent to them. */
+export function isQuiet(samples, rate) {
+  const frame = Math.max(1, Math.round(rate / 100));
+  for (let first = 0; first < samples.length; first += frame) {
+    let sum = 0;
+    const count = Math.min(frame, samples.length - first);
+    for (let i = 0; i < count; i++) sum += samples[first + i] ** 2;
+    if (Math.sqrt(sum / count) > 0.005) return false;
+  }
+  return true;
 }
 
 /** Averages each stretch of input into one output sample, which also filters what the lower rate can't hold. */
