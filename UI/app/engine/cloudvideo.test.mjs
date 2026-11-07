@@ -1,6 +1,6 @@
 // Offline checks for the browser side of cloud videos (cloudvideo.js) against a stand-in /api/video: run with Node 24.
 import assert from 'node:assert/strict';
-import { uploadVideo, downloadVideo, removeVideos, cloudUsage, CloudVideoError } from '../cloudvideo.js';
+import { uploadVideo, downloadVideo, removeVideos, cloudUsage, CloudVideoError, chunkRanges } from '../cloudvideo.js';
 
 let replies = [], calls = [], putStatus = 200, puts = [];
 globalThis.fetch = async (url, options = {}) => {
@@ -86,3 +86,31 @@ assert.deepEqual(calls, [['delete', { mediaIds: ['a', 'b'] }]]);
 reset([200, { used: 10, cap: 500, videos: [] }]);
 assert.deepEqual(await cloudUsage({ token }), { used: 10, cap: 500, videos: [] });
 console.log('cloud video checks passed');
+
+// Parallel download ranges cover every byte exactly once, last one shorter.
+const ranges = chunkRanges(20, 8);
+assert.deepEqual(ranges, [{ start: 0, end: 7 }, { start: 8, end: 15 }, { start: 16, end: 19 }]);
+assert.equal(ranges.reduce((sum, r) => sum + r.end - r.start + 1, 0), 20);
+
+// A large video comes in ranges; one piece fails once and is retried alone, and the rate reports speed and time left.
+{
+  const size = 20 * 1024 * 1024, bytesOf = new Uint8Array(size).map((_, i) => i % 251);
+  const seen = {}, base = globalThis.fetch;
+  globalThis.fetch = async (url, options = {}) => {
+    if (!String(url).startsWith('https://r2.test/big')) return base(url, options);
+    const [, a, b] = /bytes=(\d+)-(\d+)/.exec(options.headers?.Range ?? '');
+    const start = Number(a), end = Number(b);
+    seen[start] = (seen[start] ?? 0) + 1;
+    if (start === 8 * 1024 * 1024 && seen[start] === 1) return new Response('busy', { status: 503 });
+    return new Response(bytesOf.slice(start, end + 1), { status: 206 });
+  };
+  replies = [[200, { url: 'https://r2.test/big' }]];
+  const rates = [];
+  const blob = await downloadVideo({ token, mediaId: 'big', type: 'video/mp4', size, onProgress: (f, r) => rates.push([f, r]) });
+  assert.equal(blob.size, size);
+  assert.equal(seen[8 * 1024 * 1024], 2, 'the failed piece was retried');
+  assert.equal(seen[0], 1, 'pieces that worked were not fetched again');
+  assert.equal(new Uint8Array(await blob.arrayBuffer())[1000], bytesOf[1000]);
+  assert.ok(rates.at(-1)[0] === 1 && rates.at(-1)[1].bytesPerSecond > 0);
+  globalThis.fetch = base;
+}

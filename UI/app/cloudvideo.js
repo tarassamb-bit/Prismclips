@@ -70,10 +70,52 @@ export async function uploadVideo({ token, media, file, askRoom, onProgress, sig
   return { bytes: done.data.bytes, evicted };
 }
 
-/** The stored video as a Blob, with progress as it arrives. */
-export async function downloadVideo({ token, mediaId, type, onProgress, signal }) {
+const CHUNK = 8 * 1024 * 1024, PARALLEL = 6, PIECE_ATTEMPTS = 3;
+/** A reply that retrying can't fix (not a partial-content answer, or a 403 for an expired link). */
+const isPermanent = (error) => /HTTP (401|403|404)/.test(error.message);
+
+/** Byte ranges that cover `size` bytes, each at most CHUNK long. */
+export function chunkRanges(size, chunk = CHUNK) {
+  const ranges = [];
+  for (let start = 0; start < size; start += chunk) ranges.push({ start, end: Math.min(size, start + chunk) - 1 });
+  return ranges;
+}
+
+/** The stored video as a Blob. Large videos come in parallel byte ranges (several connections at once), which is much faster than
+ * one stream; anything unexpected falls back to a single download. Progress covers the bytes received so far. */
+export async function downloadVideo({ token, mediaId, type, size, onProgress, signal }) {
   const { status, data } = await api('download', { mediaId }, token, signal);
   if (status !== 200) throw new CloudVideoError('failed', data.error || `Cloud storage answered ${status}.`);
+  const ranges = size > CHUNK ? chunkRanges(size) : [];
+  if (ranges.length > 1) {
+    const parts = new Array(ranges.length);
+    const started = Date.now();
+    let received = 0;
+    // One piece at a time, each retried on its own: a dropped connection repeats only that piece, never the whole video.
+    const fetchPart = async (index) => {
+      const { start, end } = ranges[index];
+      for (let attempt = 1; ; attempt++) {
+        try {
+          const response = await fetch(data.url, { headers: { Range: `bytes=${start}-${end}` }, signal });
+          if (response.status !== 206) throw new CloudVideoError('failed', `The video could not be downloaded (HTTP ${response.status}).`);
+          const buffer = await response.arrayBuffer();
+          if (buffer.byteLength !== end - start + 1) throw new CloudVideoError('failed', 'The download was cut short.');
+          parts[index] = buffer;
+          received += buffer.byteLength;
+          const seconds = (Date.now() - started) / 1000 || 1;
+          onProgress?.(received / size, { bytesPerSecond: received / seconds, remainingSeconds: (size - received) / (received / seconds) });
+          return;
+        } catch (error) {
+          if (signal?.aborted || attempt >= PIECE_ATTEMPTS || (error instanceof CloudVideoError && isPermanent(error))) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 800 * attempt));
+        }
+      }
+    };
+    let next = 0;
+    const worker = async () => { while (next < ranges.length) await fetchPart(next++); };
+    await Promise.all(Array.from({ length: Math.min(PARALLEL, ranges.length) }, worker));
+    return new Blob(parts, { type });
+  }
   const response = await fetch(data.url, { signal });
   if (!response.ok) throw new CloudVideoError('failed', `The video could not be downloaded (HTTP ${response.status}).`);
   const total = Number(response.headers.get('Content-Length')) || 0;

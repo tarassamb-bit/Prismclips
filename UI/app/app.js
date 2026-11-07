@@ -786,7 +786,7 @@ async function fillAccountData(tab) {
 // MARK: Projects and media
 
 // Shorter videos rarely hold a whole story worth a Short, and an empty result reads as a broken app.
-const MIN_VIDEO_SECONDS = 5 * 60;
+const MIN_VIDEO_SECONDS = 3 * 60;
 
 async function importMedia(project, file) {
   const source = await openSource(file);
@@ -806,25 +806,32 @@ async function importMedia(project, file) {
 }
 
 async function openProject(id, shortPart = null) {
-  const project = await store.loadProject(id);
-  if (!project) return showHome();
-  const missing = [];
-  for (const media of project.media) if (!(await store.hasFile(media.id))) missing.push(media);
-  if (missing.length) return attachVideo(project, missing[0], shortPart);
-  state.project = project;
-  // An address like .../short-3 opens that Short; otherwise the first one.
-  const wanted = /^short-(\d+)$/.exec(shortPart ?? '')?.[1];
-  state.selectedId = (wanted && project.segments[Number(wanted) - 1] ? project.segments[Number(wanted) - 1] : project.segments[0])?.id ?? null;
-  state.undo = [];
-  for (const media of project.media) await sourceFor(media).catch(() => null);
-  renderEditor();
-  if (state.selectedId) selectShort(state.selectedId);
+  try {
+    const project = await store.loadProject(id);
+    if (!project) return showHome();
+    const missing = [];
+    for (const media of project.media) if (!(await store.hasFile(media.id))) missing.push(media);
+    if (missing.length) return attachVideo(project, missing[0], shortPart);
+    state.project = project;
+    // An address like .../short-3 opens that Short; otherwise the first one.
+    const wanted = /^short-(\d+)$/.exec(shortPart ?? '')?.[1];
+    state.selectedId = (wanted && project.segments[Number(wanted) - 1] ? project.segments[Number(wanted) - 1] : project.segments[0])?.id ?? null;
+    state.undo = [];
+    for (const media of project.media) await sourceFor(media).catch(() => null);
+    renderEditor();
+    if (state.selectedId) selectShort(state.selectedId);
+  } catch (error) {
+    // A click must never end in silence: whatever stopped the project from opening is shown.
+    console.error('Opening the project failed:', error);
+    showError('Couldn’t open this project', error?.message || 'Something went wrong. Try again, or choose the video file again.');
+  }
 }
 
 /** A project made on another device has no video here yet: choose the same file again. It is checked against the fingerprint saved with the project. */
 async function attachVideo(project, media, shortPart, note = '') {
-  await showHome(state.homeView);
+  // The video is in the account's cloud: fetch it straight from the click, without leaving the screen the person is on.
   if (media.cloud?.uploaded && userId()) return fetchFromCloud(project, media, shortPart);
+  await showHome(state.homeView);
   const minutes = Math.round(media.duration / 6) / 10;
   openDialog(`<div class="stack"><h2>Add the video to this device</h2>
     <p>“${esc(project.title)}” was made on another device, and its video isn’t here yet. Choose <strong>${esc(media.name)}</strong> (${minutes} min) again to open it. The video stays on this device only.</p>
@@ -853,19 +860,27 @@ async function attachVideo(project, media, shortPart, note = '') {
   });
 }
 
-let downloadAbort = null;
-/** The project's video is in the account's cloud storage: download it once, then it is kept on this device. */
+let downloadAbort = null, lastDownload = null;
+/** The project's video is in the account's cloud storage: download it once, then it is kept on this device and the project opens by itself. */
 async function fetchFromCloud(project, media, shortPart) {
   const controller = new AbortController();
   downloadAbort = controller;
-  openDialog(`<div class="stack"><h2>Getting the video</h2>
-    <p>Downloading <strong>${esc(media.name)}</strong> from your account. It is kept on this device afterwards.</p>
-    <div class="bar"><div id="dl-bar" style="width:0%"></div></div><p id="dl-text" class="muted small" role="status">Starting…</p>
+  lastDownload = { project, media, shortPart };
+  openDialog(`<div class="stack"><h2>Opening “${esc(project.title)}”</h2>
+    <p>Downloading <strong>${esc(media.name)}</strong> (${bytes(media.size)}) from your account. It opens as soon as it is here, and stays on this device afterwards.</p>
+    <div class="bar"><div id="dl-bar" style="width:0%"></div></div><p id="dl-text" class="muted small" role="status" aria-live="polite">Starting…</p>
     <div class="row end"><button class="button ghost" data-action="close">Cancel</button></div></div>`);
   try {
     const blob = await downloadVideo({
-      token: accessToken, mediaId: media.cloud.key ?? media.id, type: media.mime || 'video/mp4', signal: controller.signal,
-      onProgress: (fraction) => { const bar = $('#dl-bar'); if (bar) { bar.style.width = `${Math.round(fraction * 100)}%`; $('#dl-text').textContent = `${Math.round(fraction * 100)}% of ${bytes(media.size)}`; } },
+      token: accessToken, mediaId: media.cloud.key ?? media.id, type: media.mime || 'video/mp4', size: media.size, signal: controller.signal,
+      onProgress: (fraction, rate) => {
+        const bar = $('#dl-bar');
+        if (!bar) return;
+        bar.style.width = `${Math.round(fraction * 100)}%`;
+        const speed = rate?.bytesPerSecond ? ` · ${bytes(rate.bytesPerSecond)}/s` : '';
+        const left = rate?.remainingSeconds && Number.isFinite(rate.remainingSeconds) ? ` · about ${Math.max(1, Math.round(rate.remainingSeconds))} s left` : '';
+        $('#dl-text').textContent = `${Math.round(fraction * 100)}% of ${bytes(media.size)}${speed}${left}`;
+      },
     });
     const file = new File([blob], media.name, { type: blob.type, lastModified: media.lastModified });
     const source = await openSource(file);
@@ -877,8 +892,11 @@ async function fetchFromCloud(project, media, shortPart) {
   } catch (error) {
     if (controller.signal.aborted) return;
     downloadAbort = null;
-    // The cloud copy can't be had right now: choosing the file works as before.
-    attachVideo(project, { ...media, cloud: null }, shortPart, `It couldn’t be downloaded (${error.message}). Choose the file instead.`);
+    // Usually a dropped connection: offer another try first, and the file on this device as the fallback.
+    openDialog(`<div class="stack"><h2>The video didn’t download</h2>
+      <p>${esc(error.message || 'The connection stopped.')} Check your connection and try again.</p>
+      <div class="row end"><button class="button ghost" data-action="choose-instead">Choose the file instead</button>
+        <button class="button primary" data-action="retry-download">Try again</button></div></div>`);
   }
 }
 
@@ -1750,6 +1768,8 @@ document.addEventListener('click', async (event) => {
   else if (action === 'cancel') cancelTask();
   else if (action === 'home') showHome();
   else if (action === 'open') openProject(target.dataset.id);
+  else if (action === 'retry-download' && lastDownload) fetchFromCloud(lastDownload.project, lastDownload.media, lastDownload.shortPart);
+  else if (action === 'choose-instead' && lastDownload) attachVideo(lastDownload.project, { ...lastDownload.media, cloud: null }, lastDownload.shortPart);
   else if (action === 'project-menu') projectMenu(target.dataset.id, target);
   else if (action === 'folder-menu') folderMenu(target.dataset.id, target);
   else if (action === 'open-folder') showHome({ folderId: target.dataset.id });
