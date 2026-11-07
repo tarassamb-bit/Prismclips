@@ -152,6 +152,8 @@ async function checkVideoLimit(request: Request): Promise<{ refused: Response | 
 const MIN_ANSWER_USD = 0.002;
 // Mimo gets this long; the fallback gets what is left of the budget.
 const MODEL_TIMEOUT_MS = 75_000;
+// Audio tries are short: a model that hasn't answered audio in 30 s rarely does later, and Gemini gets the time.
+const AUDIO_TRY_MS = 30_000;
 // All models together must answer before Supabase stops the function at 150 s (the sign-in and usage checks come first).
 const REQUEST_BUDGET_MS = 135_000;
 // A fallback model gets tried only with at least this much of the budget left.
@@ -235,7 +237,10 @@ Deno.serve(async (request) => {
   const { refused, session } = await checkVideoLimit(request);
   if (refused || !session) return refused ?? fail(401, "Sign in to your Relio account to continue.");
 
-  const models = [Deno.env.get("OPENROUTER_MODEL") || DEFAULT_MODEL, Deno.env.get("OPENROUTER_FALLBACK_MODEL") || DEFAULT_FALLBACK];
+  const chosen = Deno.env.get("OPENROUTER_MODEL") || DEFAULT_MODEL;
+  const fallback = Deno.env.get("OPENROUTER_FALLBACK_MODEL") || DEFAULT_FALLBACK;
+  // Audio: MiMo, then Gemini, each with a short try. Text and images: MiMo, then Gemini.
+  const models = [chosen, fallback];
   let status = 503, reply: any = null;
   const failures: string[] = [];
   const started = Date.now();
@@ -248,7 +253,8 @@ Deno.serve(async (request) => {
       break;
     }
     // The last model gets all the time that is left.
-    const limit = attempt === models.length - 1 ? left : Math.min(MODEL_TIMEOUT_MS, left);
+    const perTry = converted.kind === "audio" ? AUDIO_TRY_MS : MODEL_TIMEOUT_MS;
+    const limit = attempt === models.length - 1 ? left : Math.min(perTry, left);
     const tried = Date.now();
     const failure = (error_type: string, extra: Record<string, unknown> = {}) =>
       logFailure(session, { model, kind: converted.kind, attempt: attempt + 1, error_type, ms: Date.now() - tried, ...extra });

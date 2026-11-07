@@ -20,6 +20,8 @@ const MIN_ANSWER_USD = 0.002;
 // Mimo answers text and images in 10–30 s; past this it gets no second try (a stalled request is rarely answered later),
 // and Gemini gets what is left.
 const MODEL_TIMEOUT_MS = 60_000;
+// Audio tries are short: a model that hasn't answered audio in 30 s rarely does later, and Gemini gets the time.
+const AUDIO_TRY_MS = 30_000;
 const REQUEST_BUDGET_MS = 280_000;
 const MIN_MODEL_TIME_MS = 20_000;
 
@@ -185,8 +187,9 @@ async function handler(req, res) {
   if (!user) return;
 
   const chosen = process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
-  // The chosen model twice: a stalled request usually answers on a second try.
-  const models = [chosen, process.env.OPENROUTER_FALLBACK_MODEL || DEFAULT_FALLBACK];
+  const fallback = process.env.OPENROUTER_FALLBACK_MODEL || DEFAULT_FALLBACK;
+  // Audio: MiMo, then Gemini, each with a short try. Text and images: MiMo, then Gemini.
+  const models = [chosen, fallback];
   let status = 503, reply = null;
   const failures = [];
   const started = Date.now();
@@ -194,7 +197,8 @@ async function handler(req, res) {
     const left = REQUEST_BUDGET_MS - (Date.now() - started);
     if (left < MIN_MODEL_TIME_MS) { status = 504; failures.push(`no time left to try ${model}`); break; }
     // The last model gets all the time that is left.
-    const limit = attempt === models.length - 1 ? left : Math.min(MODEL_TIMEOUT_MS, left);
+    const perTry = converted.kind === 'audio' ? AUDIO_TRY_MS : MODEL_TIMEOUT_MS;
+    const limit = attempt === models.length - 1 ? left : Math.min(perTry, left);
     const tried = Date.now();
     const failure = (error_type, extra = {}) => logFailure({ user_id: user, model, kind: converted.kind, attempt: attempt + 1, error_type, ms: Date.now() - tried, ...extra });
     // Every attempt, served or not, is logged with its model, time and provider when OpenRouter named one (never on a timeout).
