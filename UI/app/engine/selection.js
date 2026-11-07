@@ -506,7 +506,7 @@ export async function heardWords(source, cues, from, to) {
   const levels = await audioLevels(source, from, to).catch(() => null);
   if (!levels) return [];
   const runs = T.speechRuns(levels, from);
-  return runs.length ? T.alignToSpeech(cues.flatMap(estimatedWords), runs) : [];
+  return runs.length ? T.spreadOverSpeech(cues.flatMap(estimatedWords), runs) : [];
 }
 
 export function captionCues(words, interval = null) {

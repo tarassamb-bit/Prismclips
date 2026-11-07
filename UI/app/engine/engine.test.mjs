@@ -277,3 +277,12 @@ assert.deepEqual(Shorts.dropRepeats([{ text: 'Hello there.', start: 0 }, { text:
 
 // Lines with an impossible speaking rate are dropped; a normal line stays; too many removed means likely music.
 assert.deepEqual(Shorts.dropImpossibleRate([{ text: 'one two three', start: 0, duration: 2 }, { text: 'a b c d e f g h i j k l m n o p', start: 3, duration: 1 }]).map((c) => c.start), [0]);
+
+// Words spread over heard speech: pinned to the first and last speech, skipping the pause, whatever the AI timestamps said.
+{
+  const runs = [{ start: 1, end: 3 }, { start: 5, end: 7 }];
+  const drifting = ['aa', 'bb', 'cc', 'dd'].map((text, i) => ({ text, start: 10 + i * 9, duration: 1 }));
+  const spread = T.spreadOverSpeech(drifting, runs);
+  assert.deepEqual(spread.map((w) => w.start), [1, 2, 5, 6]);
+  assert.ok(Math.abs(spread.at(-1).start + spread.at(-1).duration - 7) < 1e-9);
+}

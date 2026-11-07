@@ -224,6 +224,31 @@ export function speechRuns(levels, from) {
   return runs.filter((r) => r.end - r.start >= 0.1);
 }
 
+/** Words spread over the speech heard, in proportion to their length, from the first speech to the last. Ignores the AI's
+ *  timestamps, which can run slow across a long chunk and make captions fall further behind as a Short goes on; here any
+ *  error stays local because both ends are pinned to real speech. */
+export function spreadOverSpeech(words, runs) {
+  if (words.length === 0 || runs.length === 0) return words;
+  const weight = words.map((w) => w.text.replace(/[^\p{L}\p{N}]/gu, '').length + 1);
+  const total = weight.reduce((a, b) => a + b, 0);
+  const voiced = runs.reduce((sum, r) => sum + r.end - r.start, 0);
+  // Voiced seconds from the start of speech to the moment that many seconds into the speech runs.
+  const at = (offset) => {
+    for (const run of runs) {
+      const length = run.end - run.start;
+      if (offset < length) return run.start + offset;
+      offset -= length;
+    }
+    return runs.at(-1).end;
+  };
+  let done = 0;
+  return words.map((word, i) => {
+    const start = at(done / total * voiced);
+    done += weight[i];
+    return { ...word, start, duration: Math.max(0.05, at(done / total * voiced) - start) };
+  });
+}
+
 /** The AI's word timings are guesses. Keeps its words and order, and moves them onto the speech actually heard: consecutive
  *  words are grouped onto each stretch of speech so group lengths fit the stretch (at the clip's own speaking rate) and stay
  *  near where the AI heard them; inside a stretch, words share its time by length. Unchanged when speech can't be found. */
