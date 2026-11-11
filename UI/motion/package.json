@@ -1,0 +1,22 @@
+{
+  "name": "relio-motion",
+  "version": "1.0.0",
+  "description": "Local preview runtime for Relio Motion",
+  "scripts": {
+    "build": "node build.cjs"
+  },
+  "type": "commonjs",
+  "dependencies": {
+    "@babel/standalone": "7.29.2",
+    "@hyperframes/core": "0.9.23",
+    "@hyperframes/player": "0.9.23",
+    "@remotion/player": "4.0.541",
+    "esbuild": "0.25.12",
+    "gsap": "3.14.2",
+    "html-to-image": "1.11.13",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "remotion": "4.0.541"
+  },
+  "private": true
+}

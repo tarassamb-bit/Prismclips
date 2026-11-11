@@ -1,0 +1,4 @@
+const test=require('node:test'),assert=require('node:assert/strict'),handler=require('./motion-reference');
+async function call(style,host='localhost:4173'){const req={method:'POST',headers:{host},async *[Symbol.asyncIterator](){yield JSON.stringify({style})}},res={setHeader(){},end(value){this.body=value}};await handler(req,res);return {status:res.statusCode,data:JSON.parse(res.body)}}
+test('provides the original reference and its rendering helpers for each supported style',async()=>{for(const style of ['flat-vector-science','watercolor-wash','shadow-puppet-theatre']){const r=await call(style);assert.equal(r.status,200);assert.match(r.data.helpers,/window\.registerStyle/);assert.match(r.data.reference,/registerStyle\(/);assert.match(r.data.reference,/draw\(ctx/);}});
+test('rejects unknown styles and non-local requests',async()=>{assert.equal((await call('../../.env.local')).status,400);assert.equal((await call('flat-vector-science','example.com')).status,404)});

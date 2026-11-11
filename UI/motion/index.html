@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Motion Studio · Relio Clips</title>
+  <link rel="icon" href="/favicon.ico">
+  <link rel="stylesheet" href="motion.css">
+</head>
+<body>
+  <div class="workspace">
+    <aside class="sidebar">
+      <div class="brand-row"><img src="/icon.png" width="30" height="30" alt=""><span class="brand-name">Relio Clips</span>
+        <button class="collapse-button" data-action="collapse" aria-label="Collapse sidebar" aria-expanded="true" title="Collapse sidebar"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg></button></div>
+      <p class="tagline">Your video editor · Cloud AI</p>
+      <nav class="side-nav" aria-label="Main">
+        <a class="side-button" href="/app/" title="Home">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 12 3l9 8v10h-6v-6H9v6H3Z"/></svg><span class="label">Home</span></a>
+        <a class="side-button prominent" href="/app/create/" title="Create Shorts">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8" class="cut"/></svg><span class="label">Create Shorts</span></a>
+        <a class="side-button selected motion-link" aria-current="page" href="/motion/" title="Motion Studio">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="4"/><path d="m10 8 6 4-6 4Z"/></svg><span class="label">Motion Studio</span></a>
+      </nav>
+      <div class="side-bottom">
+        <div id="upload-status" class="upload-status" hidden><span id="upload-text" class="small muted"></span><div class="meter thin"><div id="upload-bar"></div></div></div>
+        <a class="side-button" href="/app/settings/" title="Settings">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.2 2h-.4a2 2 0 0 0-2 2v.2a2 2 0 0 1-1 1.7l-.4.3a2 2 0 0 1-2 0l-.2-.1a2 2 0 0 0-2.7.7l-.2.4a2 2 0 0 0 .7 2.7l.2.1a2 2 0 0 1 1 1.7v.5a2 2 0 0 1-1 1.7l-.2.1a2 2 0 0 0-.7 2.7l.2.4a2 2 0 0 0 2.7.7l.2-.1a2 2 0 0 1 2 0l.4.3a2 2 0 0 1 1 1.7v.2a2 2 0 0 0 2 2h.4a2 2 0 0 0 2-2v-.2a2 2 0 0 1 1-1.7l.4-.3a2 2 0 0 1 2 0l.2.1a2 2 0 0 0 2.7-.7l.2-.4a2 2 0 0 0-.7-2.7l-.2-.1a2 2 0 0 1-1-1.7v-.5a2 2 0 0 1 1-1.7l.2-.1a2 2 0 0 0 .7-2.7l-.2-.4a2 2 0 0 0-2.7-.7l-.2.1a2 2 0 0 1-2 0l-.4-.3a2 2 0 0 1-1-1.7V4a2 2 0 0 0-2-2Z"/><circle cx="12" cy="12" r="3"/></svg><span class="label">Settings</span></a>
+      </div>
+    </aside>
+    <main class="main">
+      <header class="topbar"><h1>Motion Studio</h1><button id="export" class="export" disabled>↓ &nbsp; Export MP4</button></header>
+      <div class="editor" id="editor">
+        <section class="chat" aria-label="Motion conversation">
+          <div class="panel-heading"><div><h2>Chat</h2><p>Describe your video and make changes as you go.</p></div></div>
+          <div class="conversation" id="conversation" aria-live="polite"><div class="welcome"><img class="avatar" src="/icon.png" alt=""><div><strong>What would you like to make?</strong><p>Describe your idea, including any text, colors, or style you want to see.</p><div class="suggestions"><button type="button" data-suggestion="Create a 10-second launch teaser for Relio Clips. Use the exact on-screen copy “Long video. Short-form magic.” and end with “Create your first short”. Use refined kinetic typography and Relio’s blue, coral and warm yellow, with a confident, modern editorial style.">✳ &nbsp; Launch teaser</button><button type="button" data-suggestion="Create an 8-second opening title for a video about creative ideas. Show the words “MAKE IT MOVE” and “Ideas in motion”. Use bold but restrained typography, a dark background, blue and coral accents, and smooth, purposeful transitions.">↗ &nbsp; Animated titles</button></div></div></div></div>
+          <div class="composer"><label class="sr-only" for="prompt">Describe your video</label><textarea id="prompt" rows="1" maxlength="2000" placeholder="Describe your video..."></textarea><div class="composer-bottom"><div class="composer-options"><label class="engine-label" for="style"><span class="sr-only">Video style</span><select id="style" aria-label="Video style"><option value="">Style</option><option value="flat-vector-science">Flat-Vector Science</option><option value="watercolor-wash">Watercolor Wash</option><option value="shadow-puppet-theatre">Shadow Puppet Theatre</option></select></label><input id="engine" type="hidden" value="canvas"></div><button id="stop" class="send-button stop-button" type="button" aria-label="Stop generation" title="Stop generation" hidden><span aria-hidden="true"></span></button><button id="make" class="send-button" type="button" aria-label="Send message" title="Send message" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button></div></div>
+        </section>
+        <div id="divider" class="divider" role="separator" tabindex="0" aria-label="Resize conversation and preview" aria-orientation="vertical" aria-valuemin="25" aria-valuemax="65" aria-valuenow="38"><span></span></div>
+        <section class="preview-panel" aria-label="Video preview">
+          <div class="preview-header"><h2>Preview</h2><span class="format">9:16 &nbsp;·&nbsp; 1080 × 1920</span></div>
+          <div class="preview-area"><div class="frame"><div id="empty" class="empty"><div class="empty-art"><b>▷</b></div><strong>Your preview will appear here</strong><p>Describe a video to get started.</p></div><iframe id="player" title="Video preview" sandbox="allow-scripts"></iframe></div></div>
+          <div id="playback" class="playback" hidden>
+            <button id="play-toggle" class="play-toggle" type="button" aria-label="Pause preview" title="Pause preview">❚❚</button>
+            <span id="play-time" class="play-time">0:00</span>
+            <input id="play-seek" type="range" min="0" max="1000" value="0" step="1" aria-label="Seek video">
+            <span id="play-duration" class="play-time">0:00</span>
+          </div>
+          <p id="status" class="sr-only" role="status" aria-live="polite"></p>
+          <div class="extras"><video id="result" controls playsinline hidden></video><a id="download" class="primary download" hidden download="relio-motion.mp4">Download MP4 ↓</a></div>
+          <textarea id="code" hidden></textarea><button id="run" hidden>Run edited code</button>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script type="module" src="motion.js"></script>
+</body>
+</html>
