@@ -857,6 +857,7 @@ async function openProject(id, shortPart = null) {
     const wanted = /^short-(\d+)$/.exec(shortPart ?? '')?.[1];
     state.selectedId = (wanted && project.segments[Number(wanted) - 1] ? project.segments[Number(wanted) - 1] : project.segments[0])?.id ?? null;
     state.undo = [];
+    state.timelineZoom = null;
     for (const media of project.media) await sourceFor(media).catch(() => null);
     renderEditor();
     if (state.selectedId) selectShort(state.selectedId);
@@ -1593,11 +1594,16 @@ function timelineHtml(segment) {
   const pct = (value) => `${(value / total * 100).toFixed(3)}%`;
   const others = state.project.segments.filter((s) => s.mediaId === media.id && s.id !== segment.id)
     .map((s) => `<div class="tl-other" style="left:${pct(s.start)};width:${pct(s.duration)}"></div>`).join('');
+  // The track spans the whole video but is zoomed to the Short by default: about three times its length, at least a minute.
+  // Over a whole long video a 30 s Short was a few pixels wide, a dot. The slider zooms out to the whole video.
+  const maxZoom = Math.max(1, total / Math.min(total, Math.max(60, segment.duration * 3)));
+  const zoom = clamp(state.timelineZoom ?? maxZoom, 1, maxZoom);
   return `<div class="timeline" data-total="${total}">
-      <div class="tl-track" id="tl-track">${others}
+      <div class="tl-scroll" id="tl-scroll"><div class="tl-track" id="tl-track" style="width:${(zoom * 100).toFixed(2)}%">${others}
         <div class="tl-clip" id="tl-clip" style="left:${pct(segment.start)};width:${pct(segment.duration)}"><span class="tl-handle l" data-edge="l"></span><span class="tl-handle r" data-edge="r"></span></div>
-      </div>
+      </div></div>
       <div class="row between muted small mono"><span>0:00</span><span id="tl-label">${clock(segment.start)}–${clock(segment.start + segment.duration)}</span><span>${clock(total)}</span></div>
+      ${maxZoom > 1.01 ? `<label class="tl-zoom muted small">Whole video <input id="tl-zoom" type="range" min="1" max="${maxZoom.toFixed(3)}" step="any" value="${zoom.toFixed(3)}" aria-label="Timeline zoom"> Around the Short</label>` : ''}
       <p class="muted small">Drag the block to move the Short, or its ends to trim it.</p>
     </div>`;
 }
@@ -1606,6 +1612,15 @@ function wireTimeline(segment) {
   const track = $('#tl-track'), clip = $('#tl-clip');
   if (!track || !clip) return;
   const total = Number($('.timeline').dataset.total);
+  const scroller = $('#tl-scroll');
+  // Keeps the Short in the middle of what is visible.
+  const centre = () => { scroller.scrollLeft = (segment.start + segment.duration / 2) / total * track.scrollWidth - scroller.clientWidth / 2; };
+  centre();
+  $('#tl-zoom')?.addEventListener('input', (event) => {
+    state.timelineZoom = Number(event.target.value);
+    track.style.width = `${state.timelineZoom * 100}%`;
+    centre();
+  });
   clip.addEventListener('pointerdown', (event) => {
     event.preventDefault();
     clip.setPointerCapture(event.pointerId);

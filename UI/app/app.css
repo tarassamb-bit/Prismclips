@@ -76,7 +76,11 @@ details.insp-section:not([open]) { gap: 0; }
 .bin, .inspector { background: var(--surface1); border: 1px solid var(--border); border-radius: 14px; padding: 14px; max-height: calc(100vh - 150px); overflow: auto; }
 .stage { display: grid; justify-items: center; gap: 10px; min-height: 60vh; align-content: start; }
 .timeline { width: min(560px, 100%); display: grid; gap: 4px; margin-top: 6px; }
-.tl-track { position: relative; height: 30px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; touch-action: none; }
+/* The track is wider than the window when zoomed in; it scrolls sideways. */
+.tl-scroll { overflow-x: auto; overflow-y: hidden; border-radius: 8px; }
+.tl-zoom { display: flex; align-items: center; gap: 8px; }
+.tl-zoom input { flex: 1; padding: 0; }
+.tl-track { position: relative; height: 30px; min-width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; touch-action: none; }
 .tl-other { position: absolute; top: 4px; bottom: 4px; background: var(--border); border-radius: 4px; }
 .tl-clip { position: absolute; top: 0; bottom: 0; min-width: 12px; background: color-mix(in srgb, var(--sky) 45%, transparent); border: 1px solid var(--sky); border-radius: 6px; cursor: grab; }
 .tl-handle { position: absolute; top: 0; bottom: 0; width: 10px; cursor: ew-resize; background: var(--sky); }
@@ -87,7 +91,7 @@ details.insp-section:not([open]) { gap: 0; }
 .transport input { flex: 1; padding: 0; }
 .transport .button { padding: 4px 12px; }
 .hidden-video { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-.player { height: min(80vh, 900px); width: auto; max-width: 100%; aspect-ratio: 9 / 16; background: #000; border-radius: 14px; }
+.player { height: min(calc(100dvh - 330px), 900px); min-height: 320px; width: auto; max-width: 100%; aspect-ratio: 9 / 16; background: #000; border-radius: 14px; }
 .inspector textarea { width: 100%; resize: vertical; }
 .inspector .stack > label, .inspector fieldset label { min-width: 0; }
 .progress { position: fixed; right: 20px; bottom: 20px; z-index: 40; }

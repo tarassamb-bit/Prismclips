@@ -23,14 +23,17 @@ function database() {
   return dbPromise;
 }
 
+/** Safari can fail a transaction with no error object at all; callers always get an Error with a message. */
+const storageError = (error) => (error instanceof Error || error instanceof DOMException ? error : new Error('This browser couldn’t save to its storage.'));
+
 async function run(store, mode, action) {
   const db = await database();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(store, mode);
     const request = action(transaction.objectStore(store));
     transaction.oncomplete = () => resolve(request?.result);
-    transaction.onerror = () => reject(transaction.error);
-    transaction.onabort = () => reject(transaction.error ?? new Error('Storage was interrupted.'));
+    transaction.onerror = () => reject(storageError(transaction.error ?? request?.error));
+    transaction.onabort = () => reject(storageError(transaction.error));
   });
 }
 
@@ -46,8 +49,8 @@ async function update(store, id, change) {
       if (next) objects.put(next);
     };
     transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
-    transaction.onabort = () => reject(transaction.error ?? new Error('Storage was interrupted.'));
+    transaction.onerror = () => reject(storageError(transaction.error ?? read.error));
+    transaction.onabort = () => reject(storageError(transaction.error));
   });
 }
 
@@ -84,6 +87,7 @@ export const markSynced = (store, id, syncedAt, sentChangedAt) => update(store, 
 export async function deleteProject(project) {
   await run('projects', 'readwrite', (s) => s.delete(project.id));
   for (const media of project.media) {
+    memoryFiles.delete(media.id);
     await run('files', 'readwrite', (s) => s.delete(media.id));
     // A video kept in the account's cloud storage is removed there too, as soon as the cloud can be reached.
     if (media.cloud?.uploaded) forget('videos', `${project.owner}/${media.cloud.key ?? media.id}`);
@@ -95,7 +99,7 @@ export async function deleteProject(project) {
 export async function deleteOwner(owner) {
   for (const project of (await run('projects', 'readonly', (s) => s.getAll())).filter((p) => p.owner === owner)) {
     await run('projects', 'readwrite', (s) => s.delete(project.id));
-    for (const media of project.media) await run('files', 'readwrite', (s) => s.delete(media.id));
+    for (const media of project.media) { memoryFiles.delete(media.id); await run('files', 'readwrite', (s) => s.delete(media.id)); }
   }
   for (const folder of (await run('folders', 'readonly', (s) => s.getAll())).filter((f) => f.owner === owner)) {
     await run('folders', 'readwrite', (s) => s.delete(folder.id));
@@ -142,6 +146,19 @@ export function deletionReached(kind, ids) {
 
 // MARK: Video files (device only)
 
-export const saveFile = (id, file) => run('files', 'readwrite', (s) => s.put(file, id));
-export const loadFile = (id) => run('files', 'readonly', (s) => s.get(id));
-export const hasFile = async (id) => (await run('files', 'readonly', (s) => s.count(id))) > 0;
+// Safari Private Browsing refuses to store any Blob in IndexedDB ("Error preparing Blob/File data to be stored in object store"),
+// so a video chosen or downloaded there could never be kept and the project never opened. Such a video is held in memory for
+// this tab instead: the project opens and works until the tab closes, which is all Private Browsing keeps anyway.
+const memoryFiles = new Map();
+export async function saveFile(id, file) {
+  try {
+    await run('files', 'readwrite', (s) => s.put(file, id));
+    memoryFiles.delete(id);
+  } catch (error) {
+    if (!/Blob\/File data/i.test(error?.message ?? '')) throw error;
+    console.warn('This browser won’t store videos (Safari Private Browsing?); keeping it for this tab only.', error);
+    memoryFiles.set(id, file);
+  }
+}
+export const loadFile = async (id) => memoryFiles.get(id) ?? run('files', 'readonly', (s) => s.get(id));
+export const hasFile = async (id) => memoryFiles.has(id) || (await run('files', 'readonly', (s) => s.count(id))) > 0;
