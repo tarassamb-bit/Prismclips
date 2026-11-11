@@ -68,7 +68,8 @@ function toOpenRouter(body: GeminiRequest) {
 
   // Reasoning models (Mimo) think for minutes on a whole transcript by default, past Supabase's 150 s limit per
   // function; low effort answers in seconds. Models without reasoning ignore it.
-  const request = { messages, temperature: body.generationConfig?.temperature ?? 0.2, reasoning: { effort: "low", exclude: true }, provider: PROVIDER };
+  // Same cap as UI/api/gemini.js: well above the longest real answer, stops a runaway answer from billing without limit.
+  const request = { messages, temperature: body.generationConfig?.temperature ?? 0.2, max_tokens: 12_000, reasoning: { effort: "low", exclude: true }, provider: PROVIDER };
   return { kind: hasAudio ? "audio" : hasImage ? "image" : "text", wantsJSON: Boolean(schema), request };
 }
 
@@ -148,8 +149,8 @@ async function checkVideoLimit(request: Request): Promise<{ refused: Response | 
 }
 
 // A model reporting a cost of 0 would be free to use without limit. Every answer counts at least this much, so the spend
-// cap bounds use: the default cap of 60 minutes × $0.05 allows about 1,500 answers.
-const MIN_ANSWER_USD = 0.002;
+// cap bounds use: the default cap of 60 minutes × $0.05 allows about 6,000 answers.
+const MIN_ANSWER_USD = 0.0005;
 // Mimo gets this long; the fallback gets what is left of the budget.
 const MODEL_TIMEOUT_MS = 75_000;
 // Audio tries are short: a model that hasn't answered audio in 30 s rarely does later, and Gemini gets the time.

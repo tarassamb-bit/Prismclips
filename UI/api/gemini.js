@@ -15,7 +15,8 @@ const PROVIDER = { zdr: true, data_collection: 'deny', sort: 'latency' };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const LIMIT_MESSAGE = "You've reached your beta usage limit. Ask for a promo code to get more, then enter it in Settings › Usage.";
 // A model reporting a cost of 0 would be free to use without limit; every answer counts at least this much.
-const MIN_ANSWER_USD = 0.002;
+const MIN_ANSWER_USD = 0.0005;
+const MAX_OUTPUT_TOKENS = 12_000;
 // All models together must answer before Vercel stops the function at 300 s (maxDuration in vercel.json).
 // Mimo answers text and images in 10–30 s; past this it gets no second try (a stalled request is rarely answered later),
 // and Gemini gets what is left.
@@ -71,7 +72,8 @@ function toOpenRouter(body) {
     });
   }
   messages.push({ role: 'user', content });
-  const request = { messages, temperature: body.generationConfig?.temperature ?? 0.2, reasoning: { effort: 'low', exclude: true }, provider: PROVIDER };
+  // A cap well above the longest real answer (about 5,400 tokens) stops a runaway answer from billing without limit.
+  const request = { messages, temperature: body.generationConfig?.temperature ?? 0.2, max_tokens: MAX_OUTPUT_TOKENS, reasoning: { effort: 'low', exclude: true }, provider: PROVIDER };
   return { kind: hasAudio ? 'audio' : hasImage ? 'image' : 'text', wantsJSON: Boolean(schema), request };
 }
 
@@ -190,8 +192,11 @@ async function handler(req, res) {
 
   const chosen = process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
   const fallback = process.env.OPENROUTER_FALLBACK_MODEL || DEFAULT_FALLBACK;
-  // Audio: MiMo, then Gemini, each with a short try. Text and images: MiMo, then Gemini.
-  const models = [chosen, fallback];
+  // Audio: MiMo on its pinned provider, MiMo on any other provider, then Gemini, each with a short try. A MiMo audio
+  // timeout is usually one stalled provider, and a second MiMo try costs about a sixth of a Gemini answer.
+  // Text and images: MiMo, then Gemini.
+  const models = converted.kind === 'audio' ? [chosen, chosen, fallback] : [chosen, fallback];
+  const audioProvider = process.env.OPENROUTER_AUDIO_PROVIDER || AUDIO_PROVIDER;
   let status = 503, reply = null;
   const failures = [];
   const started = Date.now();
@@ -203,7 +208,9 @@ async function handler(req, res) {
     const limit = attempt === models.length - 1 ? left : Math.min(perTry, left);
     const tried = Date.now();
     // Audio on MiMo goes to one provider only, so every attempt (a timeout too) names it.
-    const pinned = converted.kind === 'audio' && model === chosen ? (process.env.OPENROUTER_AUDIO_PROVIDER || AUDIO_PROVIDER) : null;
+    const pinned = converted.kind === 'audio' && attempt === 0 ? audioProvider : null;
+    // The second MiMo audio try skips the pinned provider that just failed.
+    const avoided = converted.kind === 'audio' && attempt === 1 ? audioProvider : null;
     const failure = (error_type, extra = {}) => logFailure({ user_id: user, model, kind: converted.kind, attempt: attempt + 1, error_type, ms: Date.now() - tried, ...extra });
     // Every attempt, served or not, is logged with its model, time and provider when OpenRouter named one (never on a timeout).
     const attemptLog = (outcome, provider = null) => console.log(JSON.stringify({ at: new Date().toISOString(), kind: converted.kind, model, attempt: attempt + 1, outcome, ms: Date.now() - tried, provider, limit_ms: limit }));
@@ -214,7 +221,8 @@ async function handler(req, res) {
       upstream = await fetch(OPENROUTER_URL, {
         method: 'POST',
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://relioclips.com', 'X-Title': 'Relio Clips' },
-        body: JSON.stringify({ model, ...converted.request, ...(pinned ? { provider: { ...converted.request.provider, order: [pinned], allow_fallbacks: false } } : {}) }),
+        body: JSON.stringify({ model, ...converted.request, ...(pinned ? { provider: { ...converted.request.provider, order: [pinned], allow_fallbacks: false } } : {}),
+          ...(avoided ? { provider: { ...converted.request.provider, ignore: [avoided] } } : {}) }),
         signal,
       });
       answer = await upstream.text().then(parseOpenRouter).catch((error) => { if (signal.aborted) throw error; return {}; });

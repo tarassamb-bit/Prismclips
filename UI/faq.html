@@ -25,7 +25,7 @@
   <link rel="stylesheet" href="styles.css">
   <script src="site.js" defer></script>
   <!-- Vercel Web Analytics and Speed Insights: cookieless page views and load times. -->
-  <script src="/analytics.js"></script>
+  <script src="/analytics.js" defer></script>
   <script defer src="/_vercel/insights/script.js"></script>
   <script defer src="/_vercel/speed-insights/script.js"></script>
 </head>
@@ -48,13 +48,13 @@
   </defs></svg>
   <header class="site-header">
     <div class="container header-inner">
-      <a class="brand" href="index.html" aria-label="Relio Clips home"><img src="icon.png" width="33" height="33" alt=""><span>Relio Clips<span class="brand-dot">.</span></span></a>
+      <a class="brand" href="/" aria-label="Relio Clips home"><img src="icon.png" width="33" height="33" alt=""><span>Relio Clips<span class="brand-dot">.</span></span></a>
       <nav id="main-nav" aria-label="Main navigation">
-        <a href="features.html">Features</a>
-        <a href="how-it-works.html">How it works</a>
+        <a href="/features">Features</a>
+        <a href="/how-it-works">How it works</a>
         
-        <a href="faq.html" aria-current="page">FAQs</a>
-        <a href="changelog.html">Changelog</a>
+        <a href="/faq" aria-current="page">FAQs</a>
+        <a href="/changelog">Changelog</a>
       </nav>
       <div class="header-actions">
         <a class="nav-signin" href="/login">Sign in</a>
@@ -68,18 +68,18 @@
     <section class="page-hero container"><p class="eyebrow">A FEW GOOD QUESTIONS</p><h1>A little clarity.<br><span>Then, create.</span></h1><p>Everything to know before your first Short.</p></section>
     <section class="container faq-page-content" aria-label="Frequently asked questions"><div class="faq-list">
       <details><summary>How much does Relio cost?<svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></summary><p>Nothing during the beta. Every account gets 60 minutes of video to make Shorts from and 1 GB of cloud space for videos; Settings › Usage in the app shows what you have left. <a href="app/">Open Relio</a>.</p></details>
-      <details><summary>What happens to my footage?<svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></summary><p>In the desktop apps, your source files, projects, preview, and rendering stay on your computer. The web app saves your projects and videos to your account (up to 1 GB of video), so they open on any device you sign in on; deleting a project or your account deletes them for good. See <a href="privacy.html">Privacy</a>. Audio chunks, transcripts, sampled frames, and editor chat messages are sent for AI processing. On Mac, they go through Relio’s server and OpenRouter to an AI model; on Windows and Linux, they go to Google Gemini. Relio needs an internet connection; it has no offline AI mode.</p></details>
+      <details><summary>What happens to my footage?<svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></summary><p>In the desktop apps, your source files, projects, preview, and rendering stay on your computer. The web app saves your projects and videos to your account (up to 1 GB of video), so they open on any device you sign in on; deleting a project or your account deletes them for good. See <a href="/privacy">Privacy</a>. Audio chunks, transcripts, sampled frames, and editor chat messages are sent for AI processing. On Mac, they go through Relio’s server and OpenRouter to an AI model; on Windows and Linux, they go to Google Gemini. Relio needs an internet connection; it has no offline AI mode.</p></details>
       <details><summary>Can I change the Shorts Relio picks?<svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></summary><p>Yes. Review and adjust every Short before export. Change the timing, choose Fill, Fit, or Split framing, try seven caption styles, or ask the editor chat to help with edits.</p></details>
       <details><summary>Where can I post my exports?<svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></summary><p>Relio exports vertical MP4 files at up to 1080 × 1920. Upload them yourself to your favorite short-form platforms, including YouTube Shorts, Instagram Reels, and TikTok. Direct publishing isn’t built in.</p></details>
       <details><summary>Is this ready for my daily workflow?<svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></summary><p>Relio is an early beta. The Mac pipeline works end to end, but you should review every clip and expect rough edges. Windows and Linux ports are available but still need verification on real devices. <a href="https://github.com/tarassamb-bit/Prism#limits">Read the current limits</a>.</p></details>
-      <details><summary>Do I need a Relio account?<svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></summary><p>On Mac, sign in to the app with your Relio account to use the AI service. Your dashboard also shows your export stats and history. Windows and Linux use your own Gemini API key instead. <a href="signup.html">Create an account</a>.</p></details>
-      <details><summary>How do I get started?<svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></summary><p><a href="download.html">Download Relio</a>, sign in on Mac or add your Gemini API key on Windows or Linux, and import a video. See the <a href="how-it-works.html">three-step workflow</a> for a quick tour.</p></details>
+      <details><summary>Do I need a Relio account?<svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></summary><p>On Mac, sign in to the app with your Relio account to use the AI service. Your dashboard also shows your export stats and history. Windows and Linux use your own Gemini API key instead. <a href="/signup">Create an account</a>.</p></details>
+      <details><summary>How do I get started?<svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></summary><p><a href="/download">Download Relio</a>, sign in on Mac or add your Gemini API key on Windows or Linux, and import a video. See the <a href="/how-it-works">three-step workflow</a> for a quick tour.</p></details>
     </div><div class="help-note"><h2>Something else on your mind?</h2><p>Check the <a href="https://github.com/tarassamb-bit/Prism#readme">project documentation ↗</a> or <a href="https://github.com/tarassamb-bit/Prismclips/issues">share your feedback on GitHub ↗</a>.</p></div></section>
   </main>
   <footer class="site-footer">
     <div class="container footer-main">
-      <div class="footer-brand"><a class="brand" href="index.html" aria-label="Relio Clips home"><img src="icon.png" width="28" height="28" alt=""><span>Relio Clips<span class="brand-dot">.</span></span></a><p>One in. Many out.</p></div>
-      <nav aria-label="Footer navigation"><a href="download.html">Download</a><a href="about.html">About</a><a href="login.html">Your account</a><a href="faq.html">Help & FAQs</a><a href="https://github.com/tarassamb-bit/Prismclips/issues">Feedback ↗</a><a href="privacy.html">Privacy</a><a href="terms.html">Terms</a></nav>
+      <div class="footer-brand"><a class="brand" href="/" aria-label="Relio Clips home"><img src="icon.png" width="28" height="28" alt=""><span>Relio Clips<span class="brand-dot">.</span></span></a><p>One in. Many out.</p></div>
+      <nav aria-label="Footer navigation"><a href="/download">Download</a><a href="/about">About</a><a href="/login">Your account</a><a href="/faq">Help & FAQs</a><a href="https://github.com/tarassamb-bit/Prismclips/issues">Feedback ↗</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a></nav>
     </div>
     <div class="container footer-bottom"><span>Built for creators. Open to everyone.</span><span>© 2026 Relio Clips <span class="separator">/</span> Relio beta</span></div>
   </footer>

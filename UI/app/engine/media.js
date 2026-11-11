@@ -1,7 +1,10 @@
 // Reading the source video in the browser with WebCodecs (Mediabunny): probe, frames, gray grids for cut detection, audio
 // for Relio AI and audio levels. The browser counterpart of Shared/Prism.Core/Media.cs; the video never leaves the computer.
-import { Input, ALL_FORMATS, BlobSource, CanvasSink, AudioSampleSink } from '../../vendor/mediabunny-1.61.5.min.mjs';
 import { ShortMakerError, GeminiError } from './gemini.js';
+
+/** Mediabunny (about 690 KB) loads on first use, so the page and the editor open without waiting for it. */
+let library = null;
+export const mediabunny = () => (library ??= import('../../vendor/mediabunny-1.61.5.min.mjs'));
 
 /** Decoding runs a couple at a time; the AI requests around it still run six side by side. */
 let running = 0;
@@ -14,6 +17,7 @@ async function decoding(work) {
 
 /** Opens a File. `video` and `audio` are Mediabunny tracks; width and height are as displayed (rotation applied). */
 export async function openSource(file) {
+  const { Input, ALL_FORMATS, BlobSource } = await mediabunny();
   const input = new Input({ formats: ALL_FORMATS, source: new BlobSource(file) });
   try {
     const video = await input.getPrimaryVideoTrack();
@@ -40,7 +44,7 @@ export function letterbox(source, start, duration) {
 
 async function measureBars(source, start, duration) {
   const size = fitWithin(source, 160);
-  const sink = new CanvasSink(source.video, { ...size, fit: 'fill' });
+  const sink = new (await mediabunny()).CanvasSink(source.video, { ...size, fit: 'fill' });
   const times = Array.from({ length: 8 }, (_, i) => start + (i + 0.5) / 8 * duration);
   const frames = [];
   for await (const wrapped of sink.canvasesAtTimestamps(times)) {
@@ -105,7 +109,7 @@ export async function framesJpeg(source, start, duration, step, maxSize = 512) {
 
 async function framesAt(source, timestamps, maxSize) {
   return decoding(async () => {
-    const sink = new CanvasSink(source.video, { ...fitWithin(source, maxSize), fit: 'fill' });
+    const sink = new (await mediabunny()).CanvasSink(source.video, { ...fitWithin(source, maxSize), fit: 'fill' });
     const result = [];
     for await (const wrapped of sink.canvasesAtTimestamps(timestamps)) result.push(wrapped ? { jpeg: await jpegBytes(wrapped.canvas) } : null);
     return result;
@@ -116,7 +120,7 @@ async function framesAt(source, timestamps, maxSize) {
 /** One decoded frame as a canvas (not encoded to JPEG), for drawing into thumbnails. */
 export async function frameImage(source, time, maxSize = 480) {
   return decoding(async () => {
-    const sink = new CanvasSink(source.video, { ...fitWithin(source, maxSize), fit: 'fill' });
+    const sink = new (await mediabunny()).CanvasSink(source.video, { ...fitWithin(source, maxSize), fit: 'fill' });
     // A file's first frame can come after time 0, and asking for a time before it gives nothing; start at the first frame at the earliest.
     const first = await source.video.getFirstTimestamp().catch(() => 0);
     return (await sink.getCanvas(Math.max(time, first)))?.canvas ?? null;
@@ -136,7 +140,7 @@ export async function thumbnail(source, time, maxSize = 480) {
 /** 32×18 luminance grids at 10 fps across a range, for scene-cut detection. */
 export async function grayGrids(source, start, duration) {
   return decoding(async () => {
-    const sink = new CanvasSink(source.video, { width: 32, height: 18, fit: 'fill' });
+    const sink = new (await mediabunny()).CanvasSink(source.video, { width: 32, height: 18, fit: 'fill' });
     const times = [];
     for (let i = 0; i < Math.floor(duration * 10); i++) times.push(start + i / 10);
     const grids = [];
@@ -207,7 +211,7 @@ export function wav(samples, rate) {
 export async function monoSamples(source, from, to) {
   if (!source.audio || to <= from) return null;
   return decoding(async () => {
-    const sink = new AudioSampleSink(source.audio);
+    const sink = new (await mediabunny()).AudioSampleSink(source.audio);
     let mono = null, rate = 0;
     for await (const sample of sink.samples(from, to)) {
       if (!mono) { rate = sample.sampleRate; mono = new Float32Array(Math.ceil((to - from) * rate)); }

@@ -11,9 +11,9 @@ const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
 export async function analyze(source, start, duration, zoom, configuration, speech = [], signal) {
   if (!Number.isFinite(start) || !Number.isFinite(duration) || duration <= 0) return [];
   try {
-    // About one frame a second, capped so long Shorts stay one modest request.
-    const step = Math.max(0.5, duration / 60);
-    const frames = await framesJpeg(source, start, duration, step, 512);
+    // At most 24 small frames: 60 frames at 512 px made Mimo time out, and the fallback model then cost ~$0.026 per Short.
+    const step = Math.max(1, duration / 24);
+    const frames = await framesJpeg(source, start, duration, step, 384);
     const grids = await grayGrids(source, start, duration);
     if (frames.length === 0) return [];
     const cuts = detectCuts(frames.map((f) => f.time), grids);

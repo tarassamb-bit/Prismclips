@@ -1,10 +1,7 @@
 // Renders a Short to an MP4 in the browser: layout (crop, Fit or split screen), camera path and captions, one frame at a time.
 // A port of the layout and encode steps of Shared/Prism.Core/Renderer.cs. Previews use the same code at a smaller size.
-import {
-  Output, BufferTarget, Mp4OutputFormat, CanvasSource, AudioSampleSource, VideoSampleSink, AudioSampleSink, canEncodeVideo,
-} from '../../vendor/mediabunny-1.61.5.min.mjs';
 import { ShortMakerError } from './gemini.js';
-import { letterbox } from './media.js';
+import { letterbox, mediabunny } from './media.js';
 import { eased } from './framing.js';
 import { elements, drawCaptions } from './captions.js';
 import { EXPORT_QUALITIES } from './models.js';
@@ -143,6 +140,9 @@ export async function render(source, segment, options) {
   if (![segment.start, segment.duration].every(Number.isFinite) || segment.start < 0 || segment.duration <= 0 || segment.start + segment.duration > source.duration + 0.05) {
     throw new ShortMakerError('invalidRange');
   }
+  const {
+    Output, BufferTarget, Mp4OutputFormat, CanvasSource, AudioSampleSource, VideoSampleSink, AudioSampleSink, canEncodeVideo,
+  } = await mediabunny();
   step('checking the video encoder');
   if (!(await canEncodeVideo(codec, { width, height, bitrate }).catch(() => false))) {
     throw new ShortMakerError('cannotExport', codec === 'hevc' ? "This browser can't encode HEVC; choose 1080p · H.264." : 'This browser cannot encode H.264 video.');
