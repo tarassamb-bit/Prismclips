@@ -2,12 +2,12 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const handler = require('./motion-review');
 async function request(body, reply) {
-  const oldFetch=global.fetch, oldKey=process.env.OPENROUTER_API_KEY; let upstream; const upstreams=[];
-  process.env.OPENROUTER_API_KEY='test';
+  const oldFetch=global.fetch, oldKey=process.env.MOTION_OPENROUTER_API_KEY; let upstream; const upstreams=[];
+  process.env.MOTION_OPENROUTER_API_KEY='test';
   global.fetch=async (_url, init)=>{assert.equal(init.headers['X-Title'],'Relio Clips');upstream=JSON.parse(init.body);upstreams.push(upstream);return {ok:true,text:async()=>JSON.stringify({choices:[{finish_reason:'stop',message:{content:JSON.stringify(reply)}}]})}};
   const req={method:'POST',headers:{host:'localhost:4173'},async *[Symbol.asyncIterator](){yield JSON.stringify(body)}};
   const res={setHeader(){},end(value){this.body=value}};
-  try {await handler(req,res)} finally {global.fetch=oldFetch;if(oldKey===undefined)delete process.env.OPENROUTER_API_KEY;else process.env.OPENROUTER_API_KEY=oldKey}
+  try {await handler(req,res)} finally {global.fetch=oldFetch;if(oldKey===undefined)delete process.env.MOTION_OPENROUTER_API_KEY;else process.env.MOTION_OPENROUTER_API_KEY=oldKey}
   return {res,upstream,upstreams};
 }
 const frames=[0,1,2].map(time=>({time,image:'data:image/jpeg;base64,YWJj'}));

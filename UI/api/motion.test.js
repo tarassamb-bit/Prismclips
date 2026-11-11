@@ -5,9 +5,9 @@ const handler = require('./motion');
 
 async function request(body) {
   const oldFetch = global.fetch;
-  const oldKey = process.env.OPENROUTER_API_KEY;
+  const oldKey = process.env.MOTION_OPENROUTER_API_KEY;
   let sent;
-  process.env.OPENROUTER_API_KEY = 'local-test-key';
+  process.env.MOTION_OPENROUTER_API_KEY = 'local-test-key';
   global.fetch = async (_url, init) => {
     sent = JSON.parse(init.body);
     assert.equal(init.headers['X-Title'], 'Relio Clips');
@@ -20,7 +20,7 @@ async function request(body) {
   const res = {setHeader() {}, end(value) { this.body = value; }};
   try { await handler(req, res); } finally {
     global.fetch = oldFetch;
-    if (oldKey === undefined) delete process.env.OPENROUTER_API_KEY; else process.env.OPENROUTER_API_KEY = oldKey;
+    if (oldKey === undefined) delete process.env.MOTION_OPENROUTER_API_KEY; else process.env.MOTION_OPENROUTER_API_KEY = oldKey;
   }
   assert.equal(res.statusCode, 200);
   return sent.messages[0].content;
@@ -70,9 +70,9 @@ test('automatic repair keeps the user brief and explains the actual failure', as
 test('rejects an overlong prompt rather than silently dropping the ending', async () => {
   const req = {method:'POST', headers:{host:'localhost:4173'}, async *[Symbol.asyncIterator]() { yield JSON.stringify({engine:'remotion', prompt:'a'.repeat(2001)}); }};
   const res = {setHeader() {}, end(value) { this.body = value; }};
-  const oldKey = process.env.OPENROUTER_API_KEY;
-  process.env.OPENROUTER_API_KEY = 'local-test-key';
-  try { await handler(req, res); } finally { if (oldKey === undefined) delete process.env.OPENROUTER_API_KEY; else process.env.OPENROUTER_API_KEY = oldKey; }
+  const oldKey = process.env.MOTION_OPENROUTER_API_KEY;
+  process.env.MOTION_OPENROUTER_API_KEY = 'local-test-key';
+  try { await handler(req, res); } finally { if (oldKey === undefined) delete process.env.MOTION_OPENROUTER_API_KEY; else process.env.MOTION_OPENROUTER_API_KEY = oldKey; }
   assert.equal(res.statusCode, 400);
   assert.match(JSON.parse(res.body).error, /2,000/);
 });
@@ -106,9 +106,9 @@ test('all three styles include the corresponding visual reference on revisions',
 test('rejects unrecognized style keys', async () => {
   const req = {method:'POST', headers:{host:'localhost:4173'}, async *[Symbol.asyncIterator]() { yield JSON.stringify({engine:'remotion', prompt:original, style:'../../.env.local'}); }};
   const res = {setHeader() {}, end(value) { this.body = value; }};
-  const oldKey = process.env.OPENROUTER_API_KEY;
-  process.env.OPENROUTER_API_KEY = 'local-test-key';
-  try { await handler(req, res); } finally { if (oldKey === undefined) delete process.env.OPENROUTER_API_KEY; else process.env.OPENROUTER_API_KEY = oldKey; }
+  const oldKey = process.env.MOTION_OPENROUTER_API_KEY;
+  process.env.MOTION_OPENROUTER_API_KEY = 'local-test-key';
+  try { await handler(req, res); } finally { if (oldKey === undefined) delete process.env.MOTION_OPENROUTER_API_KEY; else process.env.MOTION_OPENROUTER_API_KEY = oldKey; }
   assert.equal(res.statusCode, 400);
   assert.match(JSON.parse(res.body).error, /Unknown video style/);
 });
@@ -133,13 +133,13 @@ test('styled generation includes a validated, private production plan', async ()
 });
 
 test('rejects an invalid style plan instead of generating without it', async () => {
-  const oldFetch = global.fetch, oldKey = process.env.OPENROUTER_API_KEY;
+  const oldFetch = global.fetch, oldKey = process.env.MOTION_OPENROUTER_API_KEY;
   let calls = 0;
-  process.env.OPENROUTER_API_KEY = 'local-test-key';
+  process.env.MOTION_OPENROUTER_API_KEY = 'local-test-key';
   global.fetch = async () => { calls++; return {ok:true, text:async () => JSON.stringify({choices:[{finish_reason:'stop', message:{content:'{"duration":8,"beats":[]}'}}]})}; };
   const req = {method:'POST', headers:{host:'localhost:4173'}, async *[Symbol.asyncIterator]() {yield JSON.stringify({engine:'remotion', prompt:original, style:'flat-vector-science'});}};
   const res = {setHeader() {}, end(value) {this.body = value;}};
-  try { await handler(req, res); } finally { global.fetch = oldFetch; if (oldKey === undefined) delete process.env.OPENROUTER_API_KEY; else process.env.OPENROUTER_API_KEY = oldKey; }
+  try { await handler(req, res); } finally { global.fetch = oldFetch; if (oldKey === undefined) delete process.env.MOTION_OPENROUTER_API_KEY; else process.env.MOTION_OPENROUTER_API_KEY = oldKey; }
   assert.equal(res.statusCode, 502);
   assert.match(JSON.parse(res.body).error, /plan needs another try/);
   assert.equal(calls, 2);
@@ -147,14 +147,14 @@ test('rejects an invalid style plan instead of generating without it', async () 
 
 
 test('rejects a plan that puts a decorative rule through text', async () => {
-  const oldFetch = global.fetch, oldKey = process.env.OPENROUTER_API_KEY;
+  const oldFetch = global.fetch, oldKey = process.env.MOTION_OPENROUTER_API_KEY;
   let calls = 0;
   const plan = {duration:8,beats:[{start:0,end:4,visual:'Headline with a line',motion:'Reveal',text:[{content:'IDEAS',box:{x:0.2,y:0.4,w:0.6,h:0.1}}],decorations:[{x:0.1,y:0.45,w:0.8,h:0.01}]},{start:4,end:8,visual:'Final scene',motion:'Hold',text:[],decorations:[]}]};
-  process.env.OPENROUTER_API_KEY = 'local-test-key';
+  process.env.MOTION_OPENROUTER_API_KEY = 'local-test-key';
   global.fetch = async () => { calls++; return {ok:true,text:async()=>JSON.stringify({choices:[{finish_reason:'stop',message:{content:JSON.stringify(plan)}}]})}; };
   const req = {method:'POST',headers:{host:'localhost:4173'},async *[Symbol.asyncIterator](){yield JSON.stringify({engine:'remotion',prompt:original,style:'flat-vector-science'});}};
   const res = {setHeader(){},end(value){this.body=value}};
-  try { await handler(req,res); } finally { global.fetch=oldFetch; if (oldKey === undefined) delete process.env.OPENROUTER_API_KEY; else process.env.OPENROUTER_API_KEY=oldKey; }
+  try { await handler(req,res); } finally { global.fetch=oldFetch; if (oldKey === undefined) delete process.env.MOTION_OPENROUTER_API_KEY; else process.env.MOTION_OPENROUTER_API_KEY=oldKey; }
   assert.equal(res.statusCode,502);
   assert.match(JSON.parse(res.body).error,/must not overlap/);
   assert.equal(calls,2);
@@ -169,31 +169,31 @@ test('visual corrections receive the prior code and specific observed issues wit
 });
 
 test('retries a truncated animation once with a higher limit and includes both attempt costs', async () => {
-  const oldFetch=global.fetch, oldKey=process.env.OPENROUTER_API_KEY; const requests=[];
-  process.env.OPENROUTER_API_KEY='test';
+  const oldFetch=global.fetch, oldKey=process.env.MOTION_OPENROUTER_API_KEY; const requests=[];
+  process.env.MOTION_OPENROUTER_API_KEY='test';
   global.fetch=async (_url,init)=>{const body=JSON.parse(init.body);requests.push(body);return {ok:true,text:async()=>JSON.stringify({usage:{cost:requests.length===1?0.004:0.006},choices:[{finish_reason:requests.length===1?'length':'stop',message:{content:requests.length===1?'unfinished':'```js\nfunction Video() {}\n```'}}]})}};
   const req={method:'POST',headers:{host:'localhost:4173'},async *[Symbol.asyncIterator](){yield JSON.stringify({engine:'remotion',prompt:original})}};
   const res={setHeader(){},end(v){this.body=v}};
-  try {await handler(req,res)} finally {global.fetch=oldFetch;if(oldKey===undefined)delete process.env.OPENROUTER_API_KEY;else process.env.OPENROUTER_API_KEY=oldKey}
+  try {await handler(req,res)} finally {global.fetch=oldFetch;if(oldKey===undefined)delete process.env.MOTION_OPENROUTER_API_KEY;else process.env.MOTION_OPENROUTER_API_KEY=oldKey}
   assert.equal(res.statusCode,200);assert.deepEqual(requests.map(x=>x.max_tokens),[24000,32000]);assert.equal(JSON.parse(res.body).usd,0.01);assert.ok(requests.every(x=>x.reasoning.effort==='medium'));
 });
 
 test('retries a truncated planning response before requesting animation code', async () => {
-  const oldFetch=global.fetch, oldKey=process.env.OPENROUTER_API_KEY; const requests=[];
+  const oldFetch=global.fetch, oldKey=process.env.MOTION_OPENROUTER_API_KEY; const requests=[];
   const plan={duration:8,beats:[{start:0,end:4,visual:'Headline',motion:'Move',text:[{content:'MAKE IT MOVE',box:{x:0.1,y:0.3,w:0.8,h:0.1}}],decorations:[]},{start:4,end:8,visual:'Finish',motion:'Hold',text:[],decorations:[]}]};
-  process.env.OPENROUTER_API_KEY='test';
+  process.env.MOTION_OPENROUTER_API_KEY='test';
   global.fetch=async (_url,init)=>{const body=JSON.parse(init.body);requests.push(body);const n=requests.length;return {ok:true,text:async()=>JSON.stringify({usage:{cost:0.001},choices:[{finish_reason:n===1?'length':'stop',message:{content:n===1?'unfinished':n===2?JSON.stringify(plan):'```js\nfunction Video() {}\n```'}}]})}};
   const req={method:'POST',headers:{host:'localhost:4173'},async *[Symbol.asyncIterator](){yield JSON.stringify({engine:'remotion',prompt:original,style:'flat-vector-science'})}};
   const res={setHeader(){},end(v){this.body=v}};
-  try {await handler(req,res)} finally {global.fetch=oldFetch;if(oldKey===undefined)delete process.env.OPENROUTER_API_KEY;else process.env.OPENROUTER_API_KEY=oldKey}
+  try {await handler(req,res)} finally {global.fetch=oldFetch;if(oldKey===undefined)delete process.env.MOTION_OPENROUTER_API_KEY;else process.env.MOTION_OPENROUTER_API_KEY=oldKey}
   assert.equal(res.statusCode,200);assert.deepEqual(requests.map(x=>x.max_tokens),[3000,6000,24000]);assert.equal(JSON.parse(res.body).usd,0.003);
 });
 
 test('stops after one output-limit retry and reports the failed phase', async () => {
-  const oldFetch=global.fetch, oldKey=process.env.OPENROUTER_API_KEY;let calls=0;process.env.OPENROUTER_API_KEY='test';
+  const oldFetch=global.fetch, oldKey=process.env.MOTION_OPENROUTER_API_KEY;let calls=0;process.env.MOTION_OPENROUTER_API_KEY='test';
   global.fetch=async ()=>{calls++;return {ok:true,text:async()=>JSON.stringify({choices:[{finish_reason:'length',message:{content:'unfinished'}}]})}};
   const req={method:'POST',headers:{host:'localhost:4173'},async *[Symbol.asyncIterator](){yield JSON.stringify({engine:'remotion',prompt:original})}};
   const res={setHeader(){},end(v){this.body=v}};
-  try {await handler(req,res)} finally {global.fetch=oldFetch;if(oldKey===undefined)delete process.env.OPENROUTER_API_KEY;else process.env.OPENROUTER_API_KEY=oldKey}
+  try {await handler(req,res)} finally {global.fetch=oldFetch;if(oldKey===undefined)delete process.env.MOTION_OPENROUTER_API_KEY;else process.env.MOTION_OPENROUTER_API_KEY=oldKey}
   assert.equal(calls,2);assert.equal(res.statusCode,502);assert.match(JSON.parse(res.body).error,/writing the animation/);
 });

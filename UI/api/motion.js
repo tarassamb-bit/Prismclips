@@ -1,8 +1,8 @@
 // Relio Motion (dev only): the configured model writes a motion-graphics scene from a prompt. Answers only on localhost, with
-// OPENROUTER_API_KEY from .env.local; the live site refuses, so nothing here costs money or leaks a key in production.
+// the Motion key (MOTION_OPENROUTER_API_KEY, see _motion-provider.js); the live site refuses, so nothing here costs money or leaks a key in production.
 //   POST { prompt, engine, originalPrompt?, history?, previous?, error? } -> { code }
 const { HttpError, send, fail } = require('./_lib');
-const {requestProvider} = require('./_motion-provider');
+const {requestProvider, motionKey} = require('./_motion-provider');
 const fs = require('fs');
 const path = require('path');
 
@@ -155,7 +155,7 @@ class OutputLimitError extends Error {
 async function callModel(instruction, maxTokens, signal) {
     const {response, data:answer} = await requestProvider('https://openrouter.ai/api/v1/chat/completions', {
       method:'POST',
-      headers:{Authorization:`Bearer ${process.env.OPENROUTER_API_KEY}`, 'Content-Type':'application/json', 'HTTP-Referer':'https://relioclips.com', 'X-Title':'Relio Clips'},
+      headers:{Authorization:`Bearer ${motionKey()}`, 'Content-Type':'application/json', 'HTTP-Referer':'https://relioclips.com', 'X-Title':'Relio Clips'},
       body:JSON.stringify({model:MODEL, max_tokens:maxTokens, reasoning:{effort:'medium',exclude:true}, provider:PROVIDER, messages:[{role:'user',content:instruction}]}),
     }, {signal});
     if (!response.ok || !answer.choices?.length) throw new HttpError(502, `The model provider: ${answer.error?.message || `HTTP ${response.status}`}`);
@@ -190,7 +190,7 @@ module.exports = async (req, res) => {
     const host = String(req.headers.host || '');
     if (!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host)) throw new HttpError(404, 'Not found.');
     if (req.method !== 'POST') throw new HttpError(405, 'Use POST.');
-    if (!process.env.OPENROUTER_API_KEY) throw new HttpError(503, 'Add OPENROUTER_API_KEY to UI/.env.local and restart the dev server.');
+    if (!motionKey()) throw new HttpError(503, 'Add MOTION_OPENROUTER_API_KEY to ~/.config/relio-motion/.env (the Motion key, not the Relio Clips one).');
     const body = await readJson(req);
     if (!Object.hasOwn(RULES, body.engine)) throw new HttpError(400, 'Unknown engine.');
     if (body.style !== undefined && body.style !== '' && !Object.hasOwn(STYLE_FILES, body.style)) throw new HttpError(400, 'Unknown video style.');

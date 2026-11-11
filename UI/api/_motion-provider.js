@@ -2,6 +2,21 @@
 // switch models or relax provider privacy settings.
 const {HttpError} = require('./_lib');
 const https = require('node:https');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+// Motion has its own OpenRouter key, kept outside the Relio repo, so Motion work never spends or exposes the Relio Clips key.
+// Read from MOTION_OPENROUTER_API_KEY, else from the file MOTION_ENV_FILE (default ~/.config/relio-motion/.env).
+// OPENROUTER_API_KEY (the Relio Clips key) is never read here.
+function motionKey() {
+  if (process.env.MOTION_OPENROUTER_API_KEY) return process.env.MOTION_OPENROUTER_API_KEY;
+  const file = process.env.MOTION_ENV_FILE || path.join(os.homedir(), '.config', 'relio-motion', '.env');
+  try {
+    const line = fs.readFileSync(file, 'utf8').split('\n').find((l) => l.startsWith('MOTION_OPENROUTER_API_KEY='));
+    return line ? line.slice('MOTION_OPENROUTER_API_KEY='.length).trim().replace(/^["']|["']$/g, '') || null : null;
+  } catch { return null; }
+}
 
 // Node fetch has its own headers/body deadlines. The native HTTPS request has
 // no application deadline and remains abortable when the user presses Stop.
@@ -46,4 +61,4 @@ async function requestProvider(url, init, {signal, delays = [1000, 3000], fetche
     await sleep(delays[attempt]);
   }
 }
-module.exports = {requestProvider};
+module.exports = {requestProvider, motionKey};

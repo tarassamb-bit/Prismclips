@@ -1,6 +1,6 @@
 // Reviews only the generated video frames and user brief. Local development only.
 const {HttpError, send, fail} = require('./_lib');
-const {requestProvider} = require('./_motion-provider');
+const {requestProvider, motionKey} = require('./_motion-provider');
 const MODEL = process.env.MOTION_REVIEW_MODEL || 'xiaomi/mimo-v2.6-flash';
 async function readJson(req) {
   let text = '';
@@ -11,7 +11,7 @@ module.exports = async (req, res) => {
   try {
     if (!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(String(req.headers.host || ''))) throw new HttpError(404, 'Not found.');
     if (req.method !== 'POST') throw new HttpError(405, 'Use POST.');
-    if (!process.env.OPENROUTER_API_KEY) throw new HttpError(503, 'The model key is missing.');
+    if (!motionKey()) throw new HttpError(503, 'The model key is missing.');
     const body = await readJson(req);
     if (typeof body.brief !== 'string' || !body.brief.trim() || body.brief.length > 2000) throw new HttpError(400, 'A valid original brief is required.');
     if (!Array.isArray(body.frames) || body.frames.length < 3 || body.frames.length > 5 || body.frames.some(f => !f || !Number.isFinite(f.time) || typeof f.image !== 'string' || f.image.length > 600000 || !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(f.image))) throw new HttpError(400, 'The video frames could not be reviewed.');
@@ -25,7 +25,7 @@ module.exports = async (req, res) => {
       for(let attempt=0;attempt<2;attempt++) {
         const {response, data:payload} = await requestProvider('https://openrouter.ai/api/v1/chat/completions', {
           method:'POST',
-          headers:{Authorization:`Bearer ${process.env.OPENROUTER_API_KEY}`,'Content-Type':'application/json','HTTP-Referer':'https://relioclips.com','X-Title':'Relio Clips'},
+          headers:{Authorization:`Bearer ${motionKey()}`,'Content-Type':'application/json','HTTP-Referer':'https://relioclips.com','X-Title':'Relio Clips'},
           body:JSON.stringify({model:MODEL, max_tokens:attempt ? maxTokens*2 : maxTokens, reasoning:{effort:'medium',exclude:true}, provider:{zdr:true,data_collection:'deny',sort:'latency'},messages:[{role:'user',content:[{type:'text',text},{type:'image_url',image_url:{url:image}}]}]}),
         }, {signal:cancellation.signal});
         if (!response.ok || !payload.choices?.length) throw new HttpError(502, `The visual review provider: ${payload.error?.message || `HTTP ${response.status}`}`);
