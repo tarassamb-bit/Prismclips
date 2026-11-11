@@ -213,7 +213,7 @@ details.insp-section:not([open]) { gap: 0; }
 .short-card { position: relative; background: var(--surface2); border: 2px solid transparent; border-radius: 14px; padding: 6px; }
 .short-card.on { border-color: var(--sky); }
 .card-main { display: grid; gap: 4px; width: 100%; text-align: left; background: none; border: 0; padding: 0; cursor: pointer; color: var(--text); }
-.card-thumb { position: relative; display: block; aspect-ratio: 16 / 9; border-radius: 9px; overflow: hidden; background: var(--surface1); }
+.card-thumb { position: relative; display: block; aspect-ratio: 9 / 16; border-radius: 9px; overflow: hidden; background: var(--surface1); }
 .card-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .card-thumb::after { content: ""; position: absolute; inset: auto 0 0 0; height: 55%; background: linear-gradient(transparent, #000a); }
 .badge-score, .card-meta { position: absolute; z-index: 1; color: #fff; font-weight: 500; }

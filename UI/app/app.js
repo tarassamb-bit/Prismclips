@@ -1,10 +1,10 @@
 // Relio in the browser: projects, Shorts, the editor and export. The screens follow the macOS app's flows; the engine is in ./engine.
 import { GeminiError, StageFailure, ShortMakerError } from './engine/gemini.js';
-import { openSource, thumbnail, frameImage } from './engine/media.js';
+import { openSource, thumbnail, frameImage, letterbox } from './engine/media.js';
 import * as Shorts from './engine/shortmaker.js';
 import * as Framing from './engine/framing.js';
 import * as Selection from './engine/selection.js';
-import { render, preview, exportSettings } from './engine/render.js';
+import { render, preview, exportSettings, drawFrame, layoutAt } from './engine/render.js';
 import { STYLE_TITLES, STYLE_DETAILS, VIDEO_TYPE_TITLES, VIDEO_TYPE_DETAILS, REGION_TITLES, EXPORT_QUALITIES, CAPTION_STYLES, VIDEO_TYPES } from './engine/models.js';
 import { stylePreview } from './engine/captions.js';
 import { mountPlayer, unmountPlayer } from './player.js';
@@ -1432,17 +1432,22 @@ function renderBin() {
   fillThumbs();
 }
 
-/** A Short's picture is its first frame in the source. Cards load theirs only when they scroll into view, and keep it. */
+/** A Short's picture is its first frame, drawn exactly as the preview draws it: the same layoutAt and drawFrame, so crop, Fit and
+ * split screen look the same on the card and in the player. The cache key holds the layout itself, so changing it redraws the card.
+ * Cards load theirs only when they scroll into view, and keep it. */
 const shortThumbs = new Map();
 async function shortThumb(segment) {
-  const key = `${segment.mediaId}|${segment.start}`;
-  if (shortThumbs.has(key)) return shortThumbs.get(key);
   const source = await sourceFor(state.project.media.find((m) => m.id === segment.mediaId));
+  const bars = await letterbox(source, segment.start, segment.duration);
+  const layout = layoutAt(segment, 0, source.width, source.height, bars).map((op) => [op.kind, ...[op.sx, op.sy, op.sw, op.sh, op.dx, op.dy, op.dw, op.dh].map(Math.round)]);
+  const key = `${segment.mediaId}|${segment.start}|${JSON.stringify(layout)}`;
+  if (shortThumbs.has(key)) return shortThumbs.get(key);
   const image = await frameImage(source, segment.start + 0.05);
   if (!image) return null;
-  const canvas = new OffscreenCanvas(320, 180);
-  const cover = Math.max(320 / image.width, 180 / image.height);
-  canvas.getContext('2d').drawImage(image, (320 - image.width * cover) / 2, (180 - image.height * cover) / 2, image.width * cover, image.height * cover);
+  const canvas = new OffscreenCanvas(180, 320);
+  const context = canvas.getContext('2d');
+  context.scale(180 / 1080, 320 / 1920);
+  drawFrame(context, { draw: (ctx, x, y, w, h) => ctx.drawImage(image, x, y, w, h) }, segment, source.width, source.height, 0, bars);
   const url = URL.createObjectURL(await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.8 }));
   shortThumbs.set(key, url);
   while (shortThumbs.size > 300) {
