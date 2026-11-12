@@ -6,10 +6,11 @@
 // Keep the two copies in step when changing models, limits or usage accounting.
 const SUPABASE_URL = 'https://isdplhahgggundbohmlr.supabase.co';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-// MiMo only, retried on other providers when one stalls. No Gemini fallback by default (it cost more than MiMo for the
-// same work); set OPENROUTER_FALLBACK_MODEL to bring a last-resort model back. No free models: they are rate-limited
-// exactly when they are needed.
+// MiMo first. Text and images get one Ember try between two MiMo tries (OPENROUTER_FALLBACK_MODEL replaces Ember);
+// audio stays on MiMo only, because Ember has no zero-data-retention endpoint for audio. No Gemini: it cost more than
+// MiMo for the same work. No free models: they are rate-limited exactly when they are needed.
 const DEFAULT_MODEL = 'xiaomi/mimo-v2.6-flash';
+const DEFAULT_FALLBACK = 'meta/muse-ember';
 // Only providers that keep no data (zero data retention) and don't train on it; among those, the quickest to answer.
 const PROVIDER = { zdr: true, data_collection: 'deny', sort: 'latency' };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -18,10 +19,10 @@ const LIMIT_MESSAGE = "You've reached your beta usage limit. Ask for a promo cod
 const MIN_ANSWER_USD = 0.0005;
 const MAX_OUTPUT_TOKENS = 12_000;
 // All models together must answer before Vercel stops the function at 300 s (maxDuration in vercel.json).
-// Mimo answers text and images in 10–30 s; past this it gets no second try (a stalled request is rarely answered later),
-// and Gemini gets what is left.
+// Mimo answers text and images in 10–30 s; past this the try is dropped (a stalled request is rarely answered later),
+// and the next model gets its turn; the last one gets what is left.
 const MODEL_TIMEOUT_MS = 60_000;
-// Audio tries are short: a model that hasn't answered audio in 30 s rarely does later, and Gemini gets the time.
+// Audio tries are short: a model that hasn't answered audio in 30 s rarely does later, and the next try gets the time.
 const AUDIO_TRY_MS = 30_000;
 // The MiMo provider with the most answers in ai_spend (Makora, 296 of 429 over 2 days to 2026-11-08).
 const AUDIO_PROVIDER = 'makora';
@@ -191,10 +192,10 @@ async function handler(req, res) {
   if (!user) return;
 
   const chosen = process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
-  const fallback = process.env.OPENROUTER_FALLBACK_MODEL || chosen;
+  const fallback = process.env.OPENROUTER_FALLBACK_MODEL || DEFAULT_FALLBACK;
   // Audio: MiMo on its pinned provider, MiMo on any other provider, then MiMo once more with all the time left. A MiMo
-  // timeout is usually one stalled provider. Text and images: MiMo twice.
-  const models = converted.kind === 'audio' ? [chosen, chosen, fallback] : [chosen, fallback];
+  // timeout is usually one stalled provider. Text and images: MiMo, one Ember try, then MiMo with the time left.
+  const models = converted.kind === 'audio' ? [chosen, chosen, chosen] : [chosen, fallback, chosen];
   const audioProvider = process.env.OPENROUTER_AUDIO_PROVIDER || AUDIO_PROVIDER;
   let status = 503, reply = null;
   const failures = [];
