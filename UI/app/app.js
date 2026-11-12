@@ -13,6 +13,8 @@ import { configureSync, requestSync, sync, syncStatus, onSyncStatus } from './sy
 import { uploadVideo, downloadVideo, removeVideos, removeAllVideos, cloudUsage, CloudVideoError } from './cloudvideo.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
+// Motion Studio is a local-only dev tool: its API answers only on localhost.
+if (['localhost', '127.0.0.1'].includes(location.hostname)) $('.motion-link').hidden = false;
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const uuid = () => crypto.randomUUID();
 const clock = (seconds) => {

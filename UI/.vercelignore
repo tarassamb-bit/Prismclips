@@ -2,3 +2,8 @@
 .*
 dev-server.js
 selfcheck.js
+# Motion Studio is local-only.
+motion/
+api/motion*.js
+api/_motion-provider.js
+api/_motion-styles/

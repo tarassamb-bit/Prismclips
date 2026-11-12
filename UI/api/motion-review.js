@@ -1,18 +1,12 @@
 // Reviews only the generated video frames and user brief. Local development only.
 const {HttpError, send, fail} = require('./_lib');
-const {requestProvider, motionKey} = require('./_motion-provider');
+const {requestProvider, motionKey, PROVIDER, assertLocal, readJson} = require('./_motion-provider');
 const MODEL = process.env.MOTION_REVIEW_MODEL || 'xiaomi/mimo-v2.6-flash';
-async function readJson(req) {
-  let text = '';
-  for await (const chunk of req) { text += chunk; if (text.length > 4_000_000) throw new HttpError(413, 'Video frames are too large to review.'); }
-  try { return JSON.parse(text); } catch { throw new HttpError(400, 'Invalid review request.'); }
-}
 module.exports = async (req, res) => {
   try {
-    if (!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(String(req.headers.host || ''))) throw new HttpError(404, 'Not found.');
-    if (req.method !== 'POST') throw new HttpError(405, 'Use POST.');
+    assertLocal(req);
     if (!motionKey()) throw new HttpError(503, 'The model key is missing.');
-    const body = await readJson(req);
+    const body = await readJson(req, 4_000_000);
     if (typeof body.brief !== 'string' || !body.brief.trim() || body.brief.length > 2000) throw new HttpError(400, 'A valid original brief is required.');
     if (!Array.isArray(body.frames) || body.frames.length < 3 || body.frames.length > 5 || body.frames.some(f => !f || !Number.isFinite(f.time) || typeof f.image !== 'string' || f.image.length > 600000 || !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(f.image))) throw new HttpError(400, 'The video frames could not be reviewed.');
     if (body.reference !== undefined && (typeof body.reference !== 'string' || body.reference.length > 300000 || !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(body.reference))) throw new HttpError(400, 'The style reference could not be reviewed.');
@@ -26,7 +20,7 @@ module.exports = async (req, res) => {
         const {response, data:payload} = await requestProvider('https://openrouter.ai/api/v1/chat/completions', {
           method:'POST',
           headers:{Authorization:`Bearer ${motionKey()}`,'Content-Type':'application/json','HTTP-Referer':'https://relioclips.com','X-Title':'Relio Clips'},
-          body:JSON.stringify({model:MODEL, max_tokens:attempt ? maxTokens*2 : maxTokens, reasoning:{effort:'medium',exclude:true}, provider:{zdr:true,data_collection:'deny',sort:'latency'},messages:[{role:'user',content:[{type:'text',text},{type:'image_url',image_url:{url:image}}]}]}),
+          body:JSON.stringify({model:MODEL, max_tokens:attempt ? maxTokens*2 : maxTokens, reasoning:{effort:'medium',exclude:true}, provider:PROVIDER,messages:[{role:'user',content:[{type:'text',text},{type:'image_url',image_url:{url:image}}]}]}),
         }, {signal:cancellation.signal});
         if (!response.ok || !payload.choices?.length) throw new HttpError(502, `The visual review provider: ${payload.error?.message || `HTTP ${response.status}`}`);
         if(payload.usage?.cost == null) costKnown=false; else cost+=payload.usage.cost;

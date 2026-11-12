@@ -252,7 +252,8 @@ player.addEventListener('load', () => { if (engine !== 'html' && code) player.co
 async function generate(extra = {}) {
   const response = await fetch('/api/motion', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: workController?.signal,
-    body: JSON.stringify({ prompt, engine, originalPrompt: pendingBrief?.originalPrompt || prompt, history: pendingBrief?.history || [], style: pendingBrief?.style || '', ...extra }),
+    // Outside a send (a crash during playback) pendingBrief is null, so fall back to the accepted brief, history and style.
+    body: JSON.stringify({ prompt, engine, originalPrompt: pendingBrief?.originalPrompt || originalPrompt || prompt, history: pendingBrief?.history || history, style: pendingBrief ? pendingBrief.style : lastGood?.style || '', ...extra }),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
@@ -471,6 +472,7 @@ addEventListener('message', async (event) => {
     // One automatic repair: The model gets its own code and the error. A second failure is shown for a manual edit.
     if (!repaired && prompt) {
       repaired = true;
+      setBusy(true);
       showThinking('Fixing the preview');
       setStatus('Fixing the preview…');
       const repairToken = runToken;

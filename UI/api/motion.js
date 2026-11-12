@@ -2,7 +2,7 @@
 // the Motion key (MOTION_OPENROUTER_API_KEY, see _motion-provider.js); the live site refuses, so nothing here costs money or leaks a key in production.
 //   POST { prompt, engine, originalPrompt?, history?, previous?, error? } -> { code }
 const { HttpError, send, fail } = require('./_lib');
-const {requestProvider, motionKey} = require('./_motion-provider');
+const {requestProvider, motionKey, PROVIDER, assertLocal, readJson} = require('./_motion-provider');
 const fs = require('fs');
 const path = require('path');
 
@@ -40,8 +40,6 @@ function styleReference(style) {
 }
 
 const MODEL = process.env.MOTION_MODEL || 'xiaomi/mimo-v2.6-flash';
-// Same rule as the app's AI: only providers that keep no data and don't train on it.
-const PROVIDER = { zdr: true, data_collection: 'deny', sort: 'latency' };
 
 // Shared creative direction gives each engine the same brand and visual standards. A user's explicit
 // creative choices always win; the defaults apply only when the brief leaves them open.
@@ -118,12 +116,6 @@ function extractCode(text) {
   return (match ? match[1] : text).trim();
 }
 
-async function readJson(req) {
-  let text = '';
-  for await (const chunk of req) { text += chunk; if (text.length > 200_000) throw new HttpError(413, 'Request too large.'); }
-  try { return JSON.parse(text || '{}'); } catch { throw new HttpError(400, 'The request is not valid JSON.'); }
-}
-
 // Validate the proposed composition before asking the model to implement it.
 // Coordinates are normalized to the output frame; backgrounds are not decorations.
 function validatePlan(plan) {
@@ -187,11 +179,9 @@ async function callWithLengthRetry(instruction, firstLimit, retryLimit, phase, s
 
 module.exports = async (req, res) => {
   try {
-    const host = String(req.headers.host || '');
-    if (!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host)) throw new HttpError(404, 'Not found.');
-    if (req.method !== 'POST') throw new HttpError(405, 'Use POST.');
+    assertLocal(req);
     if (!motionKey()) throw new HttpError(503, 'Add MOTION_OPENROUTER_API_KEY to ~/.config/relio-motion/.env (the Motion key, not the Relio Clips one).');
-    const body = await readJson(req);
+    const body = await readJson(req, 200_000);
     if (!Object.hasOwn(RULES, body.engine)) throw new HttpError(400, 'Unknown engine.');
     if (body.style !== undefined && body.style !== '' && !Object.hasOwn(STYLE_FILES, body.style)) throw new HttpError(400, 'Unknown video style.');
     if (typeof body.prompt !== 'string' || !body.prompt.trim()) throw new HttpError(400, 'Describe the video first.');
@@ -203,7 +193,7 @@ module.exports = async (req, res) => {
     res.once?.('close', () => { if (!res.writableEnded) cancellation.abort(); });
     const started = Date.now();
     let planResult = null, planningCost = 0, costKnown = true;
-    if (body.style && !body.error && !body.visualFeedback) {
+    if (body.style && !body.previous) {
       const config = STYLE_FILES[body.style];
       const reference = fs.readFileSync(path.join(__dirname, '_motion-styles', config.file), 'utf8');
       const styleCard = reference.slice(reference.indexOf('STYLE CARD'), reference.indexOf('H HELPER LIBRARY'));
@@ -232,3 +222,4 @@ module.exports = async (req, res) => {
 };
 
 module.exports.extractCode = extractCode;
+module.exports.STYLE_FILES = STYLE_FILES;

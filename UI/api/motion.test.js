@@ -100,6 +100,7 @@ test('all three styles include the corresponding visual reference on revisions',
     const text = await request({engine:'canvas', prompt:'Make it gentler', originalPrompt:original, previous, style});
     assert.ok(text.includes(`Name: ${name}`));
     assert.match(text, /Latest user change request: "Make it gentler"/);
+    assert.doesNotMatch(text, /Private production plan/); // a revision keeps the current layout, no fresh plan
   }
 });
 

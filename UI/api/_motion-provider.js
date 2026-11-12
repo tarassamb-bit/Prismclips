@@ -18,6 +18,25 @@ function motionKey() {
   } catch { return null; }
 }
 
+// Same rule as the app's AI: only providers that keep no data and don't train on it.
+const PROVIDER = Object.freeze({zdr: true, data_collection: 'deny', sort: 'latency'});
+const LOCAL_ORIGINS = ['http://localhost:4173', 'http://127.0.0.1:4173'];
+
+// Motion is local-only. The Host check keeps it off the live site; the Origin check stops another
+// web page (or generated code in the sandbox, whose Origin is "null") from spending the Motion key.
+function assertLocal(req) {
+  if (!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(String(req.headers.host || ''))) throw new HttpError(404, 'Not found.');
+  const origin = req.headers.origin;
+  if (origin !== undefined && !LOCAL_ORIGINS.includes(origin)) throw new HttpError(403, 'Forbidden.');
+  if (req.method !== 'POST') throw new HttpError(405, 'Use POST.');
+}
+
+async function readJson(req, limit) {
+  let text = '';
+  for await (const chunk of req) { text += chunk; if (text.length > limit) throw new HttpError(413, 'Request too large.'); }
+  try { return JSON.parse(text || '{}'); } catch { throw new HttpError(400, 'The request is not valid JSON.'); }
+}
+
 // Node fetch has its own headers/body deadlines. The native HTTPS request has
 // no application deadline and remains abortable when the user presses Stop.
 function providerFetch(url, init) {
@@ -61,4 +80,4 @@ async function requestProvider(url, init, {signal, delays = [1000, 3000], fetche
     await sleep(delays[attempt]);
   }
 }
-module.exports = {requestProvider, motionKey};
+module.exports = {requestProvider, motionKey, PROVIDER, assertLocal, readJson};
