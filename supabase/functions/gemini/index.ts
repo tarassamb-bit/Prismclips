@@ -1,13 +1,11 @@
 // Relio's AI server. The app sends Gemini-format requests here, signed in with its Supabase session; this function
 // forwards them to OpenRouter with the OPENROUTER_API_KEY secret and answers in the same Gemini format.
 // The key lives only in Supabase's secrets, never in the app. Set it with Project Settings → Edge Functions → Secrets.
-// OPENROUTER_MODEL (default Mimo) is tried first, then one paid fallback (OPENROUTER_FALLBACK_MODEL) that takes audio,
-// images and text. Every failed attempt is logged in the ai_failures table. The web app uses UI/api/gemini.js instead.
+// OPENROUTER_MODEL (default Mimo) is tried twice; OPENROUTER_FALLBACK_MODEL, when set, replaces the second try. Every failed attempt is logged in the ai_failures table. The web app uses UI/api/gemini.js instead.
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 // No free models: they are rate-limited exactly when they are needed.
 const DEFAULT_MODEL = "xiaomi/mimo-v2.6-flash";
-const DEFAULT_FALLBACK = "google/gemini-3.8-flash";
 // Only providers that keep no data (zero data retention) and don't train on it; among those, the quickest to answer.
 const PROVIDER = { zdr: true, data_collection: "deny", sort: "latency" };
 
@@ -241,8 +239,8 @@ Deno.serve(async (request) => {
   if (refused || !session) return refused ?? fail(401, "Sign in to your Relio account to continue.");
 
   const chosen = Deno.env.get("OPENROUTER_MODEL") || DEFAULT_MODEL;
-  const fallback = Deno.env.get("OPENROUTER_FALLBACK_MODEL") || DEFAULT_FALLBACK;
-  // Audio: MiMo, then Gemini, each with a short try. Text and images: MiMo, then Gemini.
+  const fallback = Deno.env.get("OPENROUTER_FALLBACK_MODEL") || chosen;
+  // MiMo, then MiMo again on another provider (no Gemini by default: it cost more for the same work).
   const models = [chosen, fallback];
   let status = 503, reply: any = null;
   const failures: string[] = [];
@@ -260,7 +258,7 @@ Deno.serve(async (request) => {
     const limit = attempt === models.length - 1 ? left : Math.min(perTry, left);
     const tried = Date.now();
     // Audio on MiMo goes to one provider only, so every attempt (a timeout too) names it.
-    const pinned = converted.kind === "audio" && model === chosen ? (Deno.env.get("OPENROUTER_AUDIO_PROVIDER") || AUDIO_PROVIDER) : null;
+    const pinned = converted.kind === "audio" && attempt === 0 ? (Deno.env.get("OPENROUTER_AUDIO_PROVIDER") || AUDIO_PROVIDER) : null;
     const failure = (error_type: string, extra: Record<string, unknown> = {}) =>
       logFailure(session, { model, kind: converted.kind, attempt: attempt + 1, error_type, ms: Date.now() - tried, ...extra });
     // Every attempt, served or not, is logged with its model, time and provider when OpenRouter named one (never on a timeout).
@@ -272,7 +270,9 @@ Deno.serve(async (request) => {
       upstream = await fetch(OPENROUTER_URL, {
         method: "POST",
         headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json", "HTTP-Referer": "https://relioclips.com", "X-Title": "Relio Clips" },
-        body: JSON.stringify({ model, ...converted.request, ...(pinned ? { provider: { ...converted.request.provider, order: [pinned], allow_fallbacks: false } } : {}) }),
+        body: JSON.stringify({ model, ...converted.request, ...(pinned ? { provider: { ...converted.request.provider, order: [pinned], allow_fallbacks: false } } : {}),
+          // The second audio try skips the pinned provider that just failed.
+          ...(converted.kind === "audio" && attempt === 1 ? { provider: { ...converted.request.provider, ignore: [Deno.env.get("OPENROUTER_AUDIO_PROVIDER") || AUDIO_PROVIDER] } } : {}) }),
         // Answer before Supabase stops the function at 150 s, so the app gets a clear "busy" and retries.
         signal,
       });

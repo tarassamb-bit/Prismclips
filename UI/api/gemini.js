@@ -6,10 +6,10 @@
 // Keep the two copies in step when changing models, limits or usage accounting.
 const SUPABASE_URL = 'https://isdplhahgggundbohmlr.supabase.co';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-// Mimo first; one paid model that takes audio, images and text answers when Mimo fails twice. No free models: they are
-// rate-limited exactly when they are needed.
+// MiMo only, retried on other providers when one stalls. No Gemini fallback by default (it cost more than MiMo for the
+// same work); set OPENROUTER_FALLBACK_MODEL to bring a last-resort model back. No free models: they are rate-limited
+// exactly when they are needed.
 const DEFAULT_MODEL = 'xiaomi/mimo-v2.6-flash';
-const DEFAULT_FALLBACK = 'google/gemini-3.8-flash';
 // Only providers that keep no data (zero data retention) and don't train on it; among those, the quickest to answer.
 const PROVIDER = { zdr: true, data_collection: 'deny', sort: 'latency' };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -191,10 +191,9 @@ async function handler(req, res) {
   if (!user) return;
 
   const chosen = process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
-  const fallback = process.env.OPENROUTER_FALLBACK_MODEL || DEFAULT_FALLBACK;
-  // Audio: MiMo on its pinned provider, MiMo on any other provider, then Gemini, each with a short try. A MiMo audio
-  // timeout is usually one stalled provider, and a second MiMo try costs about a sixth of a Gemini answer.
-  // Text and images: MiMo, then Gemini.
+  const fallback = process.env.OPENROUTER_FALLBACK_MODEL || chosen;
+  // Audio: MiMo on its pinned provider, MiMo on any other provider, then MiMo once more with all the time left. A MiMo
+  // timeout is usually one stalled provider. Text and images: MiMo twice.
   const models = converted.kind === 'audio' ? [chosen, chosen, fallback] : [chosen, fallback];
   const audioProvider = process.env.OPENROUTER_AUDIO_PROVIDER || AUDIO_PROVIDER;
   let status = 503, reply = null;
