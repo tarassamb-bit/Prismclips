@@ -2,7 +2,7 @@
 // the Motion key (MOTION_OPENROUTER_API_KEY, see _motion-provider.js); the live site refuses, so nothing here costs money or leaks a key in production.
 //   POST { prompt, engine, originalPrompt?, history?, previous?, error? } -> { code }
 const { HttpError, send, fail } = require('./_lib');
-const {requestProvider, motionKey, PROVIDER, assertLocal, readJson} = require('./_motion-provider');
+const {requestProvider, motionKey, PROVIDER, assertLocal, readJson, pickModel, reasoningFor, newTally, addUsage, logRun} = require('./_motion-provider');
 const fs = require('fs');
 const path = require('path');
 
@@ -140,36 +140,33 @@ function validatePlan(plan) {
   return Math.abs(end - duration) > 0.001 ? 'The last beat must end at the video duration.' : '';
 }
 
-class OutputLimitError extends Error {
-  constructor(usd) { super('Model output limit reached'); this.usd = usd; }
-}
+class OutputLimitError extends Error {}
 
-async function callModel(instruction, maxTokens, signal) {
+async function callModel(instruction, maxTokens, signal, pick, tally) {
     const {response, data:answer} = await requestProvider('https://openrouter.ai/api/v1/chat/completions', {
       method:'POST',
       headers:{Authorization:`Bearer ${motionKey()}`, 'Content-Type':'application/json', 'HTTP-Referer':'https://relioclips.com', 'X-Title':'Relio Clips'},
-      body:JSON.stringify({model:MODEL, max_tokens:maxTokens, reasoning:{effort:'medium',exclude:true}, provider:PROVIDER, messages:[{role:'user',content:instruction}]}),
+      body:JSON.stringify({model:pick.id, max_tokens:maxTokens, reasoning:reasoningFor(pick), provider:PROVIDER, messages:[{role:'user',content:instruction}]}),
     }, {signal});
     if (!response.ok || !answer.choices?.length) throw new HttpError(502, `The model provider: ${answer.error?.message || `HTTP ${response.status}`}`);
+    addUsage(tally, answer.usage);
     const choice = answer.choices[0];
     const content = choice.message?.content ?? '';
     const code = extractCode(content);
     console.log(JSON.stringify({ motion: true, finish: choice.finish_reason, contentChars: (choice.message?.content ?? '').length, reasoningChars: (choice.message?.reasoning ?? '').length, completion: answer.usage?.completion_tokens }));
-    if (choice.finish_reason === 'length') throw new OutputLimitError(answer.usage?.cost ?? null);
+    if (choice.finish_reason === 'length') throw new OutputLimitError('Model output limit reached');
     if (!code) throw new HttpError(502, 'The model returned an empty response. Please try again.');
-    return {code, model: answer.model, provider: answer.provider, usd: answer.usage?.cost ?? null};
+    return {code, model: answer.model, provider: answer.provider};
 }
 
 // A length stop can happen during either the plan or the code. Retry once with a
 // modestly larger ceiling; it is a ceiling, so short outputs do not cost more.
-async function callWithLengthRetry(instruction, firstLimit, retryLimit, phase, signal) {
-  try { return await callModel(instruction, firstLimit, signal); }
+async function callWithLengthRetry(instruction, firstLimit, retryLimit, phase, signal, choice, tally) {
+  try { return await callModel(instruction, firstLimit, signal, choice, tally); }
   catch (error) {
     if (!(error instanceof OutputLimitError)) throw error;
     try {
-      const result = await callModel(`${instruction}\n\nComplete the entire response. Keep it concise and avoid repetitive code or commentary.`, retryLimit, signal);
-      result.usd = error.usd == null || result.usd == null ? null : error.usd + result.usd;
-      return result;
+      return await callModel(`${instruction}\n\nComplete the entire response. Keep it concise and avoid repetitive code or commentary.`, retryLimit, signal, choice, tally);
     } catch (retryError) {
       if (retryError instanceof OutputLimitError) throw new HttpError(502, `The model ran out of space while ${phase}, even after a retry. Try a simpler request.`);
       throw retryError;
@@ -178,6 +175,7 @@ async function callWithLengthRetry(instruction, firstLimit, retryLimit, phase, s
 }
 
 module.exports = async (req, res) => {
+  let run = null;
   try {
     assertLocal(req);
     if (!motionKey()) throw new HttpError(503, 'Add MOTION_OPENROUTER_API_KEY to ~/.config/relio-motion/.env (the Motion key, not the Relio Clips one).');
@@ -189,10 +187,12 @@ module.exports = async (req, res) => {
     if (typeof body.originalPrompt === 'string' && body.originalPrompt.length > 2000) throw new HttpError(400, 'Keep the original brief to 2,000 characters or fewer.');
     if (body.visualFeedback !== undefined && (typeof body.visualFeedback !== 'string' || body.visualFeedback.length > 2000 || !body.previous)) throw new HttpError(400, 'Invalid visual review feedback.');
     if (body.previous != null && (typeof body.previous !== 'string' || body.previous.length > 100000)) throw new HttpError(413, 'The existing video code is too large to revise.');
+    const choice = pickModel(body, MODEL), tally = newTally();
     const cancellation = new AbortController();
     res.once?.('close', () => { if (!res.writableEnded) cancellation.abort(); });
     const started = Date.now();
-    let planResult = null, planningCost = 0, costKnown = true;
+    run = {kind: body.visualFeedback ? 'correction' : body.error ? 'repair' : body.previous ? 'revision' : 'generation', choice, tally, started, style: body.style || null};
+    let planResult = null;
     if (body.style && !body.previous) {
       const config = STYLE_FILES[body.style];
       const reference = fs.readFileSync(path.join(__dirname, '_motion-styles', config.file), 'utf8');
@@ -201,8 +201,7 @@ module.exports = async (req, res) => {
       const planningPrompt = `You are a motion-design director. Produce a concise production plan for a short 9:16 animation. This plan will be used by a code generator, not shown on screen.\nOriginal user brief: ${JSON.stringify(body.originalPrompt || body.prompt)}\nEarlier user changes: ${JSON.stringify(earlier)}\nLatest request: ${JSON.stringify(body.prompt)}\nSelected reference style:\n${styleCard}\n\nPlan 2–4 timed beats with a specific subject-relevant visual composition, its motion, transitions and exact visible words for each. Define how the first frame is already visually engaging and the ending resolves. Give concrete layout and scale, not vague adjectives, random decoration, or invented claims. Treat qualitative feedback as direction, never literal text. The user's explicit wording, requested duration and colors override the style example. When exact words are supplied, do not invent any other visible words. The reference example is a style reference, not a script; do not borrow its topic or props unless relevant. Use only artwork the generator can draw with code; no photographs, external assets, sound, or unsupported libraries. Avoid generic title cards. Give each visible text block and each foreground decorative graphic a bounding box using normalized frame coordinates 0 to 1. Text boxes must remain inside x=0.06 to 0.94 and y=0.08 to 0.92, and stay at least 0.015 apart from other text and foreground graphics. Do not put a rule, line or shape through text. A full-frame background is not a foreground decoration. Keep text in its safe box throughout transitions, do not crop headlines. Output only valid JSON with this shape: {"duration":8,"beats":[{"start":0,"end":2,"visual":"...","motion":"...","text":[{"content":"...","box":{"x":0.1,"y":0.3,"w":0.8,"h":0.1}}],"decorations":[{"x":0.2,"y":0.6,"w":0.6,"h":0.02}]}]}. The decorations array contains bounding box objects directly, never strings or nested boxes. If there are no foreground lines or shapes, use an empty decorations array. All four coordinates are numbers. Use 2–4 beats; they must start at zero, be continuous and finish exactly at duration. Duration must be between 4 and 15 seconds. Include no markdown or code.`;
       let plan, problem = '';
       for (let attempt = 0; attempt < 2; attempt++) {
-        planResult = await callWithLengthRetry(planningPrompt + (problem ? `\n\nCorrect this problem in your previous plan: ${problem}` : ''), 3000, 6000, 'planning the video', cancellation.signal);
-        if (planResult.usd == null) costKnown = false; else planningCost += planResult.usd;
+        planResult = await callWithLengthRetry(planningPrompt + (problem ? `\n\nCorrect this problem in your previous plan: ${problem}` : ''), 3000, 6000, 'planning the video', cancellation.signal, choice, tally);
         try { plan = JSON.parse(planResult.code); problem = planResult.code.length > 10000 ? 'Keep the plan concise.' : validatePlan(plan); }
         catch { problem = 'Return valid JSON in the specified format.'; }
         if (!problem) break;
@@ -210,13 +209,15 @@ module.exports = async (req, res) => {
       if (problem) throw new HttpError(502, `The video plan needs another try: ${problem}`);
       planResult.code = JSON.stringify({duration:plan.duration, beats:plan.beats});
     }
-    const result = await callWithLengthRetry(prompt({...body, creativePlan: planResult?.code}), 24000, 32000, 'writing the animation', cancellation.signal);
+    const result = await callWithLengthRetry(prompt({...body, creativePlan: planResult?.code}), 24000, 32000, 'writing the animation', cancellation.signal, choice, tally);
     const {code, model, provider} = result;
-    const usd = costKnown && result.usd != null ? planningCost + result.usd : null;
+    const usd = tally.usdKnown ? tally.usd : null;
     const ms = Date.now() - started;
-    console.log(JSON.stringify({motion:true, engine:body.engine, model, provider, ms, chars:code.length, usd, planned:Boolean(planResult)}));
+    logRun({...run, started: undefined, ms, provider, planned: Boolean(planResult)});
+    run = null;
     send(res, 200, { code, model, provider, usd, ms });
   } catch (error) {
+    if (run) logRun({...run, started: undefined, ms: Date.now() - run.started, failed: String(error.message || error).slice(0, 200)});
     if (!res.destroyed) fail(res, error);
   }
 };

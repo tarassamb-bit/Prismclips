@@ -31,6 +31,45 @@ function assertLocal(req) {
   if (req.method !== 'POST') throw new HttpError(405, 'Use POST.');
 }
 
+// The page's model list is the allowlist. zdr stays on for every request, whatever the model.
+const MODELS = require('../motion/models.json');
+const EFFORTS = ['low', 'medium', 'high'];
+
+/** The model and reasoning level for a request. No model given: the env default (old behavior). */
+function pickModel(body, fallback) {
+  if (body.model === undefined) return {id: fallback, effort: null};
+  const model = MODELS.find((m) => m.id === body.model);
+  if (!model) throw new HttpError(400, 'Unknown model.');
+  if (!model.effort) return {id: model.id, effort: null};
+  const effort = body.reasoning ?? 'medium';
+  if (!EFFORTS.includes(effort)) throw new HttpError(400, 'Unknown reasoning level.');
+  return {id: model.id, effort};
+}
+// Models without a level setting only switch reasoning on; "medium" is what they always got.
+const reasoningFor = (choice) => ({effort: choice.effort || 'medium', exclude: true});
+
+/** Running totals for one API call: tokens and cost over every model request it made. */
+function newTally() { return {requests: 0, promptTokens: 0, completionTokens: 0, reasoningTokens: 0, usd: 0, usdKnown: true}; }
+function addUsage(tally, usage) {
+  tally.requests++;
+  tally.promptTokens += usage?.prompt_tokens || 0;
+  tally.completionTokens += usage?.completion_tokens || 0;
+  tally.reasoningTokens += usage?.completion_tokens_details?.reasoning_tokens || 0;
+  if (usage?.cost == null) tally.usdKnown = false; else tally.usd += usage.cost;
+}
+
+// One JSON line per run, next to the Motion key, so runs can be compared per model.
+const RUN_LOG = process.env.MOTION_RUN_LOG || path.join(os.homedir(), '.config', 'relio-motion', 'runs.jsonl');
+function logRun({kind, choice, tally, ms, ...extra}) {
+  const entry = {at: new Date().toISOString(), kind, model: choice.id, reasoning: choice.effort || 'default', requests: tally.requests,
+    promptTokens: tally.promptTokens, completionTokens: tally.completionTokens, reasoningTokens: tally.reasoningTokens,
+    usd: tally.usdKnown ? Number(tally.usd.toFixed(6)) : null, ms, ...extra};
+  console.log(JSON.stringify({motionRun: entry}));
+  if (process.env.NODE_TEST_CONTEXT) return;
+  try { fs.mkdirSync(path.dirname(RUN_LOG), {recursive: true}); fs.appendFileSync(RUN_LOG, JSON.stringify(entry) + '\n'); }
+  catch (error) { console.warn(JSON.stringify({motionRunLog: 'write-failed', code: error.code})); }
+}
+
 async function readJson(req, limit) {
   let text = '';
   for await (const chunk of req) { text += chunk; if (text.length > limit) throw new HttpError(413, 'Request too large.'); }
@@ -80,4 +119,4 @@ async function requestProvider(url, init, {signal, delays = [1000, 3000], fetche
     await sleep(delays[attempt]);
   }
 }
-module.exports = {requestProvider, motionKey, PROVIDER, assertLocal, readJson};
+module.exports = {requestProvider, motionKey, PROVIDER, assertLocal, readJson, MODELS, pickModel, reasoningFor, newTally, addUsage, logRun};

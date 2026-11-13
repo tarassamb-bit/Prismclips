@@ -129,6 +129,8 @@ function setBusy(nextBusy) {
   $('#make').hidden = busy && Boolean(workController);
   $('#engine').disabled = busy;
   $('#style').disabled = busy;
+  modelSelect.disabled = busy;
+  reasoningSelect.disabled = busy;
 }
 function addAssistantMessage(text) {
   const message = document.createElement('div');
@@ -193,14 +195,44 @@ function fitComposerSelect(select) {
   Object.assign(measure.style, {position:'fixed', visibility:'hidden', whiteSpace:'pre', font});
   measure.textContent = select.selectedOptions[0]?.textContent || '';
   document.body.append(measure);
-  select.style.width = `${Math.ceil(measure.getBoundingClientRect().width) + 38}px`;
+  select.style.width = `${Math.ceil(measure.getBoundingClientRect().width) + 42}px`;
   measure.remove();
 }
 for (const select of [$('#style')]) {
   select.addEventListener('change', () => fitComposerSelect(select));
   fitComposerSelect(select);
 }
-document.fonts.ready.then(() => fitComposerSelect($('#style')));
+document.fonts.ready.then(() => ['#style', '#model', '#reasoning'].forEach((id) => fitComposerSelect($(id))));
+
+// Model picker: the list in models.json is also the server's allowlist. The last choice is remembered in this browser.
+const modelSelect = $('#model'), reasoningSelect = $('#reasoning');
+let models = [];
+const remember = (key, value) => { try { localStorage.setItem(key, value); } catch {} };
+const recall = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
+function syncReasoning() {
+  reasoningSelect.parentElement.hidden = !models.find((m) => m.id === modelSelect.value)?.effort;
+  fitComposerSelect(modelSelect);
+  fitComposerSelect(reasoningSelect);
+}
+fetch('/motion/models.json').then((response) => response.json()).then((list) => {
+  models = list;
+  modelSelect.replaceChildren(...list.map((m) => {
+    const option = new Option(`${m.label}${m.batch ? ' · slow (batch)' : ''} · ${m.zdr ? 'ZDR' : 'no ZDR endpoint listed'}`, m.id);
+    option.title = m.id;
+    return option;
+  }));
+  const savedModel = recall('motion-model'), savedReasoning = recall('motion-reasoning');
+  if (list.some((m) => m.id === savedModel)) modelSelect.value = savedModel;
+  if (['low', 'medium', 'high'].includes(savedReasoning)) reasoningSelect.value = savedReasoning;
+  syncReasoning();
+}).catch(() => setStatus('The model list could not be loaded, so the default model is used.', true));
+modelSelect.addEventListener('change', () => { remember('motion-model', modelSelect.value); syncReasoning(); });
+reasoningSelect.addEventListener('change', () => { remember('motion-reasoning', reasoningSelect.value); fitComposerSelect(reasoningSelect); });
+/** The picked model, plus its reasoning level when the model has one. Empty: the server default. */
+function modelChoice() {
+  const model = models.find((m) => m.id === modelSelect.value);
+  return model ? { model: model.id, ...(model.effort ? { reasoning: reasoningSelect.value } : {}) } : {};
+}
 $('#prompt').addEventListener('input', updateComposer);
 $('#prompt').addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('#make').click(); } });
 document.querySelectorAll('[data-suggestion]').forEach((button) => button.addEventListener('click', () => { $('#prompt').value = button.dataset.suggestion; updateComposer(); $('#prompt').focus(); }));
@@ -253,7 +285,7 @@ async function generate(extra = {}) {
   const response = await fetch('/api/motion', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: workController?.signal,
     // Outside a send (a crash during playback) pendingBrief is null, so fall back to the accepted brief, history and style.
-    body: JSON.stringify({ prompt, engine, originalPrompt: pendingBrief?.originalPrompt || originalPrompt || prompt, history: pendingBrief?.history || history, style: pendingBrief ? pendingBrief.style : lastGood?.style || '', ...extra }),
+    body: JSON.stringify({ prompt, engine, originalPrompt: pendingBrief?.originalPrompt || originalPrompt || prompt, history: pendingBrief?.history || history, style: pendingBrief ? pendingBrief.style : lastGood?.style || '', ...modelChoice(), ...extra }),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
@@ -390,7 +422,7 @@ addEventListener('message',function(e){if(e.source!==parent||e.data?.type!=='ren
 async function reviewFrames(frames, reference) {
   const response = await fetch('/api/motion-review', {
     method:'POST', headers:{'Content-Type':'application/json'}, signal:workController?.signal,
-    body:JSON.stringify({brief:pendingBrief?.originalPrompt || originalPrompt || prompt, history:pendingBrief?.history || history, latest:prompt, style:pendingBrief?.style || '', frames, ...(reference ? {reference} : {})}),
+    body:JSON.stringify({brief:pendingBrief?.originalPrompt || originalPrompt || prompt, history:pendingBrief?.history || history, latest:prompt, style:pendingBrief?.style || '', frames, ...modelChoice(), ...(reference ? {reference} : {})}),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || 'Visual review failed.');

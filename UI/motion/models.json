@@ -1,0 +1,11 @@
+[
+  {"id": "xiaomi/mimo-v2.6-flash", "label": "MiMo-V2.6-Flash", "zdr": true, "batch": false, "effort": false},
+  {"id": "xiaomi/mimo-v2.6-pro", "label": "MiMo-V2.6-Pro", "zdr": true, "batch": false, "effort": false},
+  {"id": "google/gemini-4-hydrogen", "label": "Gemini 4 Hydrogen", "zdr": true, "batch": false, "effort": true},
+  {"id": "google/gemini-4-hydrogen:batch", "label": "Gemini 4 Hydrogen", "zdr": false, "batch": true, "effort": true},
+  {"id": "google/gemini-4-carbon", "label": "Gemini 4 Carbon", "zdr": true, "batch": false, "effort": true},
+  {"id": "google/gemini-4-carbon:batch", "label": "Gemini 4 Carbon", "zdr": false, "batch": true, "effort": true},
+  {"id": "google/gemini-4-argon", "label": "Gemini 4 Argon", "zdr": true, "batch": false, "effort": true},
+  {"id": "google/gemini-4-argon:batch", "label": "Gemini 4 Argon", "zdr": false, "batch": true, "effort": true},
+  {"id": "meta/muse-ember", "label": "Muse Ember", "zdr": true, "batch": false, "effort": true}
+]
