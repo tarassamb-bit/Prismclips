@@ -217,7 +217,7 @@ function syncReasoning() {
 fetch('/motion/models.json').then((response) => response.json()).then((list) => {
   models = list;
   modelSelect.replaceChildren(...list.map((m) => {
-    const option = new Option(`${m.label}${m.batch ? ' · slow (batch)' : ''}`, m.id);
+    const option = new Option(m.label, m.id);
     option.title = m.id;
     return option;
   }));
