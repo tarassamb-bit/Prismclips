@@ -292,7 +292,7 @@ async function showHome(view = null) {
     const info = `${plural(p.segments.length, 'Short')} · ${dateText(p.updated ?? p.created)}`;
     const left = daysLeft(p);
     const expiry = left <= 2 ? `<span class="missing small">${left <= 1 ? 'Deleted tomorrow' : `Deleted in ${left} days`} unless you edit or export it</span>` : '';
-    const away = noVideo.has(p.id) ? `<span class="missing small">${noVideo.get(p.id) ? 'Video downloads when you open it' : 'Video not on this device'}</span>` : '';
+    const away = noVideo.has(p.id) && !noVideo.get(p.id) ? '<span class="missing small">Video not on this device</span>' : '';
     const body = `<div class="poster">${poster ? `<img alt="" src="${poster}">` : ''}<span class="badge">${clock(p.media[0]?.duration ?? 0)}</span></div>
           <strong class="p-title">${esc(p.title)}</strong><span class="muted small">${info}</span>${expiry}${away}`;
     return `<div class="project-card" draggable="true" data-project="${esc(p.id)}">
