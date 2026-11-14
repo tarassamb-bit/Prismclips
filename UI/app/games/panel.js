@@ -19,17 +19,16 @@ const esc = (text) => String(text).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(
 const icon = (game) => `<svg viewBox="0 0 24 24" aria-hidden="true">${game.icon}</svg>`;
 
 /**
- * Shows the panel in `host`. `db()` returns the Supabase client (or null), `signedIn()` says whether scores can be saved,
- * `onView()` runs when the person asks to see their finished Shorts. Returns { ready(count), close() }.
+ * Fills `host` (the /app/games screen) with the games. `db()` returns the Supabase client (or null), `signedIn()` says whether scores can be saved,
+ * `onView()` runs when the person asks to see their finished Shorts, `onHide()` when they leave the games while the run goes on. Returns { ready(count), close() }.
  */
-export function mountGames(host, { db, signedIn, onView }) {
-  host.hidden = false;
+export function mountGames(host, { db, signedIn, onView, onHide }) {
   host.innerHTML = `<section class="games-panel" aria-label="Play while you wait">
       <div class="games-ready" role="status" hidden><strong></strong><button type="button" class="button primary" data-g="view">View Shorts</button></div>
       <header class="games-head">
         <button type="button" class="link games-back" data-g="back" hidden>‹ Games</button>
         <strong class="games-title">Play while you wait</strong>
-        <button type="button" class="games-min" data-g="min" aria-label="Hide games" aria-expanded="true">–</button>
+        <button type="button" class="button ghost games-hide" data-g="hide">Hide games</button>
       </header>
       <div class="games-body"></div>
     </section>`;
@@ -58,7 +57,7 @@ export function mountGames(host, { db, signedIn, onView }) {
     panel.querySelector('.games-back').hidden = false;
     panel.querySelector('.games-title').textContent = game.name;
     body.innerHTML = `<div class="game-stage"><p class="muted small">Loading…</p></div>
-      <div class="leaderboard"><h4>This week’s top 10</h4><ol></ol></div>`;
+      <aside class="leaderboard"><h4>This week’s top 10</h4><ol></ol></aside>`;
     leaderboard(game);
     try {
       const module = await game.load();
@@ -98,12 +97,7 @@ export function mountGames(host, { db, signedIn, onView }) {
     else if (action === 'surprise') open(GAMES[Math.floor(Math.random() * GAMES.length)].id);
     else if (action === 'back') picker();
     else if (action === 'view') onView();
-    else if (action === 'min') {
-      const hidden = panel.classList.toggle('minimized');
-      target.setAttribute('aria-expanded', String(!hidden));
-      target.setAttribute('aria-label', hidden ? 'Show games' : 'Hide games');
-      target.textContent = hidden ? '+' : '–';
-    }
+    else if (action === 'hide') onHide();
   });
   picker();
 
@@ -113,13 +107,12 @@ export function mountGames(host, { db, signedIn, onView }) {
       const banner = panel.querySelector('.games-ready');
       banner.querySelector('strong').textContent = count === 1 ? 'Your Short is ready!' : 'Your Shorts are ready!';
       banner.hidden = false;
-      panel.classList.remove('minimized');
+      panel.querySelector('.games-hide').hidden = true; // nothing left to wait for
       banner.querySelector('button').focus({ preventScroll: true });
     },
     close() {
       opening++;
       stop?.(); stop = null;
-      host.hidden = true;
       host.innerHTML = '';
     },
   };

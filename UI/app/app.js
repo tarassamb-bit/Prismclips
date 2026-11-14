@@ -90,6 +90,7 @@ async function route() {
       if (state.create?.project) { state.create.step = step; setScreen('create'); renderCreate(); }
       else startCreate();
     } else if (first === 'settings') await showSettings(second);
+    else if (first === 'games') { if (state.task?.project) await showGames(); else await showHome(); }
     else if (first === 'folder' && second) {
       const folder = (await store.listFolders()).filter(isMine).find((f) => f.id.startsWith(idOf(second)));
       await showHome(folder ? { folderId: folder.id } : null);
@@ -109,7 +110,7 @@ window.addEventListener('popstate', async () => {
 
 // MARK: Boot and the app shell (sidebar, title bar and sign-in card, as in the macOS app)
 
-const SCREEN_TITLES = { home: 'Home', create: 'Create Shorts', settings: 'Settings' };
+const SCREEN_TITLES = { home: 'Home', create: 'Create Shorts', settings: 'Settings', games: 'Play while you wait' };
 
 async function boot() {
   if (!('VideoDecoder' in window && 'VideoEncoder' in window && 'OffscreenCanvas' in window)) {
@@ -1214,7 +1215,7 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
   const project = state.project;
   const projectId = project.id;
   const task = beginTask('Preparing video analysis…', project);
-  openGames();
+  showGames();
   const usedRanges = project.segments.filter((s) => s.mediaId === media.id).map((s) => ({ start: s.start, end: s.start + s.duration }));
   const saved = project.transcripts?.[media.id] ?? null;
   const configuration = {
@@ -1272,9 +1273,9 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
     track('clips_generated', { clips: created.length });
     endTask(task);
     state.selectedId = created[0].id;
-    renderEditor();
-    selectShort(state.selectedId);
-    games?.ready(created.length);
+    // On the games screen the player stays put: a banner on top of the game offers the Shorts.
+    if (state.screen === 'games' && games) games.ready(created.length);
+    else { closeGames(); renderEditor(); selectShort(state.selectedId); }
     // The finished Shorts are saved above; the ones Relio AI couldn't make are offered again instead of silently lost.
     if (missed > 0) {
       showError(`${missed} ${missed === 1 ? 'Short' : 'Shorts'} couldn’t be made`,
@@ -1285,7 +1286,7 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
   } catch (error) {
     if (task.controller.signal.aborted) return;
     endTask(task);
-    closeGames();
+    if (state.screen === 'games') leaveGames();
     reportGenerationError(error, () => retry(options.count));
   }
 }
@@ -1337,9 +1338,9 @@ async function cancelTask({ goHome = true } = {}) {
   task.cancelled = true;
   task.controller.abort();
   endTask(task);
-  closeGames();
   const project = task.project;
-  if (!project || project.segments.length > 0) return;
+  if (!project || project.segments.length > 0) { if (state.screen === 'games') leaveGames(); return; }
+  closeGames();
   await store.deleteProject(project);
   for (const media of project.media) state.sources.delete(media.id);
   requestSync(0);
@@ -1347,15 +1348,32 @@ async function cancelTask({ goHome = true } = {}) {
 }
 
 // "Play while you wait": loaded when a run starts, so its code never delays the page or the AI step.
+// The games fill the screen at /app/games; the progress card stays in the bottom-right corner.
 let games = null;
-async function openGames() {
-  if (games) return;
+async function showGames() {
   const { mountGames } = await import('./games/panel.js').catch(() => ({}));
   // The run may have finished or been cancelled while the panel loaded.
-  if (!mountGames || games || !state.task?.project) return;
-  games = mountGames($('#games'), { db, signedIn: () => Boolean(state.session), onView: closeGames });
+  if (!mountGames || !state.task?.project) return;
+  closeGames();
+  setScreen('games');
+  setUrl('/app/games');
+  $('#app').innerHTML = '<section class="games-screen"></section>';
+  games = mountGames($('.games-screen'), {
+    db, signedIn: () => Boolean(state.session),
+    onView: () => { closeGames(); renderEditor(); selectShort(state.selectedId); },
+    onHide: leaveGames,
+  });
+  renderTask();
 }
 function closeGames() { games?.close(); games = null; }
+/** Back to the screen the run belongs to, without stopping it: the project when it has Shorts, else the Create screen. */
+function leaveGames() {
+  closeGames();
+  if (state.project?.segments.length) { renderEditor(); if (state.selectedId) selectShort(state.selectedId); }
+  else if (state.create?.project) { setScreen('create'); renderCreate(); }
+  else showHome();
+  renderTask();
+}
 
 /** Seconds left, from how far the task got in the time it has run. Null until there is enough to go on. */
 function secondsLeft(task) {
@@ -1424,12 +1442,14 @@ function renderTask() {
       <strong></strong>
       <div class="bar"><div></div></div>
       <span class="muted small eta"></span>
-      <button class="button ghost" data-action="cancel">Cancel</button>
+      <div class="row progress-actions"><button class="button primary" data-action="games" hidden>Play while you wait</button>
+      <button class="button ghost" data-action="cancel">Cancel</button></div>
     </div>`;
   }
   host.querySelector('strong').textContent = task.stage;
   host.querySelector('.bar > div').style.width = `${Math.round((task.progress ?? 0) * 100)}%`;
   host.querySelector('.eta').textContent = leftText(secondsLeft(task));
+  host.querySelector('[data-action="games"]').hidden = !task.project || state.screen === 'games';
   document.documentElement.style.setProperty('--progress-h', `${host.offsetHeight + 12}px`);
 }
 
@@ -1937,6 +1957,7 @@ document.addEventListener('click', async (event) => {
   if (action === 'close') closeDialog();
   else if (action === 'cancel') cancelTask();
   else if (action === 'delete-project') deleteProjectNow(state.project.id);
+  else if (action === 'games') showGames();
   else if (action === 'home') showHome();
   else if (action === 'open') openProject(target.dataset.id);
   else if (action === 'retry-download' && lastDownload) fetchFromCloud(lastDownload.project, lastDownload.media, lastDownload.shortPart);
@@ -2049,7 +2070,7 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && $('#menu')) { closeMenu(); return; }
   if (event.key === 'Escape' && state.dialog) { closeDialog(); return; }
   // Keys in the games panel belong to the game (Space drops a block there, it doesn't play the video).
-  if (event.target.closest('input,textarea,select,#games') || state.dialog) return;
+  if (event.target.closest('input,textarea,select,.games-screen') || state.dialog) return;
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); undo(); }
   if (event.key === ' ') { const play = $('[data-play]'); if (play) { event.preventDefault(); play.click(); } }
 });

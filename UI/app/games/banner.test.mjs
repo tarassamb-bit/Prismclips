@@ -1,4 +1,4 @@
-// Opens the games panel in a headless Chromium, starts a game, then reports the Shorts as ready: the "Shorts ready" banner
+// Opens the games screen in a headless Chromium, starts a game, then reports the Shorts as ready: the "Shorts ready" banner
 // must appear on top of the game (the topmost element at its centre is the banner) and its button must call onView.
 // Needs a Chromium: CHROME=/path/to/chrome, or Playwright's headless shell in its default cache. Skipped without one.
 import test from 'node:test';
@@ -24,13 +24,13 @@ function findChrome() {
 }
 
 const page = `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/app/app.css"></head><body>
-<div id="progress" class="progress"></div><div id="games" class="games-dock" hidden></div>
+<main><section class="games-screen" id="games"></section></main>
 <script type="module">
 import { mountGames } from '/app/games/panel.js';
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 let viewed = false;
 try {
-  const games = mountGames(document.getElementById('games'), { db: () => null, signedIn: () => false, onView: () => { viewed = true; } });
+  const games = mountGames(document.getElementById('games'), { db: () => null, signedIn: () => false, onView: () => { viewed = true; }, onHide: () => {} });
   document.querySelector('[data-g="open"][data-id="stack"]').click();
   for (let i = 0; i < 50 && !document.querySelector('.game-canvas'); i++) await wait(20);
   if (!document.querySelector('.game-canvas')) throw new Error('the game did not start');
@@ -42,6 +42,7 @@ try {
   const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
   if (!banner.contains(top)) throw new Error('something covers the banner: ' + (top?.className || top?.tagName));
   if (!document.querySelector('.game-canvas')) throw new Error('the game was closed by the banner');
+  if (!document.querySelector('.games-hide').hidden) throw new Error('Hide games still shown after the run finished');
   banner.querySelector('[data-g="view"]').click();
   if (!viewed) throw new Error('View Shorts did nothing');
   document.title = 'PASS';
