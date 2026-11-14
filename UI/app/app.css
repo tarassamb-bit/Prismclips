@@ -384,3 +384,42 @@ details.insp-section:not([open]) { gap: 0; }
 /* A project with no Shorts: one clear way forward. */
 .empty-shorts { display: grid; gap: 8px; padding: 18px 0 4px; }
 .empty-shorts .row { gap: 8px; margin-top: 6px; }
+
+/* "Play while you wait" games panel (app/games/): bottom right, above the progress card. Sky is the action colour. */
+.games-dock { position: fixed; right: 20px; bottom: calc(20px + var(--progress-h, 0px)); z-index: 39; width: min(360px, calc(100vw - 40px));
+  max-height: calc(100vh - 40px - var(--progress-h, 0px)); overflow: auto; border-radius: 16px; box-shadow: 0 10px 40px #0006; }
+.games-panel { position: relative; background: var(--surface1); border: 1px solid var(--border); border-radius: 16px; padding: 12px 14px 14px; }
+.games-head { display: flex; align-items: center; gap: 8px; }
+.games-title { flex: 1; font-size: 14px; }
+.games-min { width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--text); font-size: 16px; line-height: 1; }
+.games-panel.minimized .games-body { display: none; }
+.games-body { margin-top: 10px; }
+.games-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.game-card { position: relative; display: grid; justify-items: center; gap: 4px; padding: 12px 6px; border: 1px solid var(--border); border-radius: 12px;
+  background: transparent; color: var(--text); text-align: center; font-size: 12px; }
+.game-card:hover, .game-card:focus-visible { border-color: var(--sky); outline: 0; }
+.game-card svg { width: 26px; height: 26px; fill: none; stroke: var(--sky); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.game-last { position: absolute; top: -8px; padding: 1px 6px; border-radius: 999px; background: var(--sky); color: #10121a; font-size: 10px; }
+.games-surprise { width: 100%; margin-top: 10px; }
+.game-stage { display: grid; justify-items: center; gap: 8px; }
+.game-canvas { width: 100%; max-width: 300px; height: auto; aspect-ratio: 3 / 4; border: 1px solid var(--border); border-radius: 12px; touch-action: none; }
+.draw-canvas { aspect-ratio: 1; cursor: crosshair; }
+.game-canvas:focus-visible { outline: 2px solid var(--sky); }
+.draw-title { font-size: 13px; text-align: center; margin: 0; }
+.draw-actions { gap: 8px; justify-content: center; }
+.reaction-box { width: 100%; max-width: 300px; aspect-ratio: 4 / 3; border: 0; border-radius: 12px; background: var(--surface2); color: var(--text);
+  font: 600 16px Sora, system-ui, sans-serif; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.reaction-box[data-mode="go"] { background: var(--sky); color: #10121a; }
+.reaction-box[data-mode="early"] { background: color-mix(in srgb, var(--coral) 30%, transparent); }
+.reaction-log { margin: 0; text-align: center; }
+.leaderboard { margin-top: 12px; }
+.leaderboard h4 { margin: 0 0 6px; font-size: 12px; }
+.leaderboard ol { margin: 0; padding-left: 20px; font-size: 12px; }
+.leaderboard li span:last-child { float: right; }
+/* Shorts ready: on top of whatever game is open, never behind it. */
+.games-ready { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin: -2px 0 10px; padding: 10px 12px; border-radius: 12px; background: var(--sky); color: #10121a; }
+.games-ready .button.primary { background: #10121a; color: #fff; border-color: #10121a; }
+@media (max-width: 640px) {
+  .games-dock { right: 16px; left: 16px; width: auto; }
+}

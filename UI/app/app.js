@@ -1214,6 +1214,7 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
   const project = state.project;
   const projectId = project.id;
   const task = beginTask('Preparing video analysis…', project);
+  openGames();
   const usedRanges = project.segments.filter((s) => s.mediaId === media.id).map((s) => ({ start: s.start, end: s.start + s.duration }));
   const saved = project.transcripts?.[media.id] ?? null;
   const configuration = {
@@ -1273,6 +1274,7 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
     state.selectedId = created[0].id;
     renderEditor();
     selectShort(state.selectedId);
+    games?.ready(created.length);
     // The finished Shorts are saved above; the ones Relio AI couldn't make are offered again instead of silently lost.
     if (missed > 0) {
       showError(`${missed} ${missed === 1 ? 'Short' : 'Shorts'} couldn’t be made`,
@@ -1283,6 +1285,7 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
   } catch (error) {
     if (task.controller.signal.aborted) return;
     endTask(task);
+    closeGames();
     reportGenerationError(error, () => retry(options.count));
   }
 }
@@ -1334,6 +1337,7 @@ async function cancelTask({ goHome = true } = {}) {
   task.cancelled = true;
   task.controller.abort();
   endTask(task);
+  closeGames();
   const project = task.project;
   if (!project || project.segments.length > 0) return;
   await store.deleteProject(project);
@@ -1341,6 +1345,17 @@ async function cancelTask({ goHome = true } = {}) {
   requestSync(0);
   if (goHome) showHome();
 }
+
+// "Play while you wait": loaded when a run starts, so its code never delays the page or the AI step.
+let games = null;
+async function openGames() {
+  if (games) return;
+  const { mountGames } = await import('./games/panel.js').catch(() => ({}));
+  // The run may have finished or been cancelled while the panel loaded.
+  if (!mountGames || games || !state.task?.project) return;
+  games = mountGames($('#games'), { db, signedIn: () => Boolean(state.session), onView: closeGames });
+}
+function closeGames() { games?.close(); games = null; }
 
 /** Seconds left, from how far the task got in the time it has run. Null until there is enough to go on. */
 function secondsLeft(task) {
@@ -1400,6 +1415,8 @@ function renderTask() {
   if (!host) return;
   const task = state.task;
   host.hidden = !task;
+  // The games panel sits just above the progress card.
+  document.documentElement.style.setProperty('--progress-h', task ? `${host.offsetHeight + 12}px` : '0px');
   if (!task) return;
   // Export updates this every frame; rebuilding the card each time would swallow clicks on Cancel.
   if (!host.querySelector('.progress-card')) {
@@ -1413,6 +1430,7 @@ function renderTask() {
   host.querySelector('strong').textContent = task.stage;
   host.querySelector('.bar > div').style.width = `${Math.round((task.progress ?? 0) * 100)}%`;
   host.querySelector('.eta').textContent = leftText(secondsLeft(task));
+  document.documentElement.style.setProperty('--progress-h', `${host.offsetHeight + 12}px`);
 }
 
 function openDialog(html) {
@@ -2030,7 +2048,8 @@ document.addEventListener('mousedown', (event) => { if (event.target.id === 'dia
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && $('#menu')) { closeMenu(); return; }
   if (event.key === 'Escape' && state.dialog) { closeDialog(); return; }
-  if (event.target.closest('input,textarea,select') || state.dialog) return;
+  // Keys in the games panel belong to the game (Space drops a block there, it doesn't play the video).
+  if (event.target.closest('input,textarea,select,#games') || state.dialog) return;
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); undo(); }
   if (event.key === ' ') { const play = $('[data-play]'); if (play) { event.preventDefault(); play.click(); } }
 });
