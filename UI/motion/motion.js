@@ -535,7 +535,7 @@ addEventListener('message', async (event) => {
     if (!restoring) {
       try {
         reviewPass++;
-        showThinking('Checking sampled frames');
+        showThinking('Checking how it looks');
         const [frames, reference] = await Promise.all([captureReviewFrames(), captureStyleReference(pendingBrief?.style || '')]);
         if (token !== runToken) return;
         const issues = await reviewFrames(frames, reference);
@@ -548,10 +548,11 @@ addEventListener('message', async (event) => {
           run(correction.code);
           return;
         }
-        reviewMessage = issues.length ? `I checked five sampled frames${reference ? ' against the selected style' : ''}, but these issues may still need attention: ${issues.join(' ')}` : `I checked five sampled frames${reference ? ' against the selected style' : ''} and found no obvious issues. Other frames may still need review.`;
+        reviewMessage = issues.length ? `Your video is ready, but a few things may need fixing: ${issues.join(' ')} Ask me to fix them, or describe another change.`
+          : 'Your video is ready. Watch it on the right. Tell me what to change, or press Export MP4 to save it.';
       } catch (error) {
         if (token !== runToken) return;
-        reviewMessage = `Your preview is ready, but I couldn’t complete the visual check: ${error.message || 'Please try again.'}`;
+        reviewMessage = 'Your video is ready. I couldn’t finish checking how it looks, so watch it through before you export.';
       }
     }
     hideThinking();
