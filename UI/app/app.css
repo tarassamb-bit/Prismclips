@@ -268,7 +268,7 @@ details.insp-section:not([open]) { gap: 0; }
 
 /* Settings: category list on the left, cards on the right */
 .settings-layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 32px; max-width: 1040px; padding-top: 6px; }
-.settings-nav { display: grid; gap: 4px; align-content: start; position: sticky; top: 0; }
+.settings-nav { display: grid; gap: 4px; align-content: start; align-self: start; position: sticky; top: 16px; }
 .settings-item { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: transparent; border: 0; border-radius: 12px; padding: 10px 12px; cursor: pointer; color: var(--text); }
 .settings-item:hover { background: var(--surface1); }
 .settings-item[aria-current="page"] { background: var(--surface1); box-shadow: inset 3px 0 0 var(--sky); }
