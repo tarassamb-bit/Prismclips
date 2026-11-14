@@ -208,8 +208,8 @@ document.fonts.ready.then(() => fitComposerSelect($('#style')));
 // Choices are remembered in this browser.
 const STEPS = [['code', 'Writing the code'], ['plan', 'Planning'], ['check', 'Checking frames']];
 const EFFORTS = [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']];
-const modelButton = $('#model-button'), modelMenu = $('#model-menu');
-let models = [], picked = 'default', effort = 'medium', menuView = 'main';
+const modelButton = $('#model-button'), modelMenu = $('#model-menu'), modelSub = $('#model-sub');
+let models = [], picked = 'default', effort = 'medium', sub = null;
 let defaults = { code: 'xiaomi/mimo-v2.6-flash', plan: 'meta/muse-ember', check: 'meta/muse-ember' };
 const remember = (key, value) => { try { localStorage.setItem(key, value); } catch {} };
 const recall = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
@@ -225,15 +225,15 @@ function el(tag, props = {}, ...children) {
   node.append(...children.filter((child) => child != null));
   return node;
 }
-function menuItem({ label, note, checked, value, onClick, role = 'menuitem', back }) {
-  const item = el('button', { type: 'button', className: back ? 'menu-item menu-back' : 'menu-item', onclick: onClick });
+function menuItem({ label, note, badge, checked, value, onClick, role = 'menuitem', opens }) {
+  const item = el('button', { type: 'button', className: 'menu-item', onclick: onClick });
   item.setAttribute('role', role);
   if (role === 'menuitemradio') item.setAttribute('aria-checked', String(Boolean(checked)));
+  if (opens) { item.dataset.sub = opens; item.setAttribute('aria-haspopup', 'menu'); }
   item.append(...[
-    back ? el('span', { className: 'menu-arrow', textContent: '‹', ariaHidden: 'true' }) : null,
-    el('span', { className: 'menu-text' }, el('span', { textContent: label }), note ? el('small', { textContent: note }) : null),
+    el('span', { className: 'menu-text' }, el('span', {}, label, badge ? el('span', { className: 'menu-badge', textContent: badge }) : null), note ? el('small', { textContent: note }) : null),
     value ? el('span', { className: 'menu-value', textContent: value }) : null,
-    value !== undefined && !checked && role === 'menuitem' && !back ? el('span', { className: 'menu-arrow', textContent: '›', ariaHidden: 'true' }) : null,
+    opens ? el('span', { className: 'menu-arrow', textContent: '›', ariaHidden: 'true' }) : null,
     checked ? el('span', { className: 'menu-check', textContent: '✓', ariaHidden: 'true' }) : null,
   ].filter(Boolean));
   return item;
@@ -243,33 +243,38 @@ function renderModelButton() {
   $('#model-effort').textContent = showsEffort() ? EFFORTS.find(([key]) => key === effort)[1] : '';
 }
 function renderModelMenu() {
-  const go = (view) => () => { menuView = view; renderModelMenu(); modelMenu.querySelector('button, select')?.focus(); };
-  const items = [];
-  if (menuView === 'main') {
-    items.push(menuItem({ label: 'Default', note: 'Each step uses its own model', role: 'menuitemradio', checked: picked === 'default', onClick: () => pickModel('default') }));
-    for (const m of models) items.push(menuItem({ label: m.label, note: m.note, role: 'menuitemradio', checked: picked === m.id, onClick: () => pickModel(m.id) }));
-    items.push(el('div', { className: 'menu-sep', role: 'separator' }));
-    if (showsEffort()) items.push(menuItem({ label: 'Effort', value: EFFORTS.find(([key]) => key === effort)[1], onClick: go('effort') }));
-    items.push(menuItem({ label: 'Defaults', value: '', onClick: go('defaults') }));
-  } else if (menuView === 'effort') {
-    items.push(menuItem({ label: 'Effort', back: true, onClick: go('main') }));
-    items.push(el('p', { className: 'menu-hint', textContent: 'Higher effort gives more thorough results, but takes longer and costs more. Models without levels ignore it.' }));
-    for (const [key, label] of EFFORTS) items.push(menuItem({ label, role: 'menuitemradio', checked: effort === key, onClick: () => { effort = key; remember('motion-reasoning', key); closeModelMenu(); } }));
+  modelMenu.replaceChildren(...[
+    menuItem({ label: 'Default', note: 'Each step uses its own model', role: 'menuitemradio', checked: picked === 'default', onClick: () => pickModel('default') }),
+    ...models.map((m) => menuItem({ label: m.label, role: 'menuitemradio', checked: picked === m.id, onClick: () => pickModel(m.id) })),
+    el('div', { className: 'menu-sep', role: 'separator' }),
+    showsEffort() ? menuItem({ label: 'Effort', value: EFFORTS.find(([key]) => key === effort)[1], opens: 'effort', onClick: () => openSub('effort', true) }) : null,
+    menuItem({ label: 'Defaults', opens: 'defaults', onClick: () => openSub('defaults', true) }),
+  ].filter(Boolean));
+  renderModelButton();
+}
+// The Effort and Defaults lists open beside the main menu, which stays open (fixed, so the chat panel can't clip it).
+function openSub(key, focus) {
+  sub = key;
+  for (const row of modelMenu.querySelectorAll('[data-sub]')) { row.classList.toggle('active', row.dataset.sub === key); row.setAttribute('aria-expanded', String(row.dataset.sub === key)); }
+  modelSub.hidden = !key;
+  if (!key) return;
+  if (key === 'effort') {
+    modelSub.replaceChildren(el('p', { className: 'menu-hint', textContent: 'Higher effort gives more thorough results, but takes longer and costs more.' }),
+      ...EFFORTS.map(([level, label]) => menuItem({ label, badge: level === 'medium' ? 'Recommended' : null, role: 'menuitemradio', checked: effort === level, onClick: () => { effort = level; remember('motion-reasoning', level); closeModelMenu(); } })));
   } else {
-    items.push(menuItem({ label: 'Defaults', back: true, onClick: go('main') }));
-    items.push(el('p', { className: 'menu-hint', textContent: 'The model each step uses when Default is picked.' }));
-    for (const [step, label] of STEPS) {
+    modelSub.replaceChildren(el('p', { className: 'menu-hint', textContent: 'The model each step uses when Default is picked.' }), ...STEPS.map(([step, label]) => {
       const select = el('select', { ariaLabel: `${label} model`, onchange: () => { defaults[step] = select.value; remember('motion-defaults', JSON.stringify(defaults)); renderModelButton(); } },
         ...models.map((m) => el('option', { value: m.id, textContent: m.label, selected: defaults[step] === m.id })));
-      items.push(el('label', { className: 'menu-step' }, el('span', { textContent: label }), select));
-    }
+      return el('label', { className: 'menu-step' }, el('span', { textContent: label }), select);
+    }));
   }
-  modelMenu.replaceChildren(...items);
-  renderModelButton();
+  const menu = modelMenu.getBoundingClientRect(), width = modelSub.offsetWidth;
+  modelSub.style.left = `${menu.right + 6 + width <= innerWidth - 8 ? menu.right + 6 : Math.max(8, menu.left - 6 - width)}px`;
+  modelSub.style.bottom = `${innerHeight - menu.bottom}px`;
+  if (focus) (modelSub.querySelector('[aria-checked="true"]') || modelSub.querySelector('button, select'))?.focus();
 }
 function pickModel(id) { picked = id; remember('motion-model', id); closeModelMenu(); }
 function openModelMenu() {
-  menuView = 'main';
   renderModelMenu();
   modelMenu.hidden = false;
   modelButton.setAttribute('aria-expanded', 'true');
@@ -277,18 +282,31 @@ function openModelMenu() {
 }
 function closeModelMenu(focusButton = true) {
   if (modelMenu.hidden) return renderModelButton();
-  modelMenu.hidden = true;
+  sub = null;
+  modelMenu.hidden = modelSub.hidden = true;
   modelButton.setAttribute('aria-expanded', 'false');
   renderModelButton();
   if (focusButton) modelButton.focus();
 }
 modelButton.addEventListener('click', () => modelMenu.hidden ? openModelMenu() : closeModelMenu());
 document.addEventListener('pointerdown', (event) => { if (!modelMenu.hidden && !event.target.closest('.model-picker')) closeModelMenu(false); });
-modelMenu.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') { event.preventDefault(); closeModelMenu(); return; }
+// Hovering a row opens its list, or closes the open one, like a desktop menu.
+modelMenu.addEventListener('pointerover', (event) => {
+  const row = event.target.closest('.menu-item');
+  if (row && (row.dataset.sub || null) !== sub) openSub(row.dataset.sub || null, false);
+});
+modelMenu.parentElement.addEventListener('keydown', (event) => {
+  if (modelMenu.hidden) return;
+  const inSub = modelSub.contains(event.target), row = () => modelMenu.querySelector(`[data-sub="${sub}"]`);
+  if (event.key === 'Escape' || (inSub && event.key === 'ArrowLeft' && event.target.tagName !== 'SELECT')) {
+    event.preventDefault();
+    if (inSub) { const back = row(); openSub(null); back?.focus(); } else closeModelMenu();
+    return;
+  }
+  if (!inSub && event.key === 'ArrowRight' && event.target.dataset?.sub) { event.preventDefault(); openSub(event.target.dataset.sub, true); return; }
   if (!['ArrowDown', 'ArrowUp'].includes(event.key) || event.target.tagName === 'SELECT') return;
   event.preventDefault();
-  const focusable = [...modelMenu.querySelectorAll('button, select')];
+  const focusable = [...(inSub ? modelSub : modelMenu).querySelectorAll('button, select')];
   const next = focusable.indexOf(document.activeElement) + (event.key === 'ArrowDown' ? 1 : -1);
   focusable[(next + focusable.length) % focusable.length]?.focus();
 });
