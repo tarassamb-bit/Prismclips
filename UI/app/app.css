@@ -429,7 +429,11 @@ details.insp-section:not([open]) { gap: 0; }
   .game-card svg { grid-row: span 2; }
 }
 
-/* First sign-in tutorial: step dots in Sky. */
-.tutorial-dots { display: flex; gap: 6px; }
-.tutorial-dots span { width: 7px; height: 7px; border-radius: 50%; background: var(--border); }
-.tutorial-dots span.on { background: var(--sky); }
+/* First-project tour: a Sky ring round the real button and a hint next to it. */
+.tour-ring { position: fixed; z-index: 45; border: 2px solid var(--sky); border-radius: 14px; pointer-events: none;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--sky) 25%, transparent); animation: tour-pulse 1.6s ease-in-out infinite; }
+@keyframes tour-pulse { 50% { box-shadow: 0 0 0 9px color-mix(in srgb, var(--sky) 10%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .tour-ring { animation: none; } }
+.tour-bubble { position: fixed; z-index: 46; width: min(300px, calc(100vw - 16px)); padding: 14px 16px; border-radius: 14px;
+  background: var(--surface1); border: 1px solid var(--sky); box-shadow: 0 10px 30px #0005; font-size: 14px; }
+.tour-bubble p { margin: 0 0 10px; }
