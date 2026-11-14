@@ -437,6 +437,8 @@ details.insp-section:not([open]) { gap: 0; }
 .tour-bubble { position: fixed; z-index: 46; width: min(300px, calc(100vw - 16px)); padding: 14px 16px; border-radius: 14px;
   background: var(--surface1); border: 1px solid var(--sky); box-shadow: 0 10px 30px #0005; font-size: 14px; }
 .tour-bubble p { margin: 0 0 10px; }
+.tour-bar { height: 3px; margin: 0 0 10px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.tour-bar div { height: 100%; background: var(--sky); transition: width .3s; }
 .tour-bubble .eyebrow { margin-bottom: 4px; color: var(--accent); }
 /* The arrow: a rotated square on the edge facing the target. */
 .tour-bubble::before { content: ""; position: absolute; left: var(--arrow-x, 50%); width: 12px; height: 12px; margin-left: -6px;

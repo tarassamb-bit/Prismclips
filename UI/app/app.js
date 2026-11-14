@@ -9,6 +9,7 @@ import { STYLE_TITLES, STYLE_DETAILS, VIDEO_TYPE_TITLES, VIDEO_TYPE_DETAILS, REG
 import { stylePreview } from './engine/captions.js';
 import { mountPlayer, unmountPlayer } from './player.js';
 import * as store from './store.js';
+import { hintFor, TOUR_STEPS } from './tour.js';
 import { configureSync, requestSync, sync, syncStatus, onSyncStatus } from './sync.js';
 import { uploadVideo, downloadVideo, removeVideos, removeAllVideos, cloudUsage, CloudVideoError } from './cloudvideo.js';
 
@@ -256,35 +257,18 @@ async function expireUntouched() {
 /** Once per account: the 7-day rule, before it can surprise anyone. */
 // First sign-in: a welcome, then a guided tour through the first project. Hints point at the real buttons, one at a time,
 // and follow the person's own steps: Start creating, the video, the settings, the wait, the first Shorts and Export. The
-// early hints come from where the person is; only the last two need a saved stage ('on' -> 'export' -> 'done').
+// early hints come from where the person is; only the last ones need a saved stage ('on' -> 'edit' -> 'export' -> 'done').
 // Settings › Account › Show tutorial starts it again.
-const TOUR_STEPS = 7;
 const tourKey = () => `relio.tour.${userId()}`;
 const tourStage = () => { try { return localStorage.getItem(tourKey()); } catch { return null; } };
 function setTourStage(stage) { try { localStorage.setItem(tourKey(), stage); } catch { /* storage blocked: the tour ends with this page */ } tourHint(); }
 
-/** The hint for this moment: its step number, the element it points at, its text and its button. Null when there is none. */
+/** The hint for this moment (see tour.js), with what its button does. Null when there is none. */
 function currentHint() {
-  const stage = tourStage();
-  if (!stage || stage === 'done' || state.dialog) return null;
-  if (stage === 'export') return state.screen === 'editor' ? { step: 7, target: '#export-button', text: '<strong>Export</strong> saves your Shorts as video files, ready to post.', button: 'Finish', next: finishTour } : null;
-  if (state.task?.project) {
-    // On the games screen the hint sits on the game cards and goes away once a game is open, so it never covers a game.
-    return state.screen === 'games' ? { step: 5, target: '.games-grid', text: 'Relio AI needs a few minutes. Pick a game while you wait: the progress stays in the corner.' }
-      : { step: 5, target: '#progress .progress-card', text: 'Relio AI is finding the best moments. This takes a few minutes, and the progress stays here.' };
-  }
-  if (state.screen === 'home') return { step: 1, target: '.start-card', text: 'Start here: choose a video and Relio makes Shorts from it.' };
-  if (state.screen === 'create') {
-    const step = state.create?.step;
-    if (step === 1) return { step: 2, target: '.drop-card', text: 'Choose a video from your device, or drop it here.' };
-    if (step === 2) return { step: 3, target: '[data-create="next"]', text: 'Pick how many Shorts and how long. Not sure? Keep <strong>Auto</strong> and press Next.' };
-    if (step === 3) return { step: 3, target: '[data-create="next"]', text: 'Choose a caption style, or keep <strong>Auto</strong>. Then press Next.' };
-    if (step === 4) return { step: 4, target: '[data-create="make"]', text: 'Pick the kind of video, or keep <strong>Auto</strong>. Then press <strong>Make Shorts</strong>.' };
-  }
-  if (state.screen === 'editor' && state.project?.segments.length) {
-    return { step: 6, target: '.short-card', text: 'Your Shorts are ready. Click one to watch it and change its start, crop, captions or title. Changes save as you go.', button: 'Next', next: () => setTourStage('export') };
-  }
-  return null;
+  const hint = hintFor({ stage: tourStage(), dialog: Boolean(state.dialog), screen: state.screen, running: Boolean(state.task?.project),
+    createStep: state.create?.step ?? null, shorts: state.project?.segments.length ?? 0 });
+  if (hint?.then) hint.next = hint.then === 'finish' ? finishTour : () => setTourStage(hint.then);
+  return hint;
 }
 function welcomeTour() {
   openDialog(`<div class="stack"><h2>Welcome to Relio Clips</h2>
@@ -320,7 +304,7 @@ function tourHint() {
     }
     // A target below the fold is brought into view once, when the hint first points at it.
     if (tourTarget !== target) { tourTarget = target; target.scrollIntoView({ block: 'nearest' }); }
-    const html = `<p class="eyebrow">Step ${hint.step} of ${TOUR_STEPS}</p><p>${hint.text}</p>
+    const html = `<p class="eyebrow">Step ${hint.step} of ${TOUR_STEPS}</p><div class="tour-bar" aria-hidden="true"><div style="width:${Math.round((hint.step / TOUR_STEPS) * 100)}%"></div></div><p>${hint.text}</p>
       <div class="row between"><button class="link" id="tour-skip">Skip tour</button>${hint.button ? `<button class="button primary" id="tour-next">${hint.button}</button>` : ''}</div>`;
     if (bubble.dataset.html !== html) {
       bubble.dataset.html = html;
@@ -350,7 +334,7 @@ function firstRunNotice() {
   // Accounts that already saw the deletion notice aren't new; they can start the tour from Settings.
   if (!tourStage() && !seen(retentionKey())) { setTourStage('on'); return welcomeTour(); }
   // During the tour the deletion rule waits for its end (finishTour, endTour).
-  if (tourStage() === 'on' || tourStage() === 'export') return;
+  if (['on', 'edit', 'export'].includes(tourStage())) return;
   if (!seen(retentionKey())) showRetention();
 }
 
