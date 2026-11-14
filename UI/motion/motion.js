@@ -5,7 +5,9 @@ import { Output, BufferTarget, Mp4OutputFormat, CanvasSource, canEncodeVideo } f
 import * as store from '../app/store.js';
 
 const $ = (selector) => document.querySelector(selector);
-const W = 1080, H = 1920;
+// The frame size follows the chosen format (see setFormat); 9:16 until one is picked.
+const FORMATS = { '9:16': [1080, 1920], '16:9': [1920, 1080], '3:4': [1080, 1440] };
+let W = 1080, H = 1920, format = '9:16';
 const player = $('#player'), status = $('#status');
 try { const theme = localStorage.getItem('prism-theme'); if (theme) document.documentElement.dataset.theme = theme; } catch {}
 const workspace = document.querySelector('.workspace');
@@ -23,7 +25,7 @@ let engine = 'canvas', code = '', prompt = '', scene = null, repaired = false, p
 let originalPrompt = '', history = [], pendingBrief = null;
 let reviewPass = 0, frameRequest = null, frameRequestId = 0, runToken = 0, workController = null;
 
-const CANVAS_RUNNER = `<!doctype html><html><head><style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block}</style></head>
+const canvasRunner = () => `<!doctype html><html><head><style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block}</style></head>
 <body><canvas id="c" width="${W}" height="${H}"></canvas><script>
 const c = document.getElementById('c'), ctx = c.getContext('2d');
 let scene = null, playing = false, startAt = 0, currentTime = 0, lastUpdate = 0, pending = null, exportCancelled = false;
@@ -50,11 +52,11 @@ addEventListener('message', async (event) => {
     } catch (e) { fail(e); }
   } else if (m.type === 'capture-review' && scene) {
     try {
-      const frames = [], capture = document.createElement('canvas'); capture.width = 720; capture.height = 1280;
+      const frames = [], capture = document.createElement('canvas'); capture.width = ${Math.round(W / 1.5)}; capture.height = ${Math.round(H / 1.5)};
       const captureCtx = capture.getContext('2d');
       for (const fraction of [0.02, 0.24, 0.48, 0.72, 0.96]) {
         const time = Math.min(scene.duration - 1 / scene.fps, Math.max(0, scene.duration * fraction));
-        frame(time); captureCtx.drawImage(c, 0, 0, 720, 1280);
+        frame(time); captureCtx.drawImage(c, 0, 0, capture.width, capture.height);
         frames.push({time, image:capture.toDataURL('image/jpeg', .7)});
       }
       frame(currentTime); say({type:'review-frames', requestId:m.requestId, frames});
@@ -355,7 +357,7 @@ function run(source) {
     recoverPreview('The preview could not start. Please try again.');
   }, 30000);
   $('#export').disabled = true;
-  player.srcdoc = engine === 'canvas' ? CANVAS_RUNNER : engine === 'html' ? htmlRunner(source) : '<!doctype html><html><head><style>html,body,#root{margin:0;width:100%;height:100%;overflow:hidden;background:#000}</style></head><body><div id="root"></div><script src="/motion/runtime/engine-player.js"></script></body></html>';
+  player.srcdoc = engine === 'canvas' ? canvasRunner() : engine === 'html' ? htmlRunner(source) : '<!doctype html><html><head><style>html,body,#root{margin:0;width:100%;height:100%;overflow:hidden;background:#000}</style></head><body><div id="root"></div><script src="/motion/runtime/engine-player.js"></script></body></html>';
   fit();
 }
 
@@ -365,7 +367,7 @@ async function generate(extra = {}) {
   const response = await fetch('/api/motion', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: workController?.signal,
     // Outside a send (a crash during playback) pendingBrief is null, so fall back to the accepted brief, history and style.
-    body: JSON.stringify({ prompt, engine, originalPrompt: pendingBrief?.originalPrompt || originalPrompt || prompt, history: pendingBrief?.history || history, style: pendingBrief ? pendingBrief.style : lastGood?.style || '', ...choiceFor('code'), ...(stepModel('plan') ? { plan: choiceFor('plan') } : {}), ...extra }),
+    body: JSON.stringify({ prompt, engine, format, originalPrompt: pendingBrief?.originalPrompt || originalPrompt || prompt, history: pendingBrief?.history || history, style: pendingBrief ? pendingBrief.style : lastGood?.style || '', ...choiceFor('code'), ...(stepModel('plan') ? { plan: choiceFor('plan') } : {}), ...extra }),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
@@ -686,8 +688,8 @@ function smallThumb(dataUrl) {
   return new Promise((resolve) => {
     const image = new Image();
     image.onload = () => {
-      const canvas = Object.assign(document.createElement('canvas'), { width: 270, height: 480 });
-      canvas.getContext('2d').drawImage(image, 0, 0, 270, 480);
+      const canvas = Object.assign(document.createElement('canvas'), { width: 270, height: Math.round(270 * H / W) });
+      canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
       resolve(canvas.toDataURL('image/jpeg', 0.7));
     };
     image.onerror = () => resolve(null);
@@ -704,17 +706,59 @@ async function saveVideo() {
     await store.saveProject({
       ...(existing ?? { id: projectId, owner: signedInUser() ?? undefined, created: new Date().toISOString(), media: [], segments: [], transcripts: {} }),
       kind: 'motion', title: existing?.title ?? (title.length > 60 ? `${title.slice(0, 57)}…` : title || 'Motion video'),
-      motion: { ...lastGood, duration: scene?.duration ?? 0, thumbnail },
+      motion: { ...lastGood, format, duration: scene?.duration ?? 0, thumbnail },
     });
     // `history` here is the chat history, so the browser's is named in full.
     window.history.replaceState(null, '', `/motion/?project=${projectId}`);
   } catch { setStatus('This video could not be saved in this browser. Export it to keep it.', true); }
 }
+// A new video starts with two choices, style then format, before the description. The format can't change afterwards:
+// the code is written for one frame size.
+const STYLE_CHOICES = [['', 'No style', 'Relio picks the look'], ['flat-vector-science', 'Flat-Vector Science', 'Clean shapes, like an explainer'],
+  ['watercolor-wash', 'Watercolor Wash', 'Soft, painted look'], ['shadow-puppet-theatre', 'Shadow Puppet Theatre', 'Dark cut-out figures']];
+const FORMAT_CHOICES = [['9:16', 'Vertical', 'TikTok, Reels, Shorts'], ['16:9', 'Wide', 'YouTube, presentations'], ['3:4', 'Portrait', 'Instagram and feed posts']];
+function setFormat(value) {
+  format = Object.hasOwn(FORMATS, value) ? value : '9:16';
+  [W, H] = FORMATS[format];
+  const frame = player.parentElement;
+  frame.style.aspectRatio = `${W} / ${H}`;
+  frame.classList.toggle('wide', W > H);
+  Object.assign(player.style, { width: `${W}px`, height: `${H}px` });
+  $('.format').textContent = `${format} · ${W} × ${H}`;
+  fit();
+}
+function finishSetup() {
+  $('#setup').hidden = true;
+  $('.welcome').hidden = false;
+  $('.composer').hidden = false;
+}
+function showSetup(step) {
+  const style = step === 'style';
+  const cards = (style ? STYLE_CHOICES : FORMAT_CHOICES).map(([value, name, note]) => {
+    const [w, h] = style ? [0, 0] : FORMATS[value];
+    return el('button', { type: 'button', className: 'setup-card', onclick: () => {
+      if (style) { $('#style').value = value; fitComposerSelect($('#style')); showSetup('format'); }
+      else { setFormat(value); finishSetup(); $('#prompt').focus(); }
+    } }, style ? null : el('span', { className: 'setup-shape', style: `aspect-ratio:${w}/${h}` }),
+      el('span', { className: 'setup-text' }, el('strong', { textContent: style ? name : `${name} · ${value}` }), el('small', { textContent: note })));
+  });
+  $('#setup').replaceChildren(...[
+    el('p', { className: 'setup-step', textContent: style ? 'Step 1 of 2' : 'Step 2 of 2' }),
+    el('strong', { className: 'setup-title', textContent: style ? 'Choose a style' : 'Choose a format' }),
+    el('div', { className: style ? 'setup-grid' : 'setup-grid formats' }, ...cards),
+    style ? null : el('button', { type: 'button', className: 'setup-back', textContent: '‹ Back to style', onclick: () => showSetup('style') })].filter(Boolean));
+  $('#setup').hidden = false;
+  $('#setup').querySelector('button').focus();
+}
+if (!projectId) { $('.welcome').hidden = true; $('.composer').hidden = true; showSetup('style'); }
+
 if (projectId) store.loadProject(projectId).then((project) => {
   const saved = project?.motion;
-  if (!saved?.code) { projectId = null; window.history.replaceState(null, '', '/motion/'); return; }
+  if (!saved?.code) { projectId = null; window.history.replaceState(null, '', '/motion/'); $('.welcome').hidden = true; $('.composer').hidden = true; showSetup('style'); return; }
   lastGood = { engine: saved.engine, code: saved.code, originalPrompt: saved.originalPrompt, history: saved.history ?? [], style: saved.style ?? '' };
   ({ engine, originalPrompt } = lastGood);
+  setFormat(saved.format);
+  finishSetup();
   history = lastGood.history.slice();
   $('#engine').value = engine;
   $('#style').value = lastGood.style;

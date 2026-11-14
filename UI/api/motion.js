@@ -43,6 +43,17 @@ const MODEL = process.env.MOTION_MODEL || 'xiaomi/mimo-v2.6-flash';
 
 // Shared creative direction gives each engine the same brand and visual standards. A user's explicit
 // creative choices always win; the defaults apply only when the brief leaves them open.
+// The frame sizes a video can have. The instructions below are written for 9:16; forFormat rewrites them for the others.
+const FORMATS = { '9:16': [1080, 1920], '16:9': [1920, 1080], '3:4': [1080, 1440] };
+function forFormat(text, format = '9:16') {
+  if (format === '9:16') return text;
+  const [w, h] = FORMATS[format];
+  return text.replaceAll('1080x1920', `${w}x${h}`).replaceAll('width: 1080, height: 1920', `width: ${w}, height: ${h}`)
+    .replaceAll('data-width="1080"', `data-width="${w}"`).replaceAll('data-height="1920"', `data-height="${h}"`).replaceAll('9:16', format)
+    .replace('Design for a small vertical screen', `Design for a ${w}x${h} (${format}) frame and use its whole shape`)
+    .replace('at least 120 px from each side and 220 px from top and bottom', `at least ${Math.round(w * 0.08)} px from each side and ${Math.round(h * 0.08)} px from top and bottom`);
+}
+
 const ART_DIRECTION = `Creative direction:
 - Follow the user's requested subject, mood, duration, colors and exact wording. When the user provides exact on-screen wording, use only those words: do not invent taglines, section headings, corner labels, footer text, filler labels, issue numbers, dates, or additional captions unless asked. Before returning code, check every piece of visible text against the user’s requested copy and remove any other visible words. If no on-screen words are provided, invent only a few short, relevant words when the concept calls for them; never display the user's instructions as the script and never invent claims, prices, testimonials, or logos.
 - For an open-ended Relio-branded brief, use a contemporary editorial style: near-black #1a1c22 or warm off-white #f3f0e9, sky blue #3fa9f5 as the main accent, and coral #ff8a79 or amber #ffc233 sparingly. Prefer one dominant accent per scene. Use a clean geometric sans-serif similar to Space Grotesk, with a system sans-serif fallback.
@@ -182,6 +193,7 @@ module.exports = async (req, res) => {
     const body = await readJson(req, 200_000);
     if (!Object.hasOwn(RULES, body.engine)) throw new HttpError(400, 'Unknown engine.');
     if (body.style !== undefined && body.style !== '' && !Object.hasOwn(STYLE_FILES, body.style)) throw new HttpError(400, 'Unknown video style.');
+    if (body.format !== undefined && !Object.hasOwn(FORMATS, body.format)) throw new HttpError(400, 'Unknown video format.');
     if (typeof body.prompt !== 'string' || !body.prompt.trim()) throw new HttpError(400, 'Describe the video first.');
     if (body.prompt.length > 2000) throw new HttpError(400, 'Keep your message to 2,000 characters or fewer.');
     if (typeof body.originalPrompt === 'string' && body.originalPrompt.length > 2000) throw new HttpError(400, 'Keep the original brief to 2,000 characters or fewer.');
@@ -201,7 +213,7 @@ module.exports = async (req, res) => {
       const reference = fs.readFileSync(path.join(__dirname, '_motion-styles', config.file), 'utf8');
       const styleCard = reference.slice(reference.indexOf('STYLE CARD'), reference.indexOf('H HELPER LIBRARY'));
       const earlier = Array.isArray(body.history) ? body.history.filter((item) => item?.role === 'user' && typeof item.content === 'string').slice(-8).map((item) => item.content.slice(0, 2000)) : [];
-      const planningPrompt = `You are a motion-design director. Produce a concise production plan for a short 9:16 animation. This plan will be used by a code generator, not shown on screen.\nOriginal user brief: ${JSON.stringify(body.originalPrompt || body.prompt)}\nEarlier user changes: ${JSON.stringify(earlier)}\nLatest request: ${JSON.stringify(body.prompt)}\nSelected reference style:\n${styleCard}\n\nPlan 2–4 timed beats with a specific subject-relevant visual composition, its motion, transitions and exact visible words for each. Define how the first frame is already visually engaging and the ending resolves. Give concrete layout and scale, not vague adjectives, random decoration, or invented claims. Treat qualitative feedback as direction, never literal text. The user's explicit wording, requested duration and colors override the style example. When exact words are supplied, do not invent any other visible words. The reference example is a style reference, not a script; do not borrow its topic or props unless relevant. Use only artwork the generator can draw with code; no photographs, external assets, sound, or unsupported libraries. Avoid generic title cards. Give each visible text block and each foreground decorative graphic a bounding box using normalized frame coordinates 0 to 1. Text boxes must remain inside x=0.06 to 0.94 and y=0.08 to 0.92, and stay at least 0.015 apart from other text and foreground graphics. Do not put a rule, line or shape through text. A full-frame background is not a foreground decoration. Keep text in its safe box throughout transitions, do not crop headlines. Output only valid JSON with this shape: {"duration":8,"beats":[{"start":0,"end":2,"visual":"...","motion":"...","text":[{"content":"...","box":{"x":0.1,"y":0.3,"w":0.8,"h":0.1}}],"decorations":[{"x":0.2,"y":0.6,"w":0.6,"h":0.02}]}]}. The decorations array contains bounding box objects directly, never strings or nested boxes. If there are no foreground lines or shapes, use an empty decorations array. All four coordinates are numbers. Use 2–4 beats; they must start at zero, be continuous and finish exactly at duration. Duration must be between 4 and 15 seconds. Include no markdown or code.`;
+      const planningPrompt = forFormat(`You are a motion-design director. Produce a concise production plan for a short 9:16 animation. This plan will be used by a code generator, not shown on screen.\nOriginal user brief: ${JSON.stringify(body.originalPrompt || body.prompt)}\nEarlier user changes: ${JSON.stringify(earlier)}\nLatest request: ${JSON.stringify(body.prompt)}\nSelected reference style:\n${styleCard}\n\nPlan 2–4 timed beats with a specific subject-relevant visual composition, its motion, transitions and exact visible words for each. Define how the first frame is already visually engaging and the ending resolves. Give concrete layout and scale, not vague adjectives, random decoration, or invented claims. Treat qualitative feedback as direction, never literal text. The user's explicit wording, requested duration and colors override the style example. When exact words are supplied, do not invent any other visible words. The reference example is a style reference, not a script; do not borrow its topic or props unless relevant. Use only artwork the generator can draw with code; no photographs, external assets, sound, or unsupported libraries. Avoid generic title cards. Give each visible text block and each foreground decorative graphic a bounding box using normalized frame coordinates 0 to 1. Text boxes must remain inside x=0.06 to 0.94 and y=0.08 to 0.92, and stay at least 0.015 apart from other text and foreground graphics. Do not put a rule, line or shape through text. A full-frame background is not a foreground decoration. Keep text in its safe box throughout transitions, do not crop headlines. Output only valid JSON with this shape: {"duration":8,"beats":[{"start":0,"end":2,"visual":"...","motion":"...","text":[{"content":"...","box":{"x":0.1,"y":0.3,"w":0.8,"h":0.1}}],"decorations":[{"x":0.2,"y":0.6,"w":0.6,"h":0.02}]}]}. The decorations array contains bounding box objects directly, never strings or nested boxes. If there are no foreground lines or shapes, use an empty decorations array. All four coordinates are numbers. Use 2–4 beats; they must start at zero, be continuous and finish exactly at duration. Duration must be between 4 and 15 seconds. Include no markdown or code.`, body.format);
       let plan, problem = '';
       const planStarted = Date.now();
       try {
@@ -221,7 +233,7 @@ module.exports = async (req, res) => {
       run.started = Date.now();
       planResult.code = JSON.stringify({duration:plan.duration, beats:plan.beats});
     }
-    const result = await callWithLengthRetry(prompt({...body, creativePlan: planResult?.code}), 24000, 32000, 'writing the animation', cancellation.signal, choice, tally);
+    const result = await callWithLengthRetry(forFormat(prompt({...body, creativePlan: planResult?.code}), body.format), 24000, 32000, 'writing the animation', cancellation.signal, choice, tally);
     const {code, model, provider} = result;
     const usd = tally.usdKnown && planTally.usdKnown ? tally.usd + planTally.usd : null;
     const ms = Date.now() - started;
@@ -236,3 +248,4 @@ module.exports = async (req, res) => {
 
 module.exports.extractCode = extractCode;
 module.exports.STYLE_FILES = STYLE_FILES;
+module.exports.forFormat = forFormat;

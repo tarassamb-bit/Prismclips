@@ -5,8 +5,10 @@ const vm = require('node:vm');
 
 test('canvas review captures five frames without changing the current preview time', async () => {
   const source = fs.readFileSync(__dirname + '/motion.js', 'utf8');
-  const literal = source.match(/const CANVAS_RUNNER = (`[\s\S]*?`);/)[1];
-  const runner = vm.runInNewContext(literal, {W:1080,H:1920});
+  const literal = source.match(/const canvasRunner = \(\) => (`[\s\S]*?`);/)[1];
+  const runner = vm.runInNewContext(literal, {W:1920,H:1080,Math});
+  // The capture frames keep the format's shape (here 16:9), at two thirds of its size.
+  assert.match(runner, /capture\.width = 1280; capture\.height = 720;/);
   const script = runner.slice(runner.indexOf('<script>') + 8, runner.lastIndexOf('</script>'));
   const sent = [], drawn = [];
   const ctx = {save(){},restore(){},setTransform(){},clearRect(){},drawImage(){}};

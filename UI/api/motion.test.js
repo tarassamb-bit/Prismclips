@@ -198,3 +198,14 @@ test('stops after one output-limit retry and reports the failed phase', async ()
   try {await handler(req,res)} finally {global.fetch=oldFetch;if(oldKey===undefined)delete process.env.MOTION_OPENROUTER_API_KEY;else process.env.MOTION_OPENROUTER_API_KEY=oldKey}
   assert.equal(calls,2);assert.equal(res.statusCode,502);assert.match(JSON.parse(res.body).error,/writing the animation/);
 });
+
+test('instructions follow the chosen format', () => {
+  const {forFormat} = require('./motion');
+  const text = 'A 1080x1920 scene. const scene = { width: 1080, height: 1920 }; a short 9:16 animation. Design for a small vertical screen: keep text at least 120 px from each side and 220 px from top and bottom.';
+  assert.equal(forFormat(text, '9:16'), text);
+  assert.equal(forFormat(text), text);
+  const wide = forFormat(text, '16:9');
+  assert.match(wide, /1920x1080/); assert.match(wide, /width: 1920, height: 1080/); assert.match(wide, /short 16:9 animation/);
+  assert.doesNotMatch(wide, /vertical|1080x1920|220 px/);
+  assert.match(forFormat(text, '3:4'), /1080x1440/);
+});
