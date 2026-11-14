@@ -254,61 +254,89 @@ async function expireUntouched() {
 }
 
 /** Once per account: the 7-day rule, before it can surprise anyone. */
-// First sign-in: a guided tour through the first project. Hints point at the real buttons, one at a time, and follow the
-// person's own steps: Start creating, the video, the settings, the wait, the first Shorts and Export. The early hints come
-// from where the person is; only the last two need a saved stage. Settings › Account › Show tutorial starts it again.
+// First sign-in: a welcome, then a guided tour through the first project. Hints point at the real buttons, one at a time,
+// and follow the person's own steps: Start creating, the video, the settings, the wait, the first Shorts and Export. The
+// early hints come from where the person is; only the last two need a saved stage ('on' -> 'export' -> 'done').
+// Settings › Account › Show tutorial starts it again.
+const TOUR_STEPS = 7;
 const tourKey = () => `relio.tour.${userId()}`;
 const tourStage = () => { try { return localStorage.getItem(tourKey()); } catch { return null; } };
 function setTourStage(stage) { try { localStorage.setItem(tourKey(), stage); } catch { /* storage blocked: the tour ends with this page */ } tourHint(); }
 
-/** The hint for this moment: the element it points at, its text and its button. Null when there is none. */
+/** The hint for this moment: its step number, the element it points at, its text and its button. Null when there is none. */
 function currentHint() {
   const stage = tourStage();
   if (!stage || stage === 'done' || state.dialog) return null;
-  if (stage === 'export') return state.screen === 'editor' ? { target: '#export-button', text: '<strong>Export</strong> saves your Shorts as video files, ready to post.', button: 'Got it', next: finishTour } : null;
-  if (state.task?.project) return { target: '#progress .progress-card', text: 'Relio AI is finding the best moments. This takes a few minutes: play a game while you wait. The progress stays here.' };
-  if (state.screen === 'home') return { target: '.start-card', text: 'Start here: choose a video and Relio makes Shorts from it.' };
-  if (state.screen === 'create' && state.create?.step === 1) return { target: '.drop-card', text: 'Choose a video from your device, or drop it here.' };
-  if (state.screen === 'create' && state.create?.step > 1) {
-    return $('[data-create="make"]') ? { target: '[data-create="make"]', text: 'Press <strong>Make Shorts</strong> and Relio AI picks the best moments.' }
-      : { target: '[data-create="next"]', text: 'Change anything you like, or keep <strong>Auto</strong>. Then press Next.' };
+  if (stage === 'export') return state.screen === 'editor' ? { step: 7, target: '#export-button', text: '<strong>Export</strong> saves your Shorts as video files, ready to post.', button: 'Finish', next: finishTour } : null;
+  if (state.task?.project) {
+    // On the games screen the hint sits on the game cards and goes away once a game is open, so it never covers a game.
+    return state.screen === 'games' ? { step: 5, target: '.games-grid', text: 'Relio AI needs a few minutes. Pick a game while you wait: the progress stays in the corner.' }
+      : { step: 5, target: '#progress .progress-card', text: 'Relio AI is finding the best moments. This takes a few minutes, and the progress stays here.' };
+  }
+  if (state.screen === 'home') return { step: 1, target: '.start-card', text: 'Start here: choose a video and Relio makes Shorts from it.' };
+  if (state.screen === 'create') {
+    const step = state.create?.step;
+    if (step === 1) return { step: 2, target: '.drop-card', text: 'Choose a video from your device, or drop it here.' };
+    if (step === 2) return { step: 3, target: '[data-create="next"]', text: 'Pick how many Shorts and how long. Not sure? Keep <strong>Auto</strong> and press Next.' };
+    if (step === 3) return { step: 3, target: '[data-create="next"]', text: 'Choose a caption style, or keep <strong>Auto</strong>. Then press Next.' };
+    if (step === 4) return { step: 4, target: '[data-create="make"]', text: 'Pick the kind of video, or keep <strong>Auto</strong>. Then press <strong>Make Shorts</strong>.' };
   }
   if (state.screen === 'editor' && state.project?.segments.length) {
-    return { target: '.short-card', text: 'These are your Shorts. Click one to watch it and change its start, crop, captions or title. Changes save as you go.', button: 'Next', next: () => setTourStage('export') };
+    return { step: 6, target: '.short-card', text: 'Your Shorts are ready. Click one to watch it and change its start, crop, captions or title. Changes save as you go.', button: 'Next', next: () => setTourStage('export') };
   }
   return null;
 }
+function welcomeTour() {
+  openDialog(`<div class="stack"><h2>Welcome to Relio Clips</h2>
+    <p>Relio turns one long video into short vertical clips (Shorts), with captions, ready for TikTok, Reels and YouTube Shorts.</p>
+    <p class="muted small">A short tour shows you each step while you make your first Shorts.</p>
+    <div class="row end"><button class="button ghost" id="tour-no">Skip the tour</button><button class="button primary" id="tour-yes">Show me how</button></div></div>`);
+  // Esc or a click outside leaves the tour on: its first hint has its own Skip.
+  $('#tour-no').addEventListener('click', () => { closeDialog(); endTour(); });
+  $('#tour-yes').addEventListener('click', () => { closeDialog(); tourHint(); });
+  $('#tour-yes').focus();
+}
+/** Skipped: the deletion rule is the one thing nobody may miss, so it is still shown. */
+function endTour() {
+  setTourStage('done');
+  showRetention();
+}
 function finishTour() {
   setTourStage('done');
-  retentionNotice();
+  showRetention('You’ve made your first Shorts! One thing to know');
 }
 
-let tourFrame = 0;
+let tourFrame = 0, tourTarget = null;
 /** Shows, moves or removes the hint. Runs whenever the page changes (see the observer below). */
 function tourHint() {
   cancelAnimationFrame(tourFrame);
   tourFrame = requestAnimationFrame(() => {
     const hint = currentHint(), target = hint && $(hint.target);
     let bubble = $('#tour-bubble'), ring = $('#tour-ring');
-    const rect = target?.getBoundingClientRect();
-    if (!hint || !target || !rect.width) { bubble?.remove(); ring?.remove(); return; }
+    if (!hint || !target || !target.getBoundingClientRect().width) { bubble?.remove(); ring?.remove(); tourTarget = null; return; }
     if (!bubble) {
       document.body.insertAdjacentHTML('beforeend', '<div id="tour-ring" class="tour-ring" aria-hidden="true"></div><div id="tour-bubble" class="tour-bubble" role="status"></div>');
       bubble = $('#tour-bubble'); ring = $('#tour-ring');
     }
-    const html = `<p>${hint.text}</p><div class="row between"><button class="link" id="tour-skip">Skip tour</button>${hint.button ? `<button class="button primary" id="tour-next">${hint.button}</button>` : ''}</div>`;
+    // A target below the fold is brought into view once, when the hint first points at it.
+    if (tourTarget !== target) { tourTarget = target; target.scrollIntoView({ block: 'nearest' }); }
+    const html = `<p class="eyebrow">Step ${hint.step} of ${TOUR_STEPS}</p><p>${hint.text}</p>
+      <div class="row between"><button class="link" id="tour-skip">Skip tour</button>${hint.button ? `<button class="button primary" id="tour-next">${hint.button}</button>` : ''}</div>`;
     if (bubble.dataset.html !== html) {
       bubble.dataset.html = html;
       bubble.innerHTML = html;
-      $('#tour-skip').addEventListener('click', () => setTourStage('done'));
+      $('#tour-skip').addEventListener('click', endTour);
       $('#tour-next')?.addEventListener('click', hint.next);
     }
+    const rect = target.getBoundingClientRect();
     Object.assign(ring.style, { left: `${rect.left - 6}px`, top: `${rect.top - 6}px`, width: `${rect.width + 12}px`, height: `${rect.height + 12}px` });
-    // Below the target when there is room, otherwise above it; always inside the window.
-    const width = bubble.offsetWidth, height = bubble.offsetHeight, gap = 14;
-    const top = rect.bottom + gap + height < innerHeight ? rect.bottom + gap : Math.max(8, rect.top - gap - height);
+    // Below the target when there is room, otherwise above it; always inside the window. The arrow points at the target's middle.
+    const width = bubble.offsetWidth, height = bubble.offsetHeight, gap = 16;
+    const below = rect.bottom + gap + height < innerHeight;
     const left = Math.min(Math.max(8, rect.left + rect.width / 2 - width / 2), innerWidth - width - 8);
-    Object.assign(bubble.style, { left: `${left}px`, top: `${top}px` });
+    bubble.dataset.side = below ? 'below' : 'above';
+    bubble.style.setProperty('--arrow-x', `${Math.min(Math.max(18, rect.left + rect.width / 2 - left), width - 18)}px`);
+    Object.assign(bubble.style, { left: `${left}px`, top: `${below ? rect.bottom + gap : Math.max(8, rect.top - gap - height)}px` });
   });
 }
 new MutationObserver(tourHint).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] });
@@ -316,17 +344,19 @@ addEventListener('resize', tourHint);
 addEventListener('scroll', tourHint, true);
 function showTutorial() { setTourStage('on'); showHome(); }
 
+const retentionKey = () => `relio.retention-notice.${userId()}`;
 function firstRunNotice() {
-  const seen = (name) => { try { return localStorage.getItem(`relio.${name}.${userId()}`); } catch { return '1'; } };
+  const seen = (key) => { try { return localStorage.getItem(key); } catch { return '1'; } };
   // Accounts that already saw the deletion notice aren't new; they can start the tour from Settings.
-  if (!tourStage() && !seen('retention-notice')) { try { localStorage.setItem(`relio.retention-notice.${userId()}`, '1'); } catch { /* storage blocked */ } return setTourStage('on'); }
-  if (tourStage() !== 'on') retentionNotice();
+  if (!tourStage() && !seen(retentionKey())) { setTourStage('on'); return welcomeTour(); }
+  // During the tour the deletion rule waits for its end (finishTour, endTour).
+  if (tourStage() === 'on' || tourStage() === 'export') return;
+  if (!seen(retentionKey())) showRetention();
 }
 
-function retentionNotice() {
-  const key = `relio.retention-notice.${userId()}`;
-  try { if (localStorage.getItem(key)) return; localStorage.setItem(key, '1'); } catch { /* storage blocked: show it each time */ }
-  openDialog(`<div class="stack"><h2>Projects you don’t edit are deleted after ${UNTOUCHED_DAYS} days</h2>
+function showRetention(title = `Projects you don’t edit are deleted after ${UNTOUCHED_DAYS} days`) {
+  try { localStorage.setItem(retentionKey(), '1'); } catch { /* storage blocked: shown again next time */ }
+  openDialog(`<div class="stack"><h2>${title}</h2>
     <p>If you don’t change a project for ${UNTOUCHED_DAYS} days, Relio deletes it: the video, its Shorts and everything else in it, on this device and in the cloud. Any edit, re-analysis or export, like moving a clip on the timeline, starts a new ${UNTOUCHED_DAYS}-day period. You’ll see a warning on Home 2 days before.</p>
     <p class="muted small">Export the Shorts you want to keep. Exported files on your computer are never touched.</p>
     <div class="row end"><button class="button primary" data-action="close">Got it</button></div></div>`);
@@ -2007,7 +2037,7 @@ const safeName = (value) => value.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g,
 // MARK: Events
 
 // Actions that leave the current screen; while a task runs they ask to stop it first.
-const LEAVES = new Set(['home', 'open', 'open-folder', 'create', 'make', 'nav', 'signout']);
+const LEAVES = new Set(['home', 'open', 'open-folder', 'create', 'make', 'nav', 'signout', 'tutorial']);
 document.addEventListener('click', async (event) => {
   const choice = event.target.closest('[data-create],[data-style],[data-type]');
   if (choice && state.create && state.task && !(await confirmStop())) return;
