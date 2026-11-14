@@ -28,21 +28,21 @@ test('visually checks, corrects once, then checks the corrected video',async()=>
   await h.listener({source:h.context.player.contentWindow,data:{type:'ready',fps:30,duration:4}});
   assert.equal(h.corrections.length,1);assert.match(h.corrections[0].visualFeedback,/line crosses/);assert.equal(h.context.code,'corrected code');assert.equal(h.messages.length,0);
   await h.listener({source:h.context.player.contentWindow,data:{type:'ready',fps:30,duration:4}});
-  assert.equal(h.corrections.length,1);assert.match(h.messages[0],/checked five sampled frames/i);assert.equal(h.context.lastGood.code,'corrected code');
+  assert.equal(h.corrections.length,1);assert.match(h.messages[0],/Your video is ready\. Watch it/);assert.equal(h.context.lastGood.code,'corrected code');
 });
 
 test('does not loop when the reviewer still finds an issue after the correction',async()=>{
   const h=harness([['line crosses the title'],['line still crosses the title']]);
   await h.listener({source:h.context.player.contentWindow,data:{type:'ready',fps:30,duration:4}});
   await h.listener({source:h.context.player.contentWindow,data:{type:'ready',fps:30,duration:4}});
-  assert.equal(h.corrections.length,1);assert.match(h.messages[0],/may still need attention/);
+  assert.equal(h.corrections.length,1);assert.match(h.messages[0],/may need fixing/);
 });
 
 test('reports when reference rendering fails instead of claiming a visual review',async()=>{
   const h=harness([]);
   h.context.captureStyleReference=async()=>{throw Error('The style reference could not be drawn.')};
   await h.listener({source:h.context.player.contentWindow,data:{type:'ready',fps:30,duration:4}});
-  assert.equal(h.corrections.length,0);assert.match(h.messages[0],/couldn’t complete the visual check/);
+  assert.equal(h.corrections.length,0);assert.match(h.messages[0],/couldn’t finish checking how it looks/);
 });
 
 test('the composer exposes one style choice and no engine picker',()=>{
