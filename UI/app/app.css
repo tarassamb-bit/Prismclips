@@ -428,3 +428,8 @@ details.insp-section:not([open]) { gap: 0; }
   .game-card { grid-template-columns: 44px 1fr; justify-items: start; text-align: left; padding: 16px; }
   .game-card svg { grid-row: span 2; }
 }
+
+/* First sign-in tutorial: step dots in Sky. */
+.tutorial-dots { display: flex; gap: 6px; }
+.tutorial-dots span { width: 7px; height: 7px; border-radius: 50%; background: var(--border); }
+.tutorial-dots span.on { background: var(--sky); }

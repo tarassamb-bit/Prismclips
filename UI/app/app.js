@@ -254,6 +254,35 @@ async function expireUntouched() {
 }
 
 /** Once per account: the 7-day rule, before it can surprise anyone. */
+// First sign-in: a short tour of how Relio works, once per account on this browser. Settings › Account shows it again.
+// Its last step is the deletion rule, so a new account isn't shown that separately as well.
+const TUTORIAL = [
+  ['Welcome to Relio Clips', 'Relio turns one long video into short vertical clips (Shorts) ready for TikTok, Reels and YouTube Shorts. Here’s how, in five steps.'],
+  ['1. Choose a video', 'Press <strong>Start creating</strong> on Home and pick a video from your device. It stays in this browser and is saved to your account, so you can open the project on any device you sign in on.'],
+  ['2. Pick how you want them', 'Choose how many Shorts and how long, the part of the video to use, the language and a caption style. <strong>Auto</strong> works well if you aren’t sure.'],
+  ['3. Relio AI finds the best moments', 'It listens to the video and picks moments that work on their own, with captions and framing. This takes a few minutes: play a game while you wait, and the progress stays in the corner.'],
+  ['4. Edit if you like', 'Open a Short to change where it starts and ends, the crop, the captions and the title. Every change is saved as you go.'],
+  ['5. Export', 'Press <strong>Export</strong> to save your Shorts as video files, ready to post.'],
+  [`Projects you don’t edit are deleted after ${UNTOUCHED_DAYS} days`, `Any edit, re-analysis or export starts a new ${UNTOUCHED_DAYS}-day period, and Home warns you 2 days before. Export the Shorts you want to keep; files on your computer are never touched.`],
+];
+function showTutorial(step = 0) {
+  const [title, text] = TUTORIAL[step], last = step === TUTORIAL.length - 1;
+  openDialog(`<div class="stack tutorial"><p class="eyebrow">${step + 1} of ${TUTORIAL.length}</p><h2>${title}</h2><p>${text}</p>
+    <div class="tutorial-dots" aria-hidden="true">${TUTORIAL.map((_, i) => `<span class="${i === step ? 'on' : ''}"></span>`).join('')}</div>
+    <div class="row between">${step ? '<button class="button ghost" id="tour-back">Back</button>' : '<button class="button ghost" data-action="close">Skip</button>'}
+      <button class="button primary" id="tour-next">${last ? 'Start creating' : 'Next'}</button></div></div>`);
+  $('#tour-back')?.addEventListener('click', () => showTutorial(step - 1));
+  $('#tour-next').addEventListener('click', () => { if (last) { closeDialog(); startCreate(); } else showTutorial(step + 1); });
+  $('#tour-next').focus();
+}
+function firstRunNotice() {
+  const seen = (name) => { try { return localStorage.getItem(`relio.${name}.${userId()}`); } catch { return '1'; } };
+  const mark = (name) => { try { localStorage.setItem(`relio.${name}.${userId()}`, '1'); } catch { /* storage blocked */ } };
+  // Accounts that already saw the deletion notice aren't new; they can open the tutorial from Settings.
+  if (!seen('tutorial') && !seen('retention-notice')) { mark('tutorial'); mark('retention-notice'); return showTutorial(); }
+  retentionNotice();
+}
+
 function retentionNotice() {
   const key = `relio.retention-notice.${userId()}`;
   try { if (localStorage.getItem(key)) return; localStorage.setItem(key, '1'); } catch { /* storage blocked: show it each time */ }
@@ -268,7 +297,7 @@ async function showHome(view = null) {
   state.create = null;
   state.homeView = view;
   setScreen('home');
-  if (userId()) retentionNotice();
+  if (userId()) firstRunNotice();
   const [everything, allFolders] = await Promise.all([store.listProjects(), store.listFolders()]);
   const all = everything.filter(isMine), folders = allFolders.filter(isMine);
   state.projects = all;
@@ -746,7 +775,7 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
     body = `<div class="box">
         <div class="who"><span class="avatar" aria-hidden="true">${esc((email ?? '?')[0].toUpperCase())}</span><div><strong>${email ? esc(email) : 'Not signed in'}</strong><span class="muted small">${email ? 'Signed in' : 'Sign in to track your stats'}</span></div></div>
         <p class="muted small">Your projects, Shorts and videos are saved to your account, and each export adds its date, number of Shorts, length and quality to your stats under Overview.</p>
-        ${email ? '<div class="row"><button class="button ghost" data-action="signout">Sign out</button><button class="button ghost danger" data-action="delete-account">Delete account</button></div><p id="delete-account-note" class="error small" role="alert"></p>' : ''}
+        ${email ? '<div class="row"><button class="button ghost" data-action="tutorial">Show tutorial</button><button class="button ghost" data-action="signout">Sign out</button><button class="button ghost danger" data-action="delete-account">Delete account</button></div><p id="delete-account-note" class="error small" role="alert"></p>' : ''}
       </div>
       ${email ? `<form id="profile-form" class="box stack">
         <strong>Profile</strong>
@@ -1958,6 +1987,7 @@ document.addEventListener('click', async (event) => {
   else if (action === 'cancel') cancelTask();
   else if (action === 'delete-project') deleteProjectNow(state.project.id);
   else if (action === 'games') showGames();
+  else if (action === 'tutorial') showTutorial();
   else if (action === 'home') showHome();
   else if (action === 'open') openProject(target.dataset.id);
   else if (action === 'retry-download' && lastDownload) fetchFromCloud(lastDownload.project, lastDownload.media, lastDownload.shortPart);
