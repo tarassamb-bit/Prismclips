@@ -77,20 +77,22 @@ const sleep = (seconds, signal) => new Promise((resolve, reject) => {
  * @typedef {{ accessToken: () => Promise<string|null>, usage: Usage, onRetry?: (message: string) => void, fetch?: typeof fetch }} Configuration
  */
 
-/** Sends one request and decodes the JSON answer. */
-export async function generate(parts, schema, configuration, signal) {
-  const answer = await generateText(parts, schema, configuration, signal);
+/** Sends one request and decodes the JSON answer. `judge` marks an editorial decision (which clips, where they start and
+ *  end): the server gives those to its stronger judging model first. */
+export async function generate(parts, schema, configuration, signal, { judge = false } = {}) {
+  const answer = await generateText(parts, schema, configuration, signal, { judge });
   try { return JSON.parse(answer); } catch { throw new GeminiError('invalidResponse'); }
 }
 
 /** Sends one request and returns the answer's text as the model wrote it. */
-export async function generateText(parts, schema, configuration, signal) {
+export async function generateText(parts, schema, configuration, signal, { judge = false } = {}) {
   // Every request names its video, so the server can count it against the limit. No video, no request.
   if (!configuration.usage.video) throw new GeminiError('signIn');
   if (!(await configuration.accessToken())) throw new GeminiError('signIn');
   const body = JSON.stringify({
     contents: [{ role: 'user', parts }],
     generationConfig: { temperature: 0.2, responseMimeType: 'application/json', responseSchema: schema },
+    ...(judge ? { judge: true } : {}),
   });
   if (body.length > 19_000_000) throw new GeminiError('requestTooLarge');
   const response = await send(body, configuration, signal);

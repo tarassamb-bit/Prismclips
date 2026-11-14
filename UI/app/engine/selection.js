@@ -252,7 +252,7 @@ or an unresolved "this"/"he"/"that" a new viewer cannot place. Drop a clip whose
 Return exactly ${count} ids unless fewer than ${count} are genuinely distinct. CANDIDATES_JSON:
 ${JSON.stringify(candidates)}`;
   try {
-    const response = await generate([text(prompt)], { type: 'OBJECT', properties: { ids: { type: 'ARRAY', items: { type: 'INTEGER' } } }, required: ['ids'] }, configuration, signal);
+    const response = await generate([text(prompt)], { type: 'OBJECT', properties: { ids: { type: 'ARRAY', items: { type: 'INTEGER' } } }, required: ['ids'] }, configuration, signal, { judge: true });
     if (!Array.isArray(response.ids)) return null;
     if (response.ids.length === 0) return [];
     const seen = new Set();
@@ -323,7 +323,7 @@ ${transcript}`;
     start: { type: 'NUMBER' }, end: { type: 'NUMBER' }, score: { type: 'NUMBER' }, layout: { type: 'STRING', enum: ['track', 'fit'] },
     title: { type: 'STRING' }, reason: { type: 'STRING' }, description: { type: 'STRING' } },
   required: ['start', 'end', 'score', 'layout', 'title', 'reason', 'description'] } } }, required: ['clips'] };
-  const result = await generate(parts, schema, configuration, signal);
+  const result = await generate(parts, schema, configuration, signal, { judge: true });
   if (!Array.isArray(result?.clips)) throw new GeminiError('invalidResponse');
   const returned = result.clips.map((c) => {
     if (typeof c?.start !== 'number' || typeof c.end !== 'number' || typeof c.score !== 'number') throw new GeminiError('invalidResponse');

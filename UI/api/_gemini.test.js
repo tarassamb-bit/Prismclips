@@ -18,10 +18,10 @@ console.error = () => {};
 console.log = () => {};
 
 const part = { audio: { inlineData: { mimeType: 'audio/wav', data: 'AAAA' } }, image: { inlineData: { mimeType: 'image/jpeg', data: 'AAAA' } }, text: { text: 'hi' } };
-async function run(kind) {
+async function run(kind, extra = {}) {
   calls = [];
   const parts = kind === 'text' ? [part.text] : [part.text, part[kind]];
-  const req = { method: 'POST', body: { contents: [{ parts }] }, headers: { 'x-prism-video': 'a'.repeat(64), 'x-prism-minutes': '5', authorization: 'Bearer t', apikey: 'k' } };
+  const req = { method: 'POST', body: { contents: [{ parts }], ...extra }, headers: { 'x-prism-video': 'a'.repeat(64), 'x-prism-minutes': '5', authorization: 'Bearer t', apikey: 'k' } };
   const res = { statusCode: 0, setHeader() {}, end() {} };
   await handler(req, res);
   return calls.map((c) => c.model);
@@ -37,6 +37,10 @@ async function run(kind) {
   assert.deepEqual(calls[1].provider.ignore, ['makora']);
   assert.deepEqual(await run('image'), [mimo, ember, mimo]);
   assert.deepEqual(await run('text'), [mimo, ember, mimo]);
+  // Judging requests start on Ember; audio never does, whatever the request says.
+  assert.deepEqual(await run('text', { judge: true }), [ember, mimo, ember]);
+  assert.deepEqual(await run('image', { judge: true }), [ember, mimo, ember]);
+  assert.deepEqual(await run('audio', { judge: true }), [mimo, mimo, mimo]);
   // Every try keeps zero data retention.
   for (const kind of ['audio', 'image', 'text']) { await run(kind); for (const c of calls) assert.equal(c.provider.zdr, true); }
 

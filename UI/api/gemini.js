@@ -7,6 +7,8 @@
 const SUPABASE_URL = 'https://isdplhahgggundbohmlr.supabase.co';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 // MiMo first. Text and images get one Ember try between two MiMo tries (OPENROUTER_FALLBACK_MODEL replaces Ember);
+// judging requests (the app marks choosing and cutting clips with `judge`) go the other way round: Ember, MiMo, Ember,
+// because the picks decide how good the Shorts are. Ember as judge is a trial: compare the Shorts before keeping it;
 // audio stays on MiMo only, because Ember has no zero-data-retention endpoint for audio. No Gemini: it cost more than
 // MiMo for the same work. No free models: they are rate-limited exactly when they are needed.
 const DEFAULT_MODEL = 'xiaomi/mimo-v2.6-flash';
@@ -75,7 +77,7 @@ function toOpenRouter(body) {
   messages.push({ role: 'user', content });
   // A cap well above the longest real answer (about 5,400 tokens) stops a runaway answer from billing without limit.
   const request = { messages, temperature: body.generationConfig?.temperature ?? 0.2, max_tokens: MAX_OUTPUT_TOKENS, reasoning: { effort: 'low', exclude: true }, provider: PROVIDER };
-  return { kind: hasAudio ? 'audio' : hasImage ? 'image' : 'text', wantsJSON: Boolean(schema), request };
+  return { kind: hasAudio ? 'audio' : hasImage ? 'image' : 'text', judge: body.judge === true && !hasAudio, wantsJSON: Boolean(schema), request };
 }
 
 function cleanJSON(text) {
@@ -195,7 +197,7 @@ async function handler(req, res) {
   const fallback = process.env.OPENROUTER_FALLBACK_MODEL || DEFAULT_FALLBACK;
   // Audio: MiMo on its pinned provider, MiMo on any other provider, then MiMo once more with all the time left. A MiMo
   // timeout is usually one stalled provider. Text and images: MiMo, one Ember try, then MiMo with the time left.
-  const models = converted.kind === 'audio' ? [chosen, chosen, chosen] : [chosen, fallback, chosen];
+  const models = converted.kind === 'audio' ? [chosen, chosen, chosen] : converted.judge ? [fallback, chosen, fallback] : [chosen, fallback, chosen];
   const audioProvider = process.env.OPENROUTER_AUDIO_PROVIDER || AUDIO_PROVIDER;
   let status = 503, reply = null;
   const failures = [];
