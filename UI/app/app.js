@@ -266,8 +266,10 @@ function setTourStage(stage) { try { localStorage.setItem(tourKey(), stage); } c
 /** The hint for this moment (see tour.js), with what its button does. Null when there is none. */
 function currentHint() {
   const hint = hintFor({ stage: tourStage(), dialog: Boolean(state.dialog), screen: state.screen, running: Boolean(state.task?.project),
-    createStep: state.create?.step ?? null, shorts: state.project?.segments.length ?? 0 });
+    createStep: state.create?.step ?? null, shorts: state.project?.segments.length ?? 0,
+    made: (state.projects ?? []).some((p) => !p.trashed && p.segments.length > 0) });
   if (hint?.then) hint.next = hint.then === 'finish' ? finishTour : () => setTourStage(hint.then);
+  if (hint?.back) hint.previous = () => setTourStage(hint.back);
   return hint;
 }
 function welcomeTour() {
@@ -276,8 +278,8 @@ function welcomeTour() {
     <p class="muted small">A short tour shows you each step while you make your first Shorts.</p>
     <div class="row end"><button class="button ghost" id="tour-no">Skip the tour</button><button class="button primary" id="tour-yes">Show me how</button></div></div>`);
   // Esc or a click outside leaves the tour on: its first hint has its own Skip.
-  $('#tour-no').addEventListener('click', () => { closeDialog(); endTour(); });
-  $('#tour-yes').addEventListener('click', () => { closeDialog(); tourHint(); });
+  $('#tour-no').addEventListener('click', () => { closeDialog(); track('tour_skipped', { step: 0 }); endTour(); });
+  $('#tour-yes').addEventListener('click', () => { closeDialog(); track('tour_started'); tourHint(); });
   $('#tour-yes').focus();
 }
 /** Skipped: the deletion rule is the one thing nobody may miss, so it is still shown. */
@@ -286,6 +288,7 @@ function endTour() {
   showRetention();
 }
 function finishTour() {
+  track('tour_finished');
   setTourStage('done');
   showRetention('You’ve made your first Shorts! One thing to know');
 }
@@ -305,11 +308,12 @@ function tourHint() {
     // A target below the fold is brought into view once, when the hint first points at it.
     if (tourTarget !== target) { tourTarget = target; target.scrollIntoView({ block: 'nearest' }); }
     const html = `<p class="eyebrow">Step ${hint.step} of ${TOUR_STEPS}</p><div class="tour-bar" aria-hidden="true"><div style="width:${Math.round((hint.step / TOUR_STEPS) * 100)}%"></div></div><p>${hint.text}</p>
-      <div class="row between"><button class="link" id="tour-skip">Skip tour</button>${hint.button ? `<button class="button primary" id="tour-next">${hint.button}</button>` : ''}</div>`;
+      <div class="row between"><button class="link" id="tour-skip">Skip tour</button>${hint.button ? `<span class="row tour-buttons">${hint.back ? '<button class="button ghost" id="tour-back">Back</button>' : ''}<button class="button primary" id="tour-next">${hint.button}</button></span>` : ''}</div>`;
     if (bubble.dataset.html !== html) {
       bubble.dataset.html = html;
       bubble.innerHTML = html;
-      $('#tour-skip').addEventListener('click', endTour);
+      $('#tour-skip').addEventListener('click', () => { track('tour_skipped', { step: hint.step }); endTour(); });
+      $('#tour-back')?.addEventListener('click', hint.previous);
       $('#tour-next')?.addEventListener('click', hint.next);
     }
     const rect = target.getBoundingClientRect();

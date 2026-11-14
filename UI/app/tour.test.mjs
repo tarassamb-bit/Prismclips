@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { hintFor, TOUR_STEPS } from './tour.js';
 
-const at = (extra) => ({ stage: 'on', dialog: false, screen: 'home', running: false, createStep: null, shorts: 0, ...extra });
+const at = (extra) => ({ stage: 'on', dialog: false, screen: 'home', running: false, createStep: null, shorts: 0, made: false, ...extra });
 
 test('the tour follows the first project in order, steps 1 to the last', () => {
   const path = [
@@ -32,4 +32,14 @@ test('no hint when the tour is off, done, behind a dialog, or there is nothing t
 test('while Shorts are made the hint is on the progress card, or on the game cards on the games screen', () => {
   assert.equal(hintFor(at({ screen: 'create', createStep: 4, running: true })).target, '#progress .progress-card');
   assert.equal(hintFor(at({ screen: 'games', running: true })).target, '.games-grid');
+});
+
+test('coming back to Home with Shorts already made points at the project, not at Start creating', () => {
+  assert.equal(hintFor(at({ made: true })).target, '.project-card');
+  assert.equal(hintFor(at({ made: false })).target, '.start-card');
+});
+
+test('Back on the button steps returns one step', () => {
+  assert.equal(hintFor(at({ stage: 'edit', screen: 'editor', shorts: 2 })).back, 'on');
+  assert.equal(hintFor(at({ stage: 'export', screen: 'editor', shorts: 2 })).back, 'edit');
 });
