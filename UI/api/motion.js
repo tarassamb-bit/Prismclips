@@ -188,6 +188,9 @@ module.exports = async (req, res) => {
     if (body.visualFeedback !== undefined && (typeof body.visualFeedback !== 'string' || body.visualFeedback.length > 2000 || !body.previous)) throw new HttpError(400, 'Invalid visual review feedback.');
     if (body.previous != null && (typeof body.previous !== 'string' || body.previous.length > 100000)) throw new HttpError(413, 'The existing video code is too large to revise.');
     const choice = pickModel(body, MODEL), tally = newTally();
+    // Planning can use its own model (the page's per-step defaults); without one it uses the code model.
+    if (body.plan !== undefined && (typeof body.plan !== 'object' || body.plan === null)) throw new HttpError(400, 'Invalid planning model.');
+    const planChoice = body.plan ? pickModel(body.plan, choice.id) : choice, planTally = newTally();
     const cancellation = new AbortController();
     res.once?.('close', () => { if (!res.writableEnded) cancellation.abort(); });
     const started = Date.now();
@@ -200,20 +203,29 @@ module.exports = async (req, res) => {
       const earlier = Array.isArray(body.history) ? body.history.filter((item) => item?.role === 'user' && typeof item.content === 'string').slice(-8).map((item) => item.content.slice(0, 2000)) : [];
       const planningPrompt = `You are a motion-design director. Produce a concise production plan for a short 9:16 animation. This plan will be used by a code generator, not shown on screen.\nOriginal user brief: ${JSON.stringify(body.originalPrompt || body.prompt)}\nEarlier user changes: ${JSON.stringify(earlier)}\nLatest request: ${JSON.stringify(body.prompt)}\nSelected reference style:\n${styleCard}\n\nPlan 2–4 timed beats with a specific subject-relevant visual composition, its motion, transitions and exact visible words for each. Define how the first frame is already visually engaging and the ending resolves. Give concrete layout and scale, not vague adjectives, random decoration, or invented claims. Treat qualitative feedback as direction, never literal text. The user's explicit wording, requested duration and colors override the style example. When exact words are supplied, do not invent any other visible words. The reference example is a style reference, not a script; do not borrow its topic or props unless relevant. Use only artwork the generator can draw with code; no photographs, external assets, sound, or unsupported libraries. Avoid generic title cards. Give each visible text block and each foreground decorative graphic a bounding box using normalized frame coordinates 0 to 1. Text boxes must remain inside x=0.06 to 0.94 and y=0.08 to 0.92, and stay at least 0.015 apart from other text and foreground graphics. Do not put a rule, line or shape through text. A full-frame background is not a foreground decoration. Keep text in its safe box throughout transitions, do not crop headlines. Output only valid JSON with this shape: {"duration":8,"beats":[{"start":0,"end":2,"visual":"...","motion":"...","text":[{"content":"...","box":{"x":0.1,"y":0.3,"w":0.8,"h":0.1}}],"decorations":[{"x":0.2,"y":0.6,"w":0.6,"h":0.02}]}]}. The decorations array contains bounding box objects directly, never strings or nested boxes. If there are no foreground lines or shapes, use an empty decorations array. All four coordinates are numbers. Use 2–4 beats; they must start at zero, be continuous and finish exactly at duration. Duration must be between 4 and 15 seconds. Include no markdown or code.`;
       let plan, problem = '';
+      const planStarted = Date.now();
+      try {
       for (let attempt = 0; attempt < 2; attempt++) {
-        planResult = await callWithLengthRetry(planningPrompt + (problem ? `\n\nCorrect this problem in your previous plan: ${problem}` : ''), 3000, 6000, 'planning the video', cancellation.signal, choice, tally);
+        planResult = await callWithLengthRetry(planningPrompt + (problem ? `\n\nCorrect this problem in your previous plan: ${problem}` : ''), 3000, 6000, 'planning the video', cancellation.signal, planChoice, planTally);
         try { plan = JSON.parse(planResult.code); problem = planResult.code.length > 10000 ? 'Keep the plan concise.' : validatePlan(plan); }
         catch { problem = 'Return valid JSON in the specified format.'; }
         if (!problem) break;
       }
       if (problem) throw new HttpError(502, `The video plan needs another try: ${problem}`);
+      } catch (error) {
+        logRun({kind: 'plan', choice: planChoice, tally: planTally, ms: Date.now() - planStarted, style: body.style, failed: String(error.message || error).slice(0, 200)});
+        run = null;
+        throw error;
+      }
+      logRun({kind: 'plan', choice: planChoice, tally: planTally, ms: Date.now() - planStarted, style: body.style});
+      run.started = Date.now();
       planResult.code = JSON.stringify({duration:plan.duration, beats:plan.beats});
     }
     const result = await callWithLengthRetry(prompt({...body, creativePlan: planResult?.code}), 24000, 32000, 'writing the animation', cancellation.signal, choice, tally);
     const {code, model, provider} = result;
-    const usd = tally.usdKnown ? tally.usd : null;
+    const usd = tally.usdKnown && planTally.usdKnown ? tally.usd + planTally.usd : null;
     const ms = Date.now() - started;
-    logRun({...run, started: undefined, ms, provider, planned: Boolean(planResult)});
+    logRun({...run, started: undefined, ms: Date.now() - run.started, provider, planned: Boolean(planResult)});
     run = null;
     send(res, 200, { code, model, provider, usd, ms });
   } catch (error) {

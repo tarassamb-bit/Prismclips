@@ -129,8 +129,8 @@ function setBusy(nextBusy) {
   $('#make').hidden = busy && Boolean(workController);
   $('#engine').disabled = busy;
   $('#style').disabled = busy;
-  modelSelect.disabled = busy;
-  reasoningSelect.disabled = busy;
+  modelButton.disabled = busy;
+  if (busy) closeModelMenu(false);
 }
 function addAssistantMessage(text) {
   const message = document.createElement('div');
@@ -202,37 +202,105 @@ for (const select of [$('#style')]) {
   select.addEventListener('change', () => fitComposerSelect(select));
   fitComposerSelect(select);
 }
-document.fonts.ready.then(() => ['#style', '#model', '#reasoning'].forEach((id) => fitComposerSelect($(id))));
+document.fonts.ready.then(() => fitComposerSelect($('#style')));
 
-// Model picker: the list in models.json is also the server's allowlist. The last choice is remembered in this browser.
-const modelSelect = $('#model'), reasoningSelect = $('#reasoning');
-let models = [];
+// Model menu. "Default" lets each step use its own model; the list in models.json is also the server's allowlist.
+// Choices are remembered in this browser.
+const STEPS = [['code', 'Writing the code'], ['plan', 'Planning'], ['check', 'Checking frames']];
+const EFFORTS = [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']];
+const modelButton = $('#model-button'), modelMenu = $('#model-menu');
+let models = [], picked = 'default', effort = 'medium', menuView = 'main';
+let defaults = { code: 'xiaomi/mimo-v2.6-flash', plan: 'meta/muse-ember', check: 'meta/muse-ember' };
 const remember = (key, value) => { try { localStorage.setItem(key, value); } catch {} };
 const recall = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
-function syncReasoning() {
-  reasoningSelect.parentElement.hidden = !models.find((m) => m.id === modelSelect.value)?.effort;
-  fitComposerSelect(modelSelect);
-  fitComposerSelect(reasoningSelect);
+const stepModel = (step) => models.find((m) => m.id === (picked === 'default' ? defaults[step] : picked));
+const showsEffort = () => picked === 'default' ? STEPS.some(([step]) => stepModel(step)?.effort) : Boolean(stepModel('code')?.effort);
+/** The model for one step, plus the effort level when that model has one. Empty: the server default. */
+function choiceFor(step) {
+  const model = stepModel(step);
+  return model ? { model: model.id, ...(model.effort ? { reasoning: effort } : {}) } : {};
 }
+function el(tag, props = {}, ...children) {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...children.filter((child) => child != null));
+  return node;
+}
+function menuItem({ label, note, checked, value, onClick, role = 'menuitem', back }) {
+  const item = el('button', { type: 'button', className: back ? 'menu-item menu-back' : 'menu-item', onclick: onClick });
+  item.setAttribute('role', role);
+  if (role === 'menuitemradio') item.setAttribute('aria-checked', String(Boolean(checked)));
+  item.append(...[
+    back ? el('span', { className: 'menu-arrow', textContent: '‹', ariaHidden: 'true' }) : null,
+    el('span', { className: 'menu-text' }, el('span', { textContent: label }), note ? el('small', { textContent: note }) : null),
+    value ? el('span', { className: 'menu-value', textContent: value }) : null,
+    value !== undefined && !checked && role === 'menuitem' && !back ? el('span', { className: 'menu-arrow', textContent: '›', ariaHidden: 'true' }) : null,
+    checked ? el('span', { className: 'menu-check', textContent: '✓', ariaHidden: 'true' }) : null,
+  ].filter(Boolean));
+  return item;
+}
+function renderModelButton() {
+  $('#model-name').textContent = picked === 'default' ? 'Default' : stepModel('code')?.label || 'Default';
+  $('#model-effort').textContent = showsEffort() ? EFFORTS.find(([key]) => key === effort)[1] : '';
+}
+function renderModelMenu() {
+  const go = (view) => () => { menuView = view; renderModelMenu(); modelMenu.querySelector('button, select')?.focus(); };
+  const items = [];
+  if (menuView === 'main') {
+    items.push(menuItem({ label: 'Default', note: 'Each step uses its own model', role: 'menuitemradio', checked: picked === 'default', onClick: () => pickModel('default') }));
+    for (const m of models) items.push(menuItem({ label: m.label, note: m.note, role: 'menuitemradio', checked: picked === m.id, onClick: () => pickModel(m.id) }));
+    items.push(el('div', { className: 'menu-sep', role: 'separator' }));
+    if (showsEffort()) items.push(menuItem({ label: 'Effort', value: EFFORTS.find(([key]) => key === effort)[1], onClick: go('effort') }));
+    items.push(menuItem({ label: 'Defaults', value: '', onClick: go('defaults') }));
+  } else if (menuView === 'effort') {
+    items.push(menuItem({ label: 'Effort', back: true, onClick: go('main') }));
+    items.push(el('p', { className: 'menu-hint', textContent: 'Higher effort gives more thorough results, but takes longer and costs more. Models without levels ignore it.' }));
+    for (const [key, label] of EFFORTS) items.push(menuItem({ label, role: 'menuitemradio', checked: effort === key, onClick: () => { effort = key; remember('motion-reasoning', key); closeModelMenu(); } }));
+  } else {
+    items.push(menuItem({ label: 'Defaults', back: true, onClick: go('main') }));
+    items.push(el('p', { className: 'menu-hint', textContent: 'The model each step uses when Default is picked.' }));
+    for (const [step, label] of STEPS) {
+      const select = el('select', { ariaLabel: `${label} model`, onchange: () => { defaults[step] = select.value; remember('motion-defaults', JSON.stringify(defaults)); renderModelButton(); } },
+        ...models.map((m) => el('option', { value: m.id, textContent: m.label, selected: defaults[step] === m.id })));
+      items.push(el('label', { className: 'menu-step' }, el('span', { textContent: label }), select));
+    }
+  }
+  modelMenu.replaceChildren(...items);
+  renderModelButton();
+}
+function pickModel(id) { picked = id; remember('motion-model', id); closeModelMenu(); }
+function openModelMenu() {
+  menuView = 'main';
+  renderModelMenu();
+  modelMenu.hidden = false;
+  modelButton.setAttribute('aria-expanded', 'true');
+  (modelMenu.querySelector('[aria-checked="true"]') || modelMenu.querySelector('button'))?.focus();
+}
+function closeModelMenu(focusButton = true) {
+  if (modelMenu.hidden) return renderModelButton();
+  modelMenu.hidden = true;
+  modelButton.setAttribute('aria-expanded', 'false');
+  renderModelButton();
+  if (focusButton) modelButton.focus();
+}
+modelButton.addEventListener('click', () => modelMenu.hidden ? openModelMenu() : closeModelMenu());
+document.addEventListener('pointerdown', (event) => { if (!modelMenu.hidden && !event.target.closest('.model-picker')) closeModelMenu(false); });
+modelMenu.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') { event.preventDefault(); closeModelMenu(); return; }
+  if (!['ArrowDown', 'ArrowUp'].includes(event.key) || event.target.tagName === 'SELECT') return;
+  event.preventDefault();
+  const focusable = [...modelMenu.querySelectorAll('button, select')];
+  const next = focusable.indexOf(document.activeElement) + (event.key === 'ArrowDown' ? 1 : -1);
+  focusable[(next + focusable.length) % focusable.length]?.focus();
+});
 fetch('/motion/models.json').then((response) => response.json()).then((list) => {
   models = list;
-  modelSelect.replaceChildren(...list.map((m) => {
-    const option = new Option(m.label, m.id);
-    option.title = m.id;
-    return option;
-  }));
-  const savedModel = recall('motion-model'), savedReasoning = recall('motion-reasoning');
-  if (list.some((m) => m.id === savedModel)) modelSelect.value = savedModel;
-  if (['low', 'medium', 'high'].includes(savedReasoning)) reasoningSelect.value = savedReasoning;
-  syncReasoning();
-}).catch(() => setStatus('The model list could not be loaded, so the default model is used.', true));
-modelSelect.addEventListener('change', () => { remember('motion-model', modelSelect.value); syncReasoning(); });
-reasoningSelect.addEventListener('change', () => { remember('motion-reasoning', reasoningSelect.value); fitComposerSelect(reasoningSelect); });
-/** The picked model, plus its reasoning level when the model has one. Empty: the server default. */
-function modelChoice() {
-  const model = models.find((m) => m.id === modelSelect.value);
-  return model ? { model: model.id, ...(model.effort ? { reasoning: reasoningSelect.value } : {}) } : {};
-}
+  const known = (id) => list.some((m) => m.id === id);
+  const savedModel = recall('motion-model'), savedEffort = recall('motion-reasoning');
+  if (savedModel === 'default' || known(savedModel)) picked = savedModel;
+  if (EFFORTS.some(([key]) => key === savedEffort)) effort = savedEffort;
+  try { for (const [step, id] of Object.entries(JSON.parse(recall('motion-defaults') || '{}'))) if (step in defaults && known(id)) defaults[step] = id; } catch {}
+  renderModelButton();
+}).catch(() => setStatus('The model list could not be loaded, so the server default is used.', true));
 $('#prompt').addEventListener('input', updateComposer);
 $('#prompt').addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('#make').click(); } });
 document.querySelectorAll('[data-suggestion]').forEach((button) => button.addEventListener('click', () => { $('#prompt').value = button.dataset.suggestion; updateComposer(); $('#prompt').focus(); }));
@@ -285,7 +353,7 @@ async function generate(extra = {}) {
   const response = await fetch('/api/motion', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: workController?.signal,
     // Outside a send (a crash during playback) pendingBrief is null, so fall back to the accepted brief, history and style.
-    body: JSON.stringify({ prompt, engine, originalPrompt: pendingBrief?.originalPrompt || originalPrompt || prompt, history: pendingBrief?.history || history, style: pendingBrief ? pendingBrief.style : lastGood?.style || '', ...modelChoice(), ...extra }),
+    body: JSON.stringify({ prompt, engine, originalPrompt: pendingBrief?.originalPrompt || originalPrompt || prompt, history: pendingBrief?.history || history, style: pendingBrief ? pendingBrief.style : lastGood?.style || '', ...choiceFor('code'), ...(stepModel('plan') ? { plan: choiceFor('plan') } : {}), ...extra }),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
@@ -422,7 +490,7 @@ addEventListener('message',function(e){if(e.source!==parent||e.data?.type!=='ren
 async function reviewFrames(frames, reference) {
   const response = await fetch('/api/motion-review', {
     method:'POST', headers:{'Content-Type':'application/json'}, signal:workController?.signal,
-    body:JSON.stringify({brief:pendingBrief?.originalPrompt || originalPrompt || prompt, history:pendingBrief?.history || history, latest:prompt, style:pendingBrief?.style || '', frames, ...modelChoice(), ...(reference ? {reference} : {})}),
+    body:JSON.stringify({brief:pendingBrief?.originalPrompt || originalPrompt || prompt, history:pendingBrief?.history || history, latest:prompt, style:pendingBrief?.style || '', frames, ...choiceFor('check'), ...(reference ? {reference} : {})}),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || 'Visual review failed.');

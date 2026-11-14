@@ -19,3 +19,14 @@ test('every entry has the picker fields', () => {
     for (const key of ['label', 'effort']) assert.ok(key in m, `${m.id} ${key}`);
   }
 });
+
+test('a planning model outside the list is refused before any model call', async () => {
+  const handler = require('./motion');
+  const old = process.env.MOTION_OPENROUTER_API_KEY; process.env.MOTION_OPENROUTER_API_KEY = 'local-test-key';
+  const oldFetch = global.fetch; global.fetch = async () => { throw new Error('no model call expected'); };
+  const req = {method: 'POST', headers: {host: 'localhost:4173'}, async *[Symbol.asyncIterator]() { yield JSON.stringify({engine: 'canvas', prompt: 'x', style: 'watercolor-wash', plan: {model: 'openai/gpt-x'}}); }};
+  const res = {setHeader() {}, end(value) { this.body = value; }};
+  try { await handler(req, res); } finally { global.fetch = oldFetch; if (old === undefined) delete process.env.MOTION_OPENROUTER_API_KEY; else process.env.MOTION_OPENROUTER_API_KEY = old; }
+  assert.equal(res.statusCode, 400);
+  assert.match(JSON.parse(res.body).error, /Unknown model/);
+});
