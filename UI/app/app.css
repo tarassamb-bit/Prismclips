@@ -369,10 +369,13 @@ details.insp-section:not([open]) { gap: 0; }
 .motion-default { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .motion-default select { min-width: 200px; height: 36px; padding: 0 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface0); color: var(--text); font: inherit; }
 
-/* Start creating: two squares to choose from. */
-.create-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.choice-card { display: grid; justify-items: start; align-content: start; gap: 6px; padding: 18px 16px; border: 1px solid var(--border); border-radius: 14px;
-  background: var(--surface0); color: var(--text); text-align: left; text-decoration: none; font: inherit; cursor: pointer; }
-.choice-card:hover, .choice-card:focus-visible { border-color: var(--sky); outline: 0; }
-.choice-card svg { width: 30px; height: 30px; margin-bottom: 6px; fill: none; stroke: var(--sky); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-@media (max-width: 480px) { .create-choice { grid-template-columns: 1fr; } }
+/* Start creating (/app/create/choose): two big squares on a full screen. */
+.choose { max-width: 860px; margin: 0 auto; display: grid; gap: 18px; }
+.create-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.choice-card { display: grid; justify-items: start; align-content: center; gap: 8px; min-height: 280px; padding: 32px; border: 1px solid var(--border); border-radius: 20px;
+  background: var(--surface1); color: var(--text); text-align: left; text-decoration: none; font: inherit; cursor: pointer; transition: border-color .15s, transform .15s; }
+.choice-card:hover, .choice-card:focus-visible { border-color: var(--sky); outline: 0; transform: translateY(-2px); }
+.choice-card strong { font: 500 22px var(--display); }
+.choice-card svg { width: 44px; height: 44px; margin-bottom: 10px; fill: none; stroke: var(--sky); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+@media (max-width: 640px) { .create-choice { grid-template-columns: 1fr; } .choice-card { min-height: 0; } }
+@media (prefers-reduced-motion: reduce) { .choice-card { transition: none; } .choice-card:hover { transform: none; } }

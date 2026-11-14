@@ -367,7 +367,7 @@ async function generate(extra = {}) {
   const response = await fetch('/api/motion', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: workController?.signal,
     // Outside a send (a crash during playback) pendingBrief is null, so fall back to the accepted brief, history and style.
-    body: JSON.stringify({ prompt, engine, format, originalPrompt: pendingBrief?.originalPrompt || originalPrompt || prompt, history: pendingBrief?.history || history, style: pendingBrief ? pendingBrief.style : lastGood?.style || '', ...choiceFor('code'), ...(stepModel('plan') ? { plan: choiceFor('plan') } : {}), ...extra }),
+    body: JSON.stringify({ prompt, engine, format, ...(seconds ? { seconds } : {}), originalPrompt: pendingBrief?.originalPrompt || originalPrompt || prompt, history: pendingBrief?.history || history, style: pendingBrief ? pendingBrief.style : lastGood?.style || '', ...choiceFor('code'), ...(stepModel('plan') ? { plan: choiceFor('plan') } : {}), ...extra }),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
@@ -706,17 +706,20 @@ async function saveVideo() {
     await store.saveProject({
       ...(existing ?? { id: projectId, owner: signedInUser() ?? undefined, created: new Date().toISOString(), media: [], segments: [], transcripts: {} }),
       kind: 'motion', title: existing?.title ?? (title.length > 60 ? `${title.slice(0, 57)}…` : title || 'Motion video'),
-      motion: { ...lastGood, format, duration: scene?.duration ?? 0, thumbnail },
+      motion: { ...lastGood, format, seconds, duration: scene?.duration ?? 0, thumbnail },
     });
     // `history` here is the chat history, so the browser's is named in full.
     window.history.replaceState(null, '', `/motion/?project=${projectId}`);
   } catch { setStatus('This video could not be saved in this browser. Export it to keep it.', true); }
 }
-// A new video starts with two choices, style then format, before the description. The format can't change afterwards:
-// the code is written for one frame size.
+// A new video starts on a full screen with three choices, like the Create Shorts steps: style, format and length. The
+// format can't change afterwards: the code is written for one frame size.
 const STYLE_CHOICES = [['', 'No style', 'Relio picks the look'], ['flat-vector-science', 'Flat-Vector Science', 'Clean shapes, like an explainer'],
   ['watercolor-wash', 'Watercolor Wash', 'Soft, painted look'], ['shadow-puppet-theatre', 'Shadow Puppet Theatre', 'Dark cut-out figures']];
 const FORMAT_CHOICES = [['9:16', 'Vertical', 'TikTok, Reels, Shorts'], ['16:9', 'Wide', 'YouTube, presentations'], ['3:4', 'Portrait', 'Instagram and feed posts']];
+const LENGTH_CHOICES = [[0, 'Auto', 'Relio picks, 4 to 15 seconds'], [6, '6 seconds', 'A quick title or logo'], [10, '10 seconds', 'A teaser or one idea'], [15, '15 seconds', 'A short story']];
+const SETUP_STEPS = ['style', 'format', 'length'];
+let seconds = 0;
 function setFormat(value) {
   format = Object.hasOwn(FORMATS, value) ? value : '9:16';
   [W, H] = FORMATS[format];
@@ -729,35 +732,40 @@ function setFormat(value) {
 }
 function finishSetup() {
   $('#setup').hidden = true;
-  $('.welcome').hidden = false;
-  $('.composer').hidden = false;
+  $('#editor').hidden = false;
+  fit();
 }
 function showSetup(step) {
-  const style = step === 'style';
-  const cards = (style ? STYLE_CHOICES : FORMAT_CHOICES).map(([value, name, note]) => {
-    const [w, h] = style ? [0, 0] : FORMATS[value];
-    return el('button', { type: 'button', className: 'setup-card', onclick: () => {
-      if (style) { $('#style').value = value; fitComposerSelect($('#style')); showSetup('format'); }
-      else { setFormat(value); finishSetup(); $('#prompt').focus(); }
-    } }, style ? null : el('span', { className: 'setup-shape', style: `aspect-ratio:${w}/${h}` }),
-      el('span', { className: 'setup-text' }, el('strong', { textContent: style ? name : `${name} · ${value}` }), el('small', { textContent: note })));
-  });
-  $('#setup').replaceChildren(...[
-    el('p', { className: 'setup-step', textContent: style ? 'Step 1 of 2' : 'Step 2 of 2' }),
-    el('strong', { className: 'setup-title', textContent: style ? 'Choose a style' : 'Choose a format' }),
-    el('div', { className: style ? 'setup-grid' : 'setup-grid formats' }, ...cards),
-    style ? null : el('button', { type: 'button', className: 'setup-back', textContent: '‹ Back to style', onclick: () => showSetup('style') })].filter(Boolean));
+  const index = SETUP_STEPS.indexOf(step);
+  const choose = { style: (value) => { $('#style').value = value; fitComposerSelect($('#style')); showSetup('format'); },
+    format: (value) => { setFormat(value); showSetup('length'); },
+    length: (value) => { seconds = value; finishSetup(); $('#prompt').focus(); } }[step];
+  const cards = { style: STYLE_CHOICES, format: FORMAT_CHOICES, length: LENGTH_CHOICES }[step].map(([value, name, note]) => el('button', { type: 'button', className: `setup-card is-${step}`, onclick: () => choose(value) },
+    // Each style gets an example video here later (data-style names it); until then the box shows a play mark.
+    step === 'style' ? Object.assign(el('span', { className: 'style-preview', ariaHidden: 'true' }), { innerHTML: '<svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5Z"/></svg>' }) : null,
+    step === 'format' ? el('span', { className: 'setup-shape-box', ariaHidden: 'true' }, el('span', { className: 'setup-shape', style: `aspect-ratio:${FORMATS[value][0]}/${FORMATS[value][1]};${FORMATS[value][0] > FORMATS[value][1] ? 'width:70%' : 'height:96px'}` })) : null,
+    el('span', { className: 'setup-text' }, el('strong', { textContent: step === 'format' ? `${name} · ${value}` : name }), el('small', { textContent: note }))));
+  if (step === 'style') cards.forEach((card, i) => { card.firstChild.dataset.style = STYLE_CHOICES[i][0]; });
+  $('#setup').replaceChildren(el('div', { className: 'setup-inner' }, ...[
+    index ? el('button', { type: 'button', className: 'setup-back', textContent: '← Back', onclick: () => showSetup(SETUP_STEPS[index - 1]) })
+      : el('a', { className: 'setup-back', href: '/app/create/choose', textContent: '← Back' }),
+    el('p', { className: 'setup-step', textContent: `Step ${index + 1} of 3 · ${{ style: 'Style', format: 'Format', length: 'Length' }[step]}` }),
+    el('h2', { className: 'setup-title', textContent: { style: 'Choose a style', format: 'How big is it?', length: 'How long is it?' }[step] }),
+    el('div', { className: `setup-grid is-${step}` }, ...cards),
+  ]));
+  $('#editor').hidden = true;
   $('#setup').hidden = false;
-  $('#setup').querySelector('button').focus();
+  $('#setup').querySelector('.setup-card').focus();
 }
-if (!projectId) { $('.welcome').hidden = true; $('.composer').hidden = true; showSetup('style'); }
+if (!projectId) showSetup('style');
 
 if (projectId) store.loadProject(projectId).then((project) => {
   const saved = project?.motion;
-  if (!saved?.code) { projectId = null; window.history.replaceState(null, '', '/motion/'); $('.welcome').hidden = true; $('.composer').hidden = true; showSetup('style'); return; }
+  if (!saved?.code) { projectId = null; window.history.replaceState(null, '', '/motion/'); showSetup('style'); return; }
   lastGood = { engine: saved.engine, code: saved.code, originalPrompt: saved.originalPrompt, history: saved.history ?? [], style: saved.style ?? '' };
   ({ engine, originalPrompt } = lastGood);
   setFormat(saved.format);
+  seconds = saved.seconds || 0;
   finishSetup();
   history = lastGood.history.slice();
   $('#engine').value = engine;

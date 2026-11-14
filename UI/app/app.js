@@ -14,7 +14,6 @@ import { uploadVideo, downloadVideo, removeVideos, removeAllVideos, cloudUsage, 
 
 const $ = (selector, root = document) => root.querySelector(selector);
 // Motion Studio is a local-only dev tool: its API answers only on localhost.
-if (['localhost', '127.0.0.1'].includes(location.hostname)) $('.motion-link').hidden = false;
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const uuid = () => crypto.randomUUID();
 const clock = (seconds) => {
@@ -86,7 +85,8 @@ async function route() {
   try {
     const [first, second, third] = location.pathname.replace(/^\/app\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
     const idOf = (part) => part?.split('-').at(-1) ?? '';
-    if (first === 'create') {
+    if (first === 'create' && second === 'choose') chooseCreate();
+    else if (first === 'create') {
       const step = Math.max(1, CREATE_STEPS.indexOf(second) + 1);
       // With a video already chosen the steps can be walked with Back and Forward; otherwise start at the first.
       if (state.create?.project) { state.create.step = step; setScreen('create'); renderCreate(); }
@@ -557,14 +557,18 @@ const LENGTHS = [[0, 'Auto'], [15, '15 seconds'], [30, '30 seconds'], [45, '45 s
  *  now, so everywhere else this goes straight to Shorts. */
 function chooseCreate() {
   if (!MOTION_LOCAL) return startCreate();
-  openDialog(`<div class="stack"><h2>What do you want to make?</h2>
+  state.project = null;
+  state.create = null;
+  setScreen('create');
+  setUrl('/app/create/choose');
+  $('#app').innerHTML = `<section class="create choose"><button class="link back" data-action="home">← Back to Home</button>
+    <h2 class="big">What do you want to make?</h2>
     <div class="create-choice">
       <button class="choice-card" data-action="create-clips"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/></svg>
-        <strong>Shorts from a video</strong><span class="muted small">Choose a long video and Relio finds the moments worth sharing.</span></button>
+        <strong>Shorts from a video</strong><span class="muted">Choose a long video and Relio finds the moments worth sharing.</span></button>
       <a class="choice-card" href="/motion/"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9 5 3-5 3Z"/></svg>
-        <strong>Motion Studio</strong><span class="muted small">Describe an animated video and Relio makes it.</span></a>
-    </div>
-    <div class="row end"><button class="button ghost" data-action="close">Cancel</button></div></div>`);
+        <strong>Motion Studio</strong><span class="muted">Describe an animated video and Relio makes it.</span></a>
+    </div></section>`;
 }
 
 function startCreate({ project = null, media = null, file = null } = {}) {
@@ -1871,7 +1875,7 @@ document.addEventListener('click', async (event) => {
   else if (action === 'select') selectShort(target.dataset.id);
   else if (action === 'make') startCreate({ project: state.project, media: state.project.media.find((m) => m.id === target.dataset.id) });
   else if (action === 'create') chooseCreate();
-  else if (action === 'create-clips') { closeDialog(); startCreate(); }
+  else if (action === 'create-clips') startCreate();
   else if (action === 'nav') {
     const screen = target.dataset.screen;
     if (screen === 'home') showHome();
