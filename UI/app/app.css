@@ -374,3 +374,13 @@ details.insp-section:not([open]) { gap: 0; }
 .replay-banner div { display: flex; gap: 8px; }
 .replay-banner button { padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); font: inherit; cursor: pointer; }
 .replay-banner [data-replay="yes"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* Shorts being made in another tab, on a Home card. */
+.making { display: inline-flex; align-items: center; gap: 6px; color: var(--accent, #3fa9f5); }
+.spinner { width: 10px; height: 10px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+.progress-card .eta:empty { display: none; }
+/* A project with no Shorts: one clear way forward. */
+.empty-shorts { display: grid; gap: 8px; padding: 18px 0 4px; }
+.empty-shorts .row { gap: 8px; margin-top: 6px; }

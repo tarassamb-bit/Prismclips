@@ -101,7 +101,11 @@ async function route() {
   // The address as the screen itself spells it (a short link or an old name becomes the proper one).
   if (state.path && location.pathname !== state.path) history.replaceState(null, '', state.path);
 }
-window.addEventListener('popstate', () => route());
+window.addEventListener('popstate', async () => {
+  // The browser's Back button leaves the screen too: stay put unless the person stops the task.
+  if (state.task && !(await confirmStop())) return history.pushState(null, '', state.path);
+  route();
+});
 
 // MARK: Boot and the app shell (sidebar, title bar and sign-in card, as in the macOS app)
 
@@ -289,12 +293,14 @@ async function showHome(view = null) {
 
   const card = (p) => {
     const poster = p.media.find((m) => m.thumbnail)?.thumbnail;
-    const info = `${plural(p.segments.length, 'Short')} · ${dateText(p.updated ?? p.created)}`;
+    const making = remoteTask(p.id);
+    const info = making ? `<span class="making small"><span class="spinner" aria-hidden="true"></span><span>${remoteText(making)}</span></span>`
+      : `<span class="muted small">${plural(p.segments.length, 'Short')} · ${dateText(p.updated ?? p.created)}</span>`;
     const left = daysLeft(p);
     const expiry = left <= 2 ? `<span class="missing small">${left <= 1 ? 'Deleted tomorrow' : `Deleted in ${left} days`} unless you edit or export it</span>` : '';
     const away = noVideo.has(p.id) && !noVideo.get(p.id) ? '<span class="missing small">Video not on this device</span>' : '';
     const body = `<div class="poster">${poster ? `<img alt="" src="${poster}">` : ''}<span class="badge">${clock(p.media[0]?.duration ?? 0)}</span></div>
-          <strong class="p-title">${esc(p.title)}</strong><span class="muted small">${info}</span>${expiry}${away}`;
+          <strong class="p-title">${esc(p.title)}</strong>${info}${expiry}${away}`;
     return `<div class="project-card" draggable="true" data-project="${esc(p.id)}">
           <button class="open" data-action="open" data-id="${esc(p.id)}">${body}</button>
           <button class="card-menu" data-action="project-menu" data-id="${esc(p.id)}" aria-label="Options for ${esc(p.title)}" aria-haspopup="menu">⋯</button></div>`;
@@ -1158,7 +1164,7 @@ async function makeShorts(media, options) {
     return showError('Choose a range inside the video', 'The end of the range must come after its start and fall inside the video.');
   }
   if (!state.session) return renderGate();
-  const task = beginTask('Preparing video…');
+  const task = beginTask('Preparing video…', state.project);
   let key, minutes, check;
   try {
     key = await serverKey(media);
@@ -1207,7 +1213,7 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
   const source = await sourceFor(media);
   const project = state.project;
   const projectId = project.id;
-  const task = beginTask('Preparing video analysis…');
+  const task = beginTask('Preparing video analysis…', project);
   const usedRanges = project.segments.filter((s) => s.mediaId === media.id).map((s) => ({ start: s.start, end: s.start + s.duration }));
   const saved = project.transcripts?.[media.id] ?? null;
   const configuration = {
@@ -1258,7 +1264,7 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
       }
       created.push(segment);
     }
-    if (state.project?.id !== projectId) return;
+    if (task.cancelled || state.project?.id !== projectId) return;
     project.segments.push(...created);
     await persist();
     track('analysis_finished', { length: lengthBucket(minutes) });
@@ -1275,7 +1281,7 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
     }
     await refreshUsage();
   } catch (error) {
-    if (task.controller.signal.aborted) return endTask(task);
+    if (task.controller.signal.aborted) return;
     endTask(task);
     reportGenerationError(error, () => retry(options.count));
   }
@@ -1301,10 +1307,12 @@ function reportGenerationError(error, retry) {
 
 // MARK: Progress and dialogs
 
-function beginTask(stage) {
-  const task = { stage, progress: null, controller: new AbortController(), cancelled: false };
+/** `project` is set while Shorts are being made for it: other tabs show it on Home, and a cancel discards it when it has no Shorts. */
+function beginTask(stage, project = null) {
+  const task = { stage, progress: null, controller: new AbortController(), cancelled: false, started: Date.now(), project };
   state.task = task;
   renderTask();
+  announceTask(true);
   return task;
 }
 function setTask(stage, fraction = null) {
@@ -1312,19 +1320,80 @@ function setTask(stage, fraction = null) {
   state.task.stage = stage;
   if (fraction !== null) state.task.progress = Math.max(state.task.progress ?? 0, fraction);
   renderTask();
+  announceTask();
 }
 function endTask(task) {
   if (state.task === task) state.task = null;
+  if (task?.project) taskChannel?.postMessage({ type: 'done', projectId: task.project.id });
   renderTask();
 }
-function cancelTask() {
-  if (!state.task) return;
-  state.task.cancelled = true;
-  state.task.controller.abort();
-  state.task.stage = 'Cancelling…';
-  renderTask();
-  setTimeout(() => { if (state.task?.cancelled) endTask(state.task); }, 0);
+/** Stops the running task. A project still without Shorts is deleted and Home opens, so a cancelled video leaves nothing behind. */
+async function cancelTask({ goHome = true } = {}) {
+  const task = state.task;
+  if (!task) return;
+  task.cancelled = true;
+  task.controller.abort();
+  endTask(task);
+  const project = task.project;
+  if (!project || project.segments.length > 0) return;
+  await store.deleteProject(project);
+  for (const media of project.media) state.sources.delete(media.id);
+  requestSync(0);
+  if (goHome) showHome();
 }
+
+/** Seconds left, from how far the task got in the time it has run. Null until there is enough to go on. */
+function secondsLeft(task) {
+  const done = task.progress ?? 0;
+  if (!(done >= 0.03 && done < 1)) return null;
+  return ((Date.now() - task.started) / 1000) * (1 - done) / done;
+}
+const leftText = (seconds) => seconds == null ? '' : seconds < 60 ? 'less than a minute left' : `about ${Math.round(seconds / 60)} min left`;
+
+/** Asked before anything that would leave the screen while a task runs. Resolves true once the task is stopped. */
+function confirmStop() {
+  if (!state.task) return Promise.resolve(true);
+  if (state.dialog) closeDialog();
+  return new Promise((resolve) => {
+    openDialog(`<div class="stack"><h2>Stop the process?</h2>
+      <p>Relio is still working. If you leave now, it stops and ${state.task.project?.segments.length === 0 ? 'this video is removed from your projects' : 'the unfinished work is lost'}.</p>
+      <div class="row end"><button class="button ghost" id="stop-keep">Keep working</button><button class="button primary" id="stop-leave">Stop and leave</button></div></div>`);
+    dialogAnswer = () => resolve(false);
+    const answer = async (stop) => { dialogAnswer = null; closeDialog(); if (stop) await cancelTask({ goHome: false }); resolve(stop); };
+    $('#stop-keep').addEventListener('click', () => answer(false));
+    $('#stop-leave').addEventListener('click', () => answer(true));
+  });
+}
+
+// Shorts being made in one tab show on Home in the others, with how long is left.
+const taskChannel = 'BroadcastChannel' in window ? new BroadcastChannel('relio-tasks') : null;
+const remoteTasks = new Map(); // project id -> { stage, progress, left, at }
+let lastAnnounced = 0;
+function announceTask(now = false) {
+  const task = state.task;
+  if (!taskChannel || !task?.project || (!now && Date.now() - lastAnnounced < 1000)) return;
+  lastAnnounced = Date.now();
+  taskChannel.postMessage({ type: 'progress', projectId: task.project.id, progress: task.progress ?? 0, left: secondsLeft(task) });
+}
+// A quiet tab still says it's alive, so a closed or crashed one drops off Home.
+setInterval(() => announceTask(true), 5000);
+const remoteTask = (id) => { const t = remoteTasks.get(id); return t && Date.now() - t.at < 15_000 ? t : null; };
+const remoteText = (t) => `Making Shorts · ${Math.round(t.progress * 100)}%${t.left != null ? ` · ${leftText(t.left)}` : ''}`;
+taskChannel?.addEventListener('message', ({ data }) => {
+  if (data.type === 'ask') return announceTask(true);
+  if (data.type === 'progress') {
+    const known = remoteTasks.has(data.projectId);
+    remoteTasks.set(data.projectId, { ...data, at: Date.now() });
+    if (state.screen !== 'home') return;
+    const status = document.querySelector(`[data-project="${CSS.escape(data.projectId)}"] .making`);
+    if (status) status.lastChild.textContent = remoteText(remoteTasks.get(data.projectId));
+    else if (!known) showHome(state.homeView); // a project this Home hasn't listed yet
+  } else if (data.type === 'done') {
+    remoteTasks.delete(data.projectId);
+    if (state.screen === 'home') showHome(state.homeView);
+  }
+});
+taskChannel?.postMessage({ type: 'ask' });
 
 function renderTask() {
   const host = $('#progress');
@@ -1337,11 +1406,13 @@ function renderTask() {
     host.innerHTML = `<div class="card progress-card" role="status">
       <strong></strong>
       <div class="bar"><div></div></div>
+      <span class="muted small eta"></span>
       <button class="button ghost" data-action="cancel">Cancel</button>
     </div>`;
   }
   host.querySelector('strong').textContent = task.stage;
   host.querySelector('.bar > div').style.width = `${Math.round((task.progress ?? 0) * 100)}%`;
+  host.querySelector('.eta').textContent = leftText(secondsLeft(task));
 }
 
 function openDialog(html) {
@@ -1423,12 +1494,14 @@ function renderBin() {
   bin.innerHTML = `
     <div class="shorts-head">
       <h3>Shorts <span class="count">${project.segments.length}</span></h3><span class="spacer"></span>
-      <button class="star" data-action="sort" aria-pressed="${byScore}" title="${byScore ? 'Best score first. Click for the order of the video' : 'In the order of the video. Click for best score first'}" aria-label="Sort by score">
+      ${cards ? `<button class="star" data-action="sort" aria-pressed="${byScore}" title="${byScore ? 'Best score first. Click for the order of the video' : 'In the order of the video. Click for best score first'}" aria-label="Sort by score">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.7 5.7 6.3.8-4.6 4.3 1.2 6.2L12 17l-5.6 3 1.2-6.2L3 9.5l6.3-.8Z"/></svg></button>
-      ${media ? `<button class="create-more" data-action="make" data-id="${media.id}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2 5.5L19.5 10 14 12l-2 5.5L10 12l-5.5-2L10 8.5ZM19 16v4m-2-2h4"/></svg>Create more</button>` : ''}
+      ${media ? `<button class="create-more" data-action="make" data-id="${media.id}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2 5.5L19.5 10 14 12l-2 5.5L10 12l-5.5-2L10 8.5ZM19 16v4m-2-2h4"/></svg>Create more</button>` : ''}` : ''}
     </div>
-    <p class="source-line">${project.segments.length} ${project.segments.length === 1 ? 'Short' : 'Shorts'} from ${project.media.length === 1 ? esc(media.name) : `${project.media.length} videos`}</p>
-    ${cards ? `<div class="short-grid">${cards}</div>` : '<p class="muted small">No Shorts yet. Use Create more to make some.</p>'}`;
+    ${cards ? `<p class="source-line">${project.segments.length} ${project.segments.length === 1 ? 'Short' : 'Shorts'} from ${project.media.length === 1 ? esc(media.name) : `${project.media.length} videos`}</p>
+      <div class="short-grid">${cards}</div>` : `<div class="empty-shorts"><strong>No Shorts in this project</strong>
+      <span class="muted small">Making them was stopped or didn’t finish. Make Shorts from this video, or delete the project.</span>
+      <div class="row">${media ? `<button class="button primary" data-action="make" data-id="${media.id}">Make Shorts</button>` : ''}<button class="button ghost" data-action="delete-project">Delete project</button></div></div>`}`;
   fillThumbs();
 }
 
@@ -1826,8 +1899,11 @@ const safeName = (value) => value.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g,
 
 // MARK: Events
 
+// Actions that leave the current screen; while a task runs they ask to stop it first.
+const LEAVES = new Set(['home', 'open', 'open-folder', 'create', 'make', 'nav', 'signout']);
 document.addEventListener('click', async (event) => {
   const choice = event.target.closest('[data-create],[data-style],[data-type]');
+  if (choice && state.create && state.task && !(await confirmStop())) return;
   if (choice && state.create) {
     if (choice.dataset.create) await createAction(choice.dataset.create);
     else { if (choice.dataset.style) state.create.style = choice.dataset.style; else state.create.videoType = choice.dataset.type; renderCreate(); }
@@ -1836,8 +1912,13 @@ document.addEventListener('click', async (event) => {
   const target = event.target.closest('[data-action]');
   if (!target) return;
   const action = target.dataset.action;
+  if (state.task && LEAVES.has(action) && !(await confirmStop())) return;
+  if (action === 'open' && remoteTask(target.dataset.id)) {
+    return showError('Shorts are still being made', 'This video is being made in another tab. Open it when it’s done.');
+  }
   if (action === 'close') closeDialog();
   else if (action === 'cancel') cancelTask();
+  else if (action === 'delete-project') deleteProjectNow(state.project.id);
   else if (action === 'home') showHome();
   else if (action === 'open') openProject(target.dataset.id);
   else if (action === 'retry-download' && lastDownload) fetchFromCloud(lastDownload.project, lastDownload.media, lastDownload.shortPart);
