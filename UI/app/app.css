@@ -368,3 +368,11 @@ details.insp-section:not([open]) { gap: 0; }
 /* Settings › Motion Studio: one model per step. */
 .motion-default { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .motion-default select { min-width: 200px; height: 36px; padding: 0 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface0); color: var(--text); font: inherit; }
+
+/* Start creating: two squares to choose from. */
+.create-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.choice-card { display: grid; justify-items: start; align-content: start; gap: 6px; padding: 18px 16px; border: 1px solid var(--border); border-radius: 14px;
+  background: var(--surface0); color: var(--text); text-align: left; text-decoration: none; font: inherit; cursor: pointer; }
+.choice-card:hover, .choice-card:focus-visible { border-color: var(--sky); outline: 0; }
+.choice-card svg { width: 30px; height: 30px; margin-bottom: 6px; fill: none; stroke: var(--sky); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+@media (max-width: 480px) { .create-choice { grid-template-columns: 1fr; } }

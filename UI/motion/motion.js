@@ -2,6 +2,7 @@
 // The sandbox (allow-scripts, no same-origin) keeps generated code away from this site's sign-in and storage: it can only
 // draw and send messages back.
 import { Output, BufferTarget, Mp4OutputFormat, CanvasSource, canEncodeVideo } from '../vendor/mediabunny-1.61.5.min.mjs';
+import * as store from '../app/store.js';
 
 const $ = (selector) => document.querySelector(selector);
 const W = 1080, H = 1920;
@@ -537,6 +538,7 @@ addEventListener('message', async (event) => {
         reviewPass++;
         showThinking('Checking how it looks');
         const [frames, reference] = await Promise.all([captureReviewFrames(), captureStyleReference(pendingBrief?.style || '')]);
+        reviewThumb = frames[Math.floor(frames.length / 2)]?.image ?? null;
         if (token !== runToken) return;
         const issues = await reviewFrames(frames, reference);
         if (token !== runToken) return;
@@ -560,7 +562,8 @@ addEventListener('message', async (event) => {
     setBusy(false);
     if (restoring) {
       restoring = false;
-      addAssistantMessage('Your last working preview is back. You can try that change again.');
+      addAssistantMessage(opening ? 'Your saved video is open. Tell me what to change, or press Export MP4 to save it.' : 'Your last working preview is back. You can try that change again.');
+      opening = false;
     } else {
       const selectedStyle = pendingBrief?.style || '';
       if (pendingBrief) {
@@ -571,6 +574,7 @@ addEventListener('message', async (event) => {
       }
       lastGood = { engine, code, originalPrompt, history: history.slice(), style: selectedStyle };
       addAssistantMessage(reviewMessage);
+      saveVideo();
     }
     $('#make').setAttribute('aria-label', 'Send changes');
     $('#make').title = 'Send changes';
@@ -667,5 +671,60 @@ $('#export').addEventListener('click', async () => {
     player.contentWindow.postMessage({ type: 'export' }, '*');
   } catch (error) { exportFailed(error); }
 });
+
+// Saved videos. A Motion video is kept as a project next to the Shorts projects, so Home lists both. Only its code, brief
+// and a small picture are stored (a few kilobytes, synced with the account like any project): no video file, so it costs
+// almost nothing to keep, and it is drawn again from the code when opened.
+let projectId = new URLSearchParams(location.search).get('project'), reviewThumb = null, opening = false;
+/** The signed-in account's id, read from where the app's sign-in keeps it. Null when signed out. */
+function signedInUser() {
+  try { for (const key of Object.keys(localStorage)) if (/^sb-.+-auth-token$/.test(key)) return JSON.parse(localStorage.getItem(key))?.user?.id ?? null; } catch {}
+  return null;
+}
+/** A review frame shrunk to a card-sized picture. */
+function smallThumb(dataUrl) {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => {
+      const canvas = Object.assign(document.createElement('canvas'), { width: 270, height: 480 });
+      canvas.getContext('2d').drawImage(image, 0, 0, 270, 480);
+      resolve(canvas.toDataURL('image/jpeg', 0.7));
+    };
+    image.onerror = () => resolve(null);
+    image.src = dataUrl;
+  });
+}
+async function saveVideo() {
+  if (!lastGood) return;
+  try {
+    projectId ??= crypto.randomUUID();
+    const existing = await store.loadProject(projectId);
+    const thumbnail = (reviewThumb && await smallThumb(reviewThumb)) || existing?.motion?.thumbnail || null;
+    const title = lastGood.originalPrompt.replace(/\s+/g, ' ').trim();
+    await store.saveProject({
+      ...(existing ?? { id: projectId, owner: signedInUser() ?? undefined, created: new Date().toISOString(), media: [], segments: [], transcripts: {} }),
+      kind: 'motion', title: existing?.title ?? (title.length > 60 ? `${title.slice(0, 57)}…` : title || 'Motion video'),
+      motion: { ...lastGood, duration: scene?.duration ?? 0, thumbnail },
+    });
+    // `history` here is the chat history, so the browser's is named in full.
+    window.history.replaceState(null, '', `/motion/?project=${projectId}`);
+  } catch { setStatus('This video could not be saved in this browser. Export it to keep it.', true); }
+}
+if (projectId) store.loadProject(projectId).then((project) => {
+  const saved = project?.motion;
+  if (!saved?.code) { projectId = null; window.history.replaceState(null, '', '/motion/'); return; }
+  lastGood = { engine: saved.engine, code: saved.code, originalPrompt: saved.originalPrompt, history: saved.history ?? [], style: saved.style ?? '' };
+  ({ engine, originalPrompt } = lastGood);
+  history = lastGood.history.slice();
+  $('#engine').value = engine;
+  $('#style').value = lastGood.style;
+  fitComposerSelect($('#style'));
+  const brief = Object.assign(document.createElement('div'), { className: 'message', textContent: originalPrompt });
+  $('#conversation').append(brief);
+  opening = restoring = true;
+  setBusy(true);
+  showThinking('Opening your video');
+  run(saved.code);
+}).catch(() => { projectId = null; });
 
 fit();

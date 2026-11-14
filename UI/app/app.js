@@ -290,12 +290,14 @@ async function showHome(view = null) {
   const inFolder = (id) => live.filter((p) => p.folderId === id);
 
   const card = (p) => {
-    const poster = p.media.find((m) => m.thumbnail)?.thumbnail;
-    const info = `${plural(p.segments.length, 'Short')} · ${dateText(p.updated ?? p.created)}`;
+    // A Motion video is a project too: its picture and length come from the saved scene, and it opens in Motion Studio.
+    const motion = p.kind === 'motion';
+    const poster = motion ? p.motion?.thumbnail : p.media.find((m) => m.thumbnail)?.thumbnail;
+    const info = `${motion ? 'Motion video' : plural(p.segments.length, 'Short')} · ${dateText(p.updated ?? p.created)}`;
     const left = daysLeft(p);
     const expiry = left <= 2 ? `<span class="missing small">${left <= 1 ? 'Deleted tomorrow' : `Deleted in ${left} days`} unless you edit or export it</span>` : '';
     const away = noVideo.has(p.id) && !noVideo.get(p.id) ? '<span class="missing small">Video not on this device</span>' : '';
-    const body = `<div class="poster">${poster ? `<img alt="" src="${poster}">` : ''}<span class="badge">${clock(p.media[0]?.duration ?? 0)}</span></div>
+    const body = `<div class="poster">${poster ? `<img alt="" src="${poster}">` : ''}<span class="badge">${clock(motion ? p.motion?.duration ?? 0 : p.media[0]?.duration ?? 0)}</span></div>
           <strong class="p-title">${esc(p.title)}</strong><span class="muted small">${info}</span>${expiry}${away}`;
     return `<div class="project-card" draggable="true" data-project="${esc(p.id)}">
           <button class="open" data-action="open" data-id="${esc(p.id)}">${body}</button>
@@ -550,6 +552,20 @@ document.addEventListener('drop', (event) => {
 const LANGUAGES = ['auto', 'English', 'Ukrainian', 'Polish', 'German', 'French', 'Spanish', 'Italian', 'Portuguese', 'Dutch', 'Czech',
   'Lithuanian', 'Latvian', 'Estonian', 'Romanian', 'Turkish', 'Russian', 'Arabic', 'Hindi', 'Japanese', 'Korean', 'Chinese'];
 const LENGTHS = [[0, 'Auto'], [15, '15 seconds'], [30, '30 seconds'], [45, '45 seconds'], [60, '60 seconds'], [90, '90 seconds']];
+
+/** Start creating: Shorts from a video, or a Motion video from a description. Motion Studio runs on localhost only for
+ *  now, so everywhere else this goes straight to Shorts. */
+function chooseCreate() {
+  if (!MOTION_LOCAL) return startCreate();
+  openDialog(`<div class="stack"><h2>What do you want to make?</h2>
+    <div class="create-choice">
+      <button class="choice-card" data-action="create-clips"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/></svg>
+        <strong>Shorts from a video</strong><span class="muted small">Choose a long video and Relio finds the moments worth sharing.</span></button>
+      <a class="choice-card" href="/motion/"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9 5 3-5 3Z"/></svg>
+        <strong>Motion Studio</strong><span class="muted small">Describe an animated video and Relio makes it.</span></a>
+    </div>
+    <div class="row end"><button class="button ghost" data-action="close">Cancel</button></div></div>`);
+}
 
 function startCreate({ project = null, media = null, file = null } = {}) {
   setScreen('create');
@@ -874,6 +890,7 @@ async function openProject(id, shortPart = null) {
   try {
     const project = await store.loadProject(id);
     if (!project) return showHome();
+    if (project.kind === 'motion') { location.href = `/motion/?project=${encodeURIComponent(id)}`; return; }
     const missing = [];
     for (const media of project.media) if (!(await store.hasFile(media.id))) missing.push(media);
     if (missing.length) return attachVideo(project, missing[0], shortPart);
@@ -1853,11 +1870,12 @@ document.addEventListener('click', async (event) => {
   else if (action === 'new-folder') newFolder();
   else if (action === 'select') selectShort(target.dataset.id);
   else if (action === 'make') startCreate({ project: state.project, media: state.project.media.find((m) => m.id === target.dataset.id) });
-  else if (action === 'create') startCreate();
+  else if (action === 'create') chooseCreate();
+  else if (action === 'create-clips') { closeDialog(); startCreate(); }
   else if (action === 'nav') {
     const screen = target.dataset.screen;
     if (screen === 'home') showHome();
-    else if (screen === 'create') startCreate();
+    else if (screen === 'create') chooseCreate();
     else if (screen === 'settings') showSettings();
   }
   else if (action === 'settings-tab') showSettings(target.dataset.tab);
