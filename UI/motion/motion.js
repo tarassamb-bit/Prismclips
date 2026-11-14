@@ -244,15 +244,14 @@ function renderModelButton() {
 }
 function renderModelMenu() {
   modelMenu.replaceChildren(...[
-    menuItem({ label: 'Default', note: 'Each step uses its own model', role: 'menuitemradio', checked: picked === 'default', onClick: () => pickModel('default') }),
+    menuItem({ label: 'Default', note: 'Each step uses its own model. Change them in Settings', role: 'menuitemradio', checked: picked === 'default', onClick: () => pickModel('default') }),
     ...models.map((m) => menuItem({ label: m.label, role: 'menuitemradio', checked: picked === m.id, onClick: () => pickModel(m.id) })),
     el('div', { className: 'menu-sep', role: 'separator' }),
     showsEffort() ? menuItem({ label: 'Effort', value: EFFORTS.find(([key]) => key === effort)[1], opens: 'effort', onClick: () => openSub('effort', true) }) : null,
-    menuItem({ label: 'Defaults', opens: 'defaults', onClick: () => openSub('defaults', true) }),
   ].filter(Boolean));
   renderModelButton();
 }
-// The Effort and Defaults lists open beside the main menu, which stays open (fixed, so the chat panel can't clip it).
+// The Effort list opens beside the main menu, which stays open (fixed, so the chat panel can't clip it).
 function openSub(key, focus) {
   sub = key;
   for (const row of modelMenu.querySelectorAll('[data-sub]')) { row.classList.toggle('active', row.dataset.sub === key); row.setAttribute('aria-expanded', String(row.dataset.sub === key)); }
@@ -261,12 +260,6 @@ function openSub(key, focus) {
   if (key === 'effort') {
     modelSub.replaceChildren(el('p', { className: 'menu-hint', textContent: 'Higher effort gives more thorough results, but takes longer and costs more.' }),
       ...EFFORTS.map(([level, label]) => menuItem({ label, badge: level === 'medium' ? 'Recommended' : null, role: 'menuitemradio', checked: effort === level, onClick: () => { effort = level; remember('motion-reasoning', level); closeModelMenu(); } })));
-  } else {
-    modelSub.replaceChildren(el('p', { className: 'menu-hint', textContent: 'The model each step uses when Default is picked.' }), ...STEPS.map(([step, label]) => {
-      const select = el('select', { ariaLabel: `${label} model`, onchange: () => { defaults[step] = select.value; remember('motion-defaults', JSON.stringify(defaults)); renderModelButton(); } },
-        ...models.map((m) => el('option', { value: m.id, textContent: m.label, selected: defaults[step] === m.id })));
-      return el('label', { className: 'menu-step' }, el('span', { textContent: label }), select);
-    }));
   }
   const menu = modelMenu.getBoundingClientRect(), width = modelSub.offsetWidth;
   modelSub.style.left = `${menu.right + 6 + width <= innerWidth - 8 ? menu.right + 6 : Math.max(8, menu.left - 6 - width)}px`;
