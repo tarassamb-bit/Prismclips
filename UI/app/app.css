@@ -126,7 +126,7 @@ details.insp-section:not([open]) { gap: 0; }
 .tagline { margin: 2px 6px 14px; color: var(--text2); font-size: 12px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
 .side-nav { display: grid; gap: 10px; }
 .side-button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border-radius: 10px; border: 0; background: transparent; cursor: pointer; font-size: 14px; font-weight: 500; text-align: left; color: var(--text); }
-.side-button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.side-button svg { flex: none; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .side-button.selected { background: var(--surface2); }
 .side-button.prominent { background: var(--sky); color: #0e0f14; }
 .side-button:disabled { opacity: .45; cursor: default; }
