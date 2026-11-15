@@ -182,6 +182,10 @@ details.insp-section:not([open]) { gap: 0; }
 .choice .style-preview.no-captions { display: grid; place-items: center; box-sizing: border-box; color: rgba(255,255,255,.35); font-weight: 700; text-decoration: line-through; }
 .drop-card { display: grid; gap: 6px; justify-items: center; padding: 48px 20px; border: 2px dashed var(--border); border-radius: 16px; cursor: pointer; background: var(--surface1); }
 .drop-card:hover { border-color: var(--sky); } .drop-card.busy { opacity: .7; cursor: default; }
+/* The file inputs stay focusable (Tab, then Enter or Space opens the picker) but out of sight; the card shows the focus. */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.drop-card, .attach { position: relative; }
+.drop-card:focus-within, .attach:focus-within { outline: 2px solid var(--sky); outline-offset: 2px; }
 /* Settings */
 @media (max-width: 800px) {
   body { overflow: auto; }

@@ -50,13 +50,6 @@ async function refreshUsage() {
   if (!state.session) return;
   const { data, error } = await db().rpc('my_usage');
   state.usage = !error && data?.[0] ? { used: data[0].used, allowance: data[0].allowance } : null;
-  renderUsage();
-}
-
-function renderUsage() {
-  const badge = $('#usage-badge');
-  if (!badge) return;
-  badge.textContent = state.usage ? `${Math.ceil(state.usage.used)} of ${Math.floor(state.usage.allowance)} min used` : '';
 }
 
 
@@ -136,17 +129,24 @@ async function boot() {
     return renderGate('Sign-in is unavailable right now. Check your connection and reload.');
   }
   state.session = (await db().auth.getSession()).data.session;
-  db().auth.onAuthStateChange((_event, session) => {
-    state.session = session;
-    renderGate();
-    if (session) { refreshUsage(); requestSync(0); }
-  });
+  db().auth.onAuthStateChange((_event, session) => sessionChanged(session));
   // Captions draw on canvas, which never waits for a font: load the Latin and Cyrillic caption faces first.
   await Promise.all([document.fonts.load('800 66px "Relio Captions"', 'Aa Яя ĄŁ'), document.fonts.load('500 46px Sora')]).catch(() => {});
   renderGate();
   await route();
   refreshUsage();
   if (state.session) requestSync(0);
+}
+
+/** Signing in at the gate opens this account's screen (its projects, the welcome tour); a token refresh or tab focus never re-routes. */
+async function sessionChanged(session) {
+  const arrived = !state.session && session;
+  state.session = session;
+  renderGate();
+  if (!session) return;
+  if (arrived) await route();
+  refreshUsage();
+  requestSync(0);
 }
 
 function setScreen(screen) {
@@ -189,6 +189,13 @@ function applyTheme(theme) {
 const bytes = (value) => (value >= 1e9 ? `${Number((value / 1e9).toFixed(1))} GB` : value >= 1e6 ? `${Math.round(value / 1e6)} MB`
   : value > 0 ? `${Math.max(1, Math.round(value / 1e3))} KB` : '0 MB');
 
+/** ?mode= decides; otherwise a browser with no sign of an earlier account (a session, a tour or notice seen) gets Create account. */
+function gateMode() {
+  const asked = new URLSearchParams(location.search).get('mode');
+  if (asked === 'signup' || asked === 'signin') return asked;
+  try { return Object.keys(localStorage).some((k) => /^sb-.+-auth-token$|^relio\.(tour|retention-notice)\./.test(k)) ? 'signin' : 'signup'; } catch { return 'signin'; }
+}
+
 /** While nobody is signed in, the full-screen sign-in screen (/auth.js) covers the whole app. */
 function renderGate(message = '') {
   const gate = $('#gate');
@@ -199,12 +206,8 @@ function renderGate(message = '') {
   if (gate.querySelector('.auth') && !message) return;
   gate.innerHTML = '';
   const screen = window.prismAuth.mount(gate, {
-    db: db(), mode: new URLSearchParams(location.search).get('mode') === 'signup' ? 'signup' : 'signin', redirectTo: location.origin + '/app/',
-    onSignedIn: async () => {
-      state.session = (await db().auth.getSession()).data.session;
-      renderGate();
-      refreshUsage();
-    },
+    db: db(), mode: gateMode(), redirectTo: location.origin + '/app/',
+    onSignedIn: async () => sessionChanged((await db().auth.getSession()).data.session),
   });
   if (message) gate.querySelector('.auth-status').textContent = message;
   return screen;
@@ -679,12 +682,23 @@ async function chooseVideo(file) {
     const project = { id: uuid(), owner: userId(), title: file.name.replace(/\.[^.]+$/, ''), created: new Date().toISOString(), media: [], segments: [], transcripts: {} };
     const media = await importMedia(project, file);
     await store.saveProject(project);
-    Object.assign(c, { project, media, customEnd: Math.round(media.duration / 6) / 10, step: 2 });
+    Object.assign(c, { project, media, customEnd: Math.round(media.duration / 6) / 10, step: 2, isNew: true });
   } catch (error) {
     c.error = error.message || 'That file is not a video this browser can read.';
   }
   c.busy = false;
   renderCreate();
+}
+
+/** Leaving Create before any Short was made removes the project this Create made. Never an existing project ("Create more"),
+ *  and never one whose run failed after saving a paid transcript. */
+async function dropUnusedImport() {
+  const c = state.create, project = c?.project;
+  if (!c.isNew || !project || project.segments.length || state.task || Object.keys(project.transcripts ?? {}).length) return;
+  c.project = null;
+  await store.deleteProject(project);
+  for (const media of project.media) state.sources.delete(media.id);
+  requestSync(0);
 }
 
 /** Why the custom range can't be used, or null when it can. */
@@ -697,16 +711,16 @@ function rangeProblem(c) {
 function renderCreate() {
   const c = state.create;
   setUrl(`/app/create/${CREATE_STEPS[c.step - 1]}`);
-  const eyebrow = (n, label) => `<p class="eyebrow">Step ${n} of 5 · ${label}</p>`;
+  const eyebrow = (n, label) => `<p class="eyebrow">Step ${n} of 4 · ${label}</p>`;
   const back = `<button class="link back" data-action="home">← Back to Home</button>`;
   let html;
   if (c.step === 1) {
     html = `${eyebrow(1, 'Choose video')}<h2 class="big">Choose a video</h2>
       <p class="muted">Relio keeps the video in this browser and saves it to your account, so the project opens on any device you sign in on. Relio AI reads its audio and some frames.</p>
-      <label class="drop-card ${c.busy ? 'busy' : ''}"><input id="pick" type="file" accept="video/*" hidden ${c.busy ? 'disabled' : ''}>
+      <label class="drop-card ${c.busy ? 'busy' : ''}"><input id="pick" class="sr-only" type="file" accept="video/*" ${c.busy ? 'disabled' : ''}>
         <span class="drop-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 16V4m-5 5 5-5 5 5M5 20h14"/></svg></span>
         <strong>${c.busy ? 'Reading the video…' : 'Drop a video here'}</strong>
-        ${c.busy ? '' : '<span class="muted small">or</span><span class="button primary">Choose a video</span>'}</label>
+        ${c.busy ? '' : '<span class="muted small">Videos 3 minutes or longer</span><span class="muted small">or</span><span class="button primary">Choose a video</span>'}</label>
       ${c.error ? `<p class="error" role="alert">${esc(c.error)}</p>` : ''}${back}`;
   } else if (c.step === 2) {
     const m = c.media;
@@ -714,6 +728,12 @@ function renderCreate() {
     const where = { entireVideo: 'the entire video', firstHalf: 'the first half', lastHalf: 'the last half', custom: 'the chosen range' }[c.region];
     const many = c.count > 0 ? `up to ${c.count} distinct moments` : 'as many distinct moments as are strong (about one per minute)';
     const long = c.duration > 0 ? `of about ${c.duration} seconds` : 'as long as each story needs';
+    // What the run costs, shown before the remaining steps. Only a warning: a video used before costs less or nothing,
+    // which only the server knows, so it alone refuses a run (usage_allowed).
+    if (!c.usageAsked && state.session) { c.usageAsked = true; refreshUsage().then(() => { if (state.create === c && c.step === 2) renderCreate(); }); }
+    const u = state.usage, need = Math.ceil(m.duration / 60), left = u ? Math.max(0, Math.floor(u.allowance - u.used)) : null;
+    const cost = left === null ? '' : `<p class="muted small">This uses about ${need} min · ${left} min left</p>
+      ${need > left ? `<p class="notice small" role="status">This may be more than your ${left} minutes left. A video you already used doesn’t count again.</p>` : ''}`;
     html = `${eyebrow(2, 'Set up Shorts')}<h2 class="big">Choose your Short settings</h2><p class="muted">Your video is ready. Choose how to turn it into Shorts.</p>
       <div class="panel"><p class="file-line"><span class="tick">✓</span> ${esc(m.name)}</p>
         <p class="muted">Video duration: ${clock(m.duration)} · ${(m.duration / 60).toFixed(2)} minutes</p>
@@ -730,7 +750,7 @@ function renderCreate() {
           <label>End (minutes) <input id="to" type="number" min="0" step="0.1" value="${c.customEnd}"></label></div>
           <p class="muted small">${problem ? esc(problem) : `Analyze ${clock(c.customStart * 60)} to ${clock(c.customEnd * 60)} · ${clock((c.customEnd - c.customStart) * 60)} selected`}</p>` : ''}
         <p class="muted small">Relio will analyze frames and available speech, then suggest ${many} ${long} in ${where}. Review every pick before exporting.</p></div>
-      <button class="button primary" data-create="next" ${problem ? 'disabled' : ''}>Next: Choose captions →</button>${back}`;
+      ${cost}<button class="button primary" data-create="next" ${problem ? 'disabled' : ''}>Next: Choose captions →</button>${back}`;
   } else if (c.step === 3) {
     html = `${eyebrow(3, 'Choose captions')}<h2 class="big">Choose your captions</h2><p class="muted">Pick how spoken words appear. You can change this for each Short later.</p>
       <div class="cards">${CAPTION_STYLES.map((s) => `<button class="choice ${s === c.style ? 'on' : ''}" data-style="${s}"><canvas class="style-preview" data-preview="${s}" aria-hidden="true"></canvas><strong>${STYLE_TITLES[s]}</strong><span class="muted small">${STYLE_DETAILS[s]}</span></button>`).join('')}
@@ -962,7 +982,7 @@ const MIN_VIDEO_SECONDS = 3 * 60;
 async function importMedia(project, file) {
   const source = await openSource(file);
   if (source.duration < MIN_VIDEO_SECONDS) {
-    throw new Error(`This video is ${clock(source.duration)} long. Relio needs at least ${MIN_VIDEO_SECONDS / 60} minutes of video to find Shorts in it.`);
+    throw new Error(`This video is ${clock(source.duration)} long. Relio needs at least ${MIN_VIDEO_SECONDS / 60} minutes of video to find Shorts in it. Try a longer video, like a podcast, stream or talk.`);
   }
   const media = {
     id: uuid(), name: file.name, mime: file.type, size: file.size, lastModified: file.lastModified, duration: source.duration,
@@ -1008,7 +1028,7 @@ async function attachVideo(project, media, shortPart, note = '') {
   const minutes = Math.round(media.duration / 6) / 10;
   openDialog(`<div class="stack"><h2>Add the video to this device</h2>
     <p>“${esc(project.title)}” was made on another device, and its video isn’t here yet. Choose <strong>${esc(media.name)}</strong> (${minutes} min) again to open it. The video stays on this device only.</p>
-    <label class="button primary attach">Choose the video<input id="attach" type="file" accept="video/*" hidden></label>
+    <label class="button primary attach">Choose the video<input id="attach" class="sr-only" type="file" accept="video/*"></label>
     <p id="attach-status" class="muted small" role="status">${esc(note)}</p>
     <div class="row end"><button class="button ghost" data-action="close">Cancel</button></div></div>`);
   $('#attach').addEventListener('change', async (event) => {
@@ -1679,8 +1699,8 @@ function renderBin() {
       ${media ? `<button class="create-more" data-action="make" data-id="${media.id}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2 5.5L19.5 10 14 12l-2 5.5L10 12l-5.5-2L10 8.5ZM19 16v4m-2-2h4"/></svg>Create more</button>` : ''}` : ''}
     </div>
     ${cards ? `<p class="source-line">${project.segments.length} ${project.segments.length === 1 ? 'Short' : 'Shorts'} from ${project.media.length === 1 ? esc(media.name) : `${project.media.length} videos`}</p>
-      <div class="short-grid">${cards}</div>` : `<div class="empty-shorts"><strong>No Shorts in this project</strong>
-      <span class="muted small">Making them was stopped or didn’t finish. Make Shorts from this video, or delete the project.</span>
+      <div class="short-grid">${cards}</div>` : `<div class="empty-shorts"><strong>No Shorts yet</strong>
+      <span class="muted small">Make Shorts from this video.</span>
       <div class="row">${media ? `<button class="button primary" data-action="make" data-id="${media.id}">Make Shorts</button>` : ''}<button class="button ghost" data-action="delete-project">Delete project</button></div></div>`}`;
   fillThumbs();
 }
@@ -1789,10 +1809,19 @@ function renderInspector() {
   const segment = selected();
   if (!segment) { host.innerHTML = '<p class="muted small">Select a Short to edit it.</p>'; return; }
   const styleOptions = CAPTION_STYLES.map((s) => `<option value="${s}" ${s === (segment.captionStyle ?? 'classic') ? 'selected' : ''}>${STYLE_TITLES[s]}</option>`).join('');
+  // A fallback pick's reason starts with an internal "Weaker pick: ..." sentence; the reason itself follows.
+  const reason = (segment.selectionReason ?? '').replace(/^Weaker pick:[^.]*\.\s*/, '').trim();
   const choice = (field, values, fallback) => values.map((v) => `<option value="${v}" ${v === (segment[field] ?? fallback) ? 'selected' : ''}>${v[0].toUpperCase() + v.slice(1)}</option>`).join('');
   host.innerHTML = `
     <div class="insp">
       <label>Title <input data-field="suggestedTitle" value="${esc(segment.suggestedTitle ?? '')}"></label>
+      ${reason ? `<p class="muted small">Why Relio picked this: ${esc(reason)}</p>` : ''}
+      <label>Post description <textarea data-field="suggestedDescription" rows="3">${esc(segment.suggestedDescription ?? '')}</textarea></label>
+      <button class="link-button" data-action="copy-description">Copy description</button>
+      <div class="insp-pair">
+        <label>Start (s) <input type="number" data-field="start" min="0" step="0.1" value="${segment.start.toFixed(1)}"></label>
+        <label>Length (s) <input type="number" data-field="duration" min="0.5" step="0.1" value="${segment.duration.toFixed(1)}"></label>
+      </div>
       ${segment.captionNotice ? `<p class="notice small">${esc(segment.captionNotice)}</p>` : ''}
       <section class="insp-section">
         <h3>Captions</h3>
@@ -1804,7 +1833,8 @@ function renderInspector() {
           <label>Size <select data-field="captionSize">${choice('captionSize', ['small', 'medium', 'large'], 'medium')}</select></label>
         </div>
         <label class="check"><input type="checkbox" data-field="captionAnimated" ${segment.captionAnimated ? 'checked' : ''}> Pop in new captions</label>
-        <label>Words <textarea data-field="captionTexts" rows="4">${esc((segment.captions ?? []).map((c) => c.text).join('\n'))}</textarea></label>
+        <label>Words <span class="muted small">One line per caption</span><textarea data-field="captionTexts" rows="4">${esc((segment.captions ?? []).map((c) => c.text).join('\n'))}</textarea></label>
+        <p id="caption-lines" class="error small" aria-live="polite"></p>
         <button class="link-button" data-action="regen-captions">Regenerate subtitles</button>
       </section>
       <details class="insp-section">
@@ -1908,6 +1938,20 @@ function wireTimeline(segment) {
 }
 
 /** Applies an edit to the selected Short: keeps an undo copy, saves, and re-renders the preview when the picture changed. */
+/** A slow edit (tracking, finding speakers): says so while it runs, and a failure is shown instead of lost. */
+async function slowEdit(control, label, change) {
+  const note = $('#track-note');
+  control.disabled = true;
+  if (note) note.textContent = label;
+  try { await edit(change); } catch (error) {
+    console.warn(error);
+    showError('Relio couldn’t finish that', 'Try again in a moment.', 'temporary');
+  } finally {
+    control.disabled = false;
+    if (note?.isConnected && note.textContent === label) note.textContent = '';
+  }
+}
+
 async function edit(change, { rerender = true } = {}) {
   const segment = selected();
   if (!segment) return;
@@ -2093,6 +2137,7 @@ document.addEventListener('click', async (event) => {
   if (!target) return;
   const action = target.dataset.action;
   if (state.task && LEAVES.has(action) && !(await confirmStop())) return;
+  if (LEAVES.has(action) && state.create) await dropUnusedImport();
   if (action === 'open' && remoteTask(target.dataset.id)) {
     return showError('Shorts are still being made', 'This video is being made in another tab. Open it when it’s done.');
   }
@@ -2130,7 +2175,8 @@ document.addEventListener('click', async (event) => {
   else if (action === 'sync-now') sync();
   else if (action === 'retry-upload') { videoBlock = null; uploadPending(); showSettings('usage'); }
   else if (action === 'usage') { closeDialog(); showSettings('usage'); }
-  else if (action === 'retrack') edit(async (s) => { s.cropKeyframes = null; await retrack(s, await sourceFor(state.project.media.find((m) => m.id === s.mediaId))); });
+  else if (action === 'copy-description') navigator.clipboard?.writeText(selected()?.suggestedDescription ?? '').then(() => { target.textContent = 'Copied'; }, () => {});
+  else if (action === 'retrack') slowEdit(target, 'Finding the subject…', async (s) => { s.cropKeyframes = null; await retrack(s, await sourceFor(state.project.media.find((m) => m.id === s.mediaId))); });
   else if (action === 'remove') removeShort(target.dataset.id ?? state.selectedId);
   else if (action === 'sort') toggleSort();
   else if (action === 'regen-captions') regenerateCaptions();
@@ -2149,7 +2195,14 @@ document.addEventListener('change', async (event) => {
   // Title and description save as you type (see the input listener).
   if (!field || field === 'suggestedTitle' || field === 'suggestedDescription' || !selected()) return;
   const input = event.target;
-  edit(async (s) => {
+  if (field === 'captionTexts') {
+    // Each line is one timed caption; a different count can't be matched up, so the text stays in the field to fix.
+    const count = (selected().captions ?? []).length;
+    if (input.value.split('\n').length !== count) { $('#caption-lines').textContent = `Keep one line per caption (${plural(count, 'line')}).`; return; }
+  }
+  // Finding both speakers takes a moment and goes to Relio AI: say so while it runs.
+  const run = field === 'splitScreen' && input.checked && !selected().splitCenters ? (change) => slowEdit(input, 'Finding both speakers…', change) : edit;
+  run(async (s) => {
     if (field === 'captionTexts') {
       const lines = input.value.split('\n');
       if (lines.length === (s.captions ?? []).length) s.captions = s.captions.map((c, i) => ({ ...c, text: lines[i] }));

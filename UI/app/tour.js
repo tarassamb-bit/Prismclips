@@ -15,7 +15,7 @@ export function hintFor({ stage, dialog, screen, running, createStep, shorts, ma
   if (stage === 'edit' || stage === 'export') {
     if (screen !== 'editor' || !shorts) return null;
     return stage === 'edit'
-      ? { step: 7, target: '#inspector', text: 'Edit the selected Short here: its title, captions, start, length and crop. The preview in the middle shows every change.', button: 'Next', then: 'export', back: 'on' }
+      ? { step: 7, target: '#inspector', text: 'Edit the selected Short here: its title, captions, start and length. Drag the bar under the preview to trim.', button: 'Next', then: 'export', back: 'on' }
       : { step: 8, target: '#export-button', text: '<strong>Export</strong> saves your Shorts as video files, ready to post.', button: 'Finish', then: 'finish', back: 'edit' };
   }
   if (running) {
