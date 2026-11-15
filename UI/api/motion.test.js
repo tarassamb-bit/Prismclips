@@ -12,7 +12,7 @@ async function request(body) {
     sent = JSON.parse(init.body);
     assert.equal(init.headers['X-Title'], 'Relio Clips');
     assert.equal(sent.model, process.env.MOTION_MODEL || 'xiaomi/mimo-v2.6-flash');
-    if (body.style) assert.ok(sent.reasoning.max_tokens >= 2000); else assert.equal(sent.reasoning.effort, 'medium');
+    if (body.style) assert.equal(sent.reasoning.enabled, false); else assert.equal(sent.reasoning.effort, 'medium');
     const content = sent.max_tokens === 3000 ? JSON.stringify({duration:8, beats:[{start:0,end:4,visual:'A prominent headline',motion:'Ease in',text:[{content:'MAKE IT MOVE',box:{x:0.1,y:0.3,w:0.8,h:0.1}}],decorations:[]},{start:4,end:8,visual:'A new layout',motion:'Transition and hold',text:[{content:'Ideas in motion',box:{x:0.1,y:0.55,w:0.8,h:0.1}}],decorations:[]}]}) : '```js\nfunction Video() {}\n```';
     return {ok: true, text: async () => JSON.stringify({choices: [{finish_reason: 'stop', message: {content}}]})};
   };

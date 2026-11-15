@@ -173,8 +173,8 @@ async function callModel(instruction, maxTokens, signal, pick, tally) {
     const {response, data:answer} = await requestProvider('https://openrouter.ai/api/v1/chat/completions', {
       method:'POST',
       headers:{Authorization:`Bearer ${motionKey()}`, 'Content-Type':'application/json', 'HTTP-Referer':'https://relioclips.com', 'X-Title':'Relio Clips'},
-      // Styled runs only: models without a level setting (MiMo) got an uncapped "medium" and could spend the whole output on reasoning, returning no code; a budget leaves room to write it.
-      body:JSON.stringify({model:pick.id, max_tokens:maxTokens, reasoning:pick.effort || !pick.cap ? reasoningFor(pick) : {max_tokens:Math.max(2000, Math.round(maxTokens / 3)), exclude:true}, provider:PROVIDER, messages:[{role:'user',content:instruction}]}),
+      // Styled runs only: models without a level setting (MiMo) spent the whole output on reasoning and returned no code; a reasoning max_tokens budget was ignored (18k of 24k), so reasoning is off.
+      body:JSON.stringify({model:pick.id, max_tokens:maxTokens, reasoning:pick.effort || !pick.cap ? reasoningFor(pick) : {enabled:false}, provider:PROVIDER, messages:[{role:'user',content:instruction}]}),
     }, {signal});
     if (!response.ok || !answer.choices?.length) throw new HttpError(502, `The model provider: ${answer.error?.message || `HTTP ${response.status}`}`);
     addUsage(tally, answer.usage);
