@@ -302,7 +302,8 @@ const STEPS = [['code', 'Writing the code'], ['plan', 'Planning'], ['check', 'Ch
 const EFFORTS = [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']];
 const modelButton = $('#model-button'), modelMenu = $('#model-menu'), modelSub = $('#model-sub');
 let models = [], picked = 'default', effort = 'medium', sub = null;
-let defaults = { code: 'xiaomi/mimo-v2.6-flash', plan: 'meta/muse-ember', check: 'meta/muse-ember' };
+// Relio picks the models: GPT-6 Luna Pro was the best cheap model in the 20-model test (Nov 2026), for every step.
+let defaults = { code: 'openai/gpt-6-luna-pro', plan: 'openai/gpt-6-luna-pro', check: 'openai/gpt-6-luna-pro' };
 const remember = (key, value) => { try { localStorage.setItem(key, value); } catch {} };
 const recall = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
 const stepModel = (step) => models.find((m) => m.id === (picked === 'default' ? defaults[step] : picked));
@@ -397,11 +398,9 @@ modelMenu.parentElement.addEventListener('keydown', (event) => {
 });
 fetch('/motion/models.json').then((response) => response.json()).then((list) => {
   models = list;
-  const known = (id) => list.some((m) => m.id === id);
-  const savedModel = recall('motion-model'), savedEffort = recall('motion-reasoning');
-  if (savedModel === 'default' || known(savedModel)) picked = savedModel;
+  // No model choice for users: older saved picks are ignored.
+  const savedEffort = recall('motion-reasoning');
   if (EFFORTS.some(([key]) => key === savedEffort)) effort = savedEffort;
-  try { for (const [step, id] of Object.entries(JSON.parse(recall('motion-defaults') || '{}'))) if (step in defaults && known(id)) defaults[step] = id; } catch {}
   renderModelButton();
 }).catch(() => setStatus('The model list could not be loaded, so the server default is used.', true));
 $('#prompt').addEventListener('input', updateComposer);
@@ -635,9 +634,11 @@ addEventListener('message', async (event) => {
         const stillIssues = (frames.still || []).map(([from, to]) => `From ${from.toFixed(1)}s to ${to.toFixed(1)}s almost nothing moves: keep something animating the whole time.`);
         const issues = [...stillIssues, ...await reviewFrames(frames, reference)].slice(0, 4);
         if (token !== runToken) return;
-        if (issues.length && reviewPass === 1) {
-          showThinking('Fixing issues found in the video');
-          const correction = await generate({previous:code, visualFeedback:issues.join('\n')});
+        // Every new video gets one polish pass (the test's best setup), fixing any issues the check found.
+        if (reviewPass === 1 && pendingBrief) {
+          showThinking(issues.length ? 'Fixing issues found in the video' : 'Polishing your video');
+          const polish = 'Second pass: make this video much better. Add detail and craft to every illustration and the background, fill empty areas of the frame, make the visual story clearer, and keep something moving at every moment. Keep the exact text and its order.';
+          const correction = await generate({previous:code, visualFeedback:[...issues, polish].join('\n')});
           if (token !== runToken) return;
           if (!lastGood) lastGood = {engine, code, originalPrompt:pendingBrief?.originalPrompt || prompt, history:pendingBrief?.history || [], style:pendingBrief?.style || ''};
           run(correction.code);

@@ -798,24 +798,7 @@ async function createAction(action) {
 
 // Motion Studio runs on localhost only, so its tab does too.
 const MOTION_LOCAL = ['localhost', '127.0.0.1'].includes(location.hostname);
-const SETTINGS_TABS = ['account', 'overview', 'usage', ...(MOTION_LOCAL ? ['motion'] : [])];
-// The same steps, storage key and starting models as motion/motion.js, which reads what is saved here.
-const MOTION_STEPS = [['code', 'Writing the code'], ['plan', 'Planning'], ['check', 'Checking frames']];
-const MOTION_DEFAULTS = { code: 'xiaomi/mimo-v2.6-flash', plan: 'meta/muse-ember', check: 'meta/muse-ember' };
-async function fillMotionDefaults() {
-  const host = $('#motion-defaults');
-  const models = await fetch('/motion/models.json').then((r) => r.json()).catch(() => null);
-  if (!host?.isConnected) return;
-  if (!models) { host.innerHTML = '<p class="error small">The model list could not be loaded.</p>'; return; }
-  const chosen = { ...MOTION_DEFAULTS };
-  try { for (const [step, id] of Object.entries(JSON.parse(localStorage.getItem('motion-defaults') || '{}'))) if (step in chosen && models.some((m) => m.id === id)) chosen[step] = id; } catch { /* nothing saved */ }
-  host.innerHTML = MOTION_STEPS.map(([step, label]) => `<label class="motion-default"><span>${label}</span>
-    <select data-step="${step}">${models.map((m) => `<option value="${esc(m.id)}" ${chosen[step] === m.id ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}</select></label>`).join('');
-  host.addEventListener('change', (event) => {
-    chosen[event.target.dataset.step] = event.target.value;
-    try { localStorage.setItem('motion-defaults', JSON.stringify(chosen)); $('#motion-saved').textContent = 'Saved.'; } catch { $('#motion-saved').textContent = 'This browser blocks saving, so the choice was not kept.'; }
-  });
-}
+const SETTINGS_TABS = ['account', 'overview', 'usage'];
 const count = new Intl.NumberFormat();
 const lengthText = (seconds) => { const s = Math.round(seconds); return s >= 60 ? `${count.format(Math.floor(s / 60))}m ${s % 60}s` : `${s}s`; };
 
@@ -856,15 +839,12 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
     ['account', 'Account', email ?? 'Sign in to track your stats', '<path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0"/>', 'Your Relio account.'],
     ['overview', 'Overview', 'Stats and exports', '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>', 'What you have made with Relio, and your exports.'],
     ['usage', 'Usage', used, '<path d="M5 18a8 8 0 1 1 14 0M12 18l4-6"/>', 'Minutes of video you can make Shorts from, and your space for videos in the cloud.'],
-    ...(MOTION_LOCAL ? [['motion', 'Motion Studio', 'Default models', '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9 5 3-5 3Z"/>', 'The model each step uses when “Default” is picked in Motion Studio.']] : []),
   ];
   const nav = NAV.map(([id, title, detail, icon]) => `<button class="settings-item" data-action="settings-tab" data-tab="${id}" ${tab === id ? 'aria-current="page"' : ''}>
       <svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg><span><strong>${title}</strong><span class="muted small">${esc(detail)}</span></span></button>`).join('');
   const [, title, , , blurb] = NAV.find(([id]) => id === tab);
   let body;
-  if (tab === 'motion') {
-    body = `<div class="card stack"><div id="motion-defaults" class="stack"><p class="muted small">Loading…</p></div><p id="motion-saved" class="muted small" role="status"></p></div>`;
-  } else if (tab === 'usage') {
+  if (tab === 'usage') {
     const percent = u ? Math.min(100, u.used / u.allowance * 100) : 0;
     body = `<div class="box">
         <div class="big-number"><b>${u ? Math.ceil(u.used) : '—'}</b><span>${u ? `of ${Math.floor(u.allowance)} minutes used` : state.session ? 'Usage is unavailable. Check your connection and try again.' : 'Sign in to see usage.'}</span></div>
@@ -917,7 +897,6 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
   if (state.session && tab === 'overview') fillAccountData(tab);
   if (state.session && tab === 'account') fillProfile();
   if (tab === 'usage' && email) fillCloudVideo();
-  if (tab === 'motion') fillMotionDefaults();
 }
 
 /** Name and username (profiles table): filled in, then saved on Save. Usernames are unique; the database has the last word. */

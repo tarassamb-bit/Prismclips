@@ -11,7 +11,7 @@ function harness(reviews) {
   const player={contentWindow:{postMessage(){}}};
   const context={console,Number,Boolean,String,Math,Error,URL:{revokeObjectURL(){}},clearTimeout(){},
     addEventListener(name,fn){listeners[name]=fn},player,frameRequest:null,runToken:1,previewTimeout:0,
-    scene:null,$,formatTime:()=> '0:04',updatePlayback(){},downloadUrl:null,restoring:false,
+    scene:null,previewShown:false,matchMedia:()=>({matches:false}),$,formatTime:()=> '0:04',updatePlayback(){},downloadUrl:null,restoring:false,
     reviewPass:0,engine:'canvas',code:'old code',pendingBrief:{originalPrompt:'Original idea',history:[],style:'flat-vector-science',request:'Original idea',isRevision:false},
     originalPrompt:'',history:[],lastGood:null,repaired:false,prompt:'Original idea',exporter:null,
     hideThinking(){},setBusy(){},showThinking(){},setStatus(){},addAssistantMessage(text){messages.push(text)},
@@ -28,7 +28,7 @@ test('visually checks, corrects once, then checks the corrected video',async()=>
   await h.listener({source:h.context.player.contentWindow,data:{type:'ready',fps:30,duration:4}});
   assert.equal(h.corrections.length,1);assert.match(h.corrections[0].visualFeedback,/line crosses/);assert.equal(h.context.code,'corrected code');assert.equal(h.messages.length,0);
   await h.listener({source:h.context.player.contentWindow,data:{type:'ready',fps:30,duration:4}});
-  assert.equal(h.corrections.length,1);assert.match(h.messages[0],/Your video is ready\. Watch it/);assert.equal(h.context.lastGood.code,'corrected code');
+  assert.equal(h.corrections.length,1);assert.match(h.messages[0],/Your video is ready\. Tell me/);assert.equal(h.context.lastGood.code,'corrected code');
   // The accepted video, and only it, is saved as a project.
   assert.deepEqual(h.saves,['corrected code']);
 });
@@ -38,6 +38,14 @@ test('does not loop when the reviewer still finds an issue after the correction'
   await h.listener({source:h.context.player.contentWindow,data:{type:'ready',fps:30,duration:4}});
   await h.listener({source:h.context.player.contentWindow,data:{type:'ready',fps:30,duration:4}});
   assert.equal(h.corrections.length,1);assert.match(h.messages[0],/may need fixing/);
+});
+
+test('a clean first check still gets one polish pass, then stops',async()=>{
+  const h=harness([[],[]]);
+  await h.listener({source:h.context.player.contentWindow,data:{type:'ready',fps:30,duration:4}});
+  assert.equal(h.corrections.length,1);assert.match(h.corrections[0].visualFeedback,/Second pass/);
+  await h.listener({source:h.context.player.contentWindow,data:{type:'ready',fps:30,duration:4}});
+  assert.equal(h.corrections.length,1);assert.match(h.messages[0],/Your video is ready\. Tell me/);
 });
 
 test('reports when reference rendering fails instead of claiming a visual review',async()=>{

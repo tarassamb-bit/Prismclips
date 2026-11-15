@@ -458,8 +458,6 @@ details.insp-section:not([open]) { gap: 0; }
 .motion-link { text-decoration: none; }
 
 /* Settings › Motion Studio: one model per step. */
-.motion-default { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.motion-default select { min-width: 200px; height: 36px; padding: 0 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface0); color: var(--text); font: inherit; }
 
 /* Start creating (/app/create/choose): two big squares on a full screen. */
 .choose { max-width: 860px; margin: 0 auto; display: grid; gap: 18px; }
