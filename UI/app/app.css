@@ -472,6 +472,7 @@ details.insp-section:not([open]) { gap: 0; }
   .collapsed .brand-row { flex-direction: row; gap: 8px; padding: 0 0 0 9px; }
   .collapsed .brand-name, .collapsed .label { display: inline; white-space: nowrap; opacity: 0; transition: opacity .12s; }
   .collapsed .sidebar:hover .brand-name, .collapsed .sidebar:hover .label { opacity: 1; transition: opacity .2s .1s; }
-  .collapsed .side-button { justify-content: flex-start; padding-inline: 15px; white-space: nowrap; }
+  .collapsed .side-nav, .collapsed .side-bottom { grid-template-columns: minmax(0, 1fr); }
+  .collapsed .side-button { justify-content: flex-start; padding-inline: 15px; white-space: nowrap; overflow: hidden; }
 }
 @media (prefers-reduced-motion: reduce) { .collapsed .sidebar, .collapsed .brand-name, .collapsed .label { transition: none; } }
