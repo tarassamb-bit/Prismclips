@@ -3,7 +3,7 @@
 const Kit = require('../motion/kit.js');
 
 const STYLE_THEME = {'flat-vector-science': 'space', 'watercolor-wash': 'paper', 'shadow-puppet-theatre': 'shadow'};
-const BLOCKS = ['headline', 'sub', 'kicker', 'list', 'stat', 'bars', 'quote', 'button', 'icon', 'cards', 'media'];
+const BLOCKS = ['headline', 'sub', 'kicker', 'list', 'stat', 'bars', 'quote', 'button', 'icon', 'cards', 'media', 'character', 'planet', 'flow'];
 const PREFIX = 'const scene = Kit.build(';
 const isKit = (code) => typeof code === 'string' && code.trimStart().startsWith(PREFIX);
 const specOf = (code) => { try { return JSON.parse(code.trim().slice(PREFIX.length).replace(/\);?\s*$/, '')); } catch { return null; } };
@@ -27,7 +27,7 @@ FONTS (optional, {"head","body"}): ${Kit.FONTS.join(', ')}. Loud: Anton, Bebas N
 SCENES: 2 to 5, played in order; "seconds" share out the duration. Each scene shows 1 to 3 blocks stacked top to bottom (4 at most). One idea per scene.
 - transition (how the scene arrives): ${Kit.TRANSITIONS.join(', ')}.
 - align: center (default), top or bottom.
-- decor (0 to 2 moving decorations behind the blocks): ${Kit.DECOR.join(', ')}. Pick ones that fit the idea (orbits/planet for ideas and science, confetti for wins, rays for reveals, waves for calm, grid for tech, rings for emphasis, particles for energy).
+- decor (0 to 2 moving decorations behind the blocks): ${Kit.DECOR.join(', ')}. galaxy and flare work in the space theme only. Pick ones that fit the idea (orbits/planet for ideas and science, confetti for wins, rays for reveals, waves for calm, grid for tech, rings for emphasis, particles for energy).
 
 BLOCKS
 - {"type":"headline","text":"Make it *move*","anim":"words"}: big title, 2 to 6 words. Wrap 1 or 2 key words in *stars* to color them. anim: ${Kit.ANIMS.join(', ')} (words = pop in one by one, letters = letter cascade, rise = lines slide up, type = typewriter, slam = hits hard, fade = soft).
@@ -40,6 +40,9 @@ BLOCKS
 - {"type":"button","text":"Try it free"}: a call-to-action pill; good as the last block of the last scene.
 - {"type":"icon","name":"..."}: a round icon badge. Names: ${Kit.ICONS.join(', ')}.
 - {"type":"cards","count":3}: a row of floating short-video cards (for video, clips, content, social posts).
+- {"type":"flow","items":["Guess","Check","Adjust"]}: 2 to 4 short step labels joined by dotted arrows that draw on. Use it to show a process or cause and effect.
+- {"type":"character","name":"robot","mood":"happy","says":"cat!"}: space theme only. A cute illustrated character (${Kit.CHARACTERS.join(', ')}) that pops in and bobs; mood is neutral, happy or worry; "says" (optional, 1 to 3 words) appears in a speech bubble. Characters make explainers feel alive: use one in most space scenes, and let its mood follow the story.
+- {"type":"planet","color":"teal"}: space theme only. A big shaded planet (${Kit.PLANETS.join(', ')}; magenta and teal have rings).
 - {"type":"media","id":"..."}: one of the user's own photos or videos (only ids listed under USER MEDIA).
 
 RULES

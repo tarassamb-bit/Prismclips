@@ -15,7 +15,7 @@ let originalPrompt = '', history = [], pendingBrief = null;
 let previewShown = false, reviewPass = 0, frameRequest = null, frameRequestId = 0, runToken = 0, workController = null;
 
 const canvasRunner = () => `<!doctype html><html><head><style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block}</style></head>
-<body><canvas id="c" width="${W}" height="${H}"></canvas><script src="/motion/kit.js"></script><script>
+<body><canvas id="c" width="${W}" height="${H}"></canvas><script src="/motion/packs/flat-space.js"></script><script src="/motion/kit.js"></script><script>
 const c = document.getElementById('c'), ctx = c.getContext('2d');
 let scene = null, playing = false, startAt = 0, currentTime = 0, lastUpdate = 0, pending = null, exportCancelled = false;
 const say = (m, t) => parent.postMessage(m, '*', t || []);

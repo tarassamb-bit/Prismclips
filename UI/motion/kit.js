@@ -18,6 +18,11 @@
   const bright = (hex) => { const n = parseInt(hex.slice(1), 16); return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255; };
   const dot = (c, x, y, r) => { c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill(); };
 
+  // The Flat-Vector Science materials (motion/packs/flat-space.js), when the page loaded them. Its drawings are tuned for
+  // a frame 720 px on the short side, so they are drawn in that scale.
+  const pack = () => (typeof window !== 'undefined' && window.FVS) || null;
+  const packed = (c, W, H, draw) => { const k = Math.min(W, H) / 720; c.save(); c.scale(k, k); draw(W / k, H / k, k); c.restore(); };
+
   // Google Fonts by name; only the ones a video uses are loaded.
   const FONTS = ['Anton', 'Archivo Black', 'Bebas Neue', 'Oswald', 'Montserrat', 'Poppins', 'Sora', 'Space Grotesk', 'Inter', 'Rubik',
     'Fredoka', 'Nunito', 'Baloo 2', 'Playfair Display', 'DM Serif Display', 'Fraunces', 'Caveat', 'Permanent Marker'];
@@ -31,6 +36,7 @@
     });
   }
   function bgSpace(c, W, H, t, p) {
+    if (pack()) return packed(c, W, H, (w, h) => pack().sky(c, w, h, t));
     const g = c.createLinearGradient(0, 0, W * 0.4, H); g.addColorStop(0, p.bg); g.addColorStop(1, p.bg2); c.fillStyle = g; c.fillRect(0, 0, W, H);
     const neb = c.createRadialGradient(W * 0.75, H * 0.3, 0, W * 0.75, H * 0.3, Math.max(W, H) * 0.6); neb.addColorStop(0, rgba(p.accent2, 0.22)); neb.addColorStop(1, rgba(p.accent2, 0)); c.fillStyle = neb; c.fillRect(0, 0, W, H);
     const r = rng(7);
@@ -103,7 +109,7 @@
   // Looks. `plaque` hangs text on dark cut-paper signs (shadow theatre); `ink` is the sign color.
   const THEMES = {
     neon: { palette: { bg: '#0a0c1c', bg2: '#1a1040', text: '#ffffff', accent: '#5aa9ff', accent2: '#ff6b6b' }, head: 'Sora', body: 'Inter', bg: bgGlow, finish: (c, W, H, t) => { grain(c, W, H, t, 0.04); vignette(c, W, H, 0.35); }, glow: true },
-    space: { palette: { bg: '#0d1440', bg2: '#3a1c6e', text: '#ffffff', accent: '#5fd4ff', accent2: '#ff7ac0' }, head: 'Fredoka', body: 'Nunito', bg: bgSpace, finish: (c, W, H, t) => vignette(c, W, H, 0.3), glow: true },
+    space: { palette: { bg: '#0d1440', bg2: '#3a1c6e', text: '#ffffff', accent: '#5fd4ff', accent2: '#ff7ac0' }, head: 'Fredoka', body: 'Nunito', bg: bgSpace, finish: (c, W, H, t) => (pack() ? packed(c, W, H, (w, h) => pack().finish(c, w, h, t)) : vignette(c, W, H, 0.3)), glow: true, pack: true },
     paper: { palette: { bg: '#f6efe0', bg2: '#8fb9d8', text: '#2b2b3a', accent: '#2f6fa8', accent2: '#e2725b' }, head: 'Fraunces', body: 'Nunito', bg: bgPaper, finish: finishPaper },
     shadow: { palette: { bg: '#301005', bg2: '#ec8836', text: '#ffe3a8', accent: '#ffe3a8', accent2: '#a8dcff' }, head: 'Archivo Black', body: 'Nunito', bg: bgLamp, finish: finishLamp, plaque: true, ink: 'rgb(22,9,5)' },
     clean: { palette: { bg: '#f5f3ee', bg2: '#e8e4da', text: '#14151a', accent: '#2563eb', accent2: '#f97316' }, head: 'Archivo Black', body: 'Inter', bg: bgClean, finish: (c, W, H, t) => grain(c, W, H, 0, 0.02) },
@@ -150,7 +156,8 @@
         c.lineTo(W, H); c.fill();
       }
     },
-    planet(c, W, H, t, lt, p) {
+    planet(c, W, H, t, lt, p, U, T) {
+      if (pack() && T.pack) return packed(c, W, H, (w, h) => pack().planet(c, w * 0.9 + Math.sin(t * 0.3) * 8, h * 0.93 + Math.cos(t * 0.25) * 6, 190 * back(prog(lt, 0.1, 0.8)), pack().PL.magenta));
       const m = Math.min(W, H), r = m * 0.15 * back(prog(lt, 0.1, 0.7)), x = W * 0.86 + Math.sin(t * 0.3) * m * 0.02, y = H * 0.86 + Math.cos(t * 0.25) * m * 0.015;
       if (r <= 0) return;
       c.save(); c.translate(x, y); c.rotate(-0.35);
@@ -159,6 +166,9 @@
       c.fillStyle = 'rgba(255,255,255,0.14)'; c.beginPath(); c.ellipse(-r * 0.2, -r * 0.35, r * 0.6, r * 0.22, 0, 0, TAU); c.fill();
       c.beginPath(); c.ellipse(0, 0, r * 1.7, r * 0.42, 0, 0, Math.PI); c.stroke(); c.restore();
     },
+    // Space look only: a spiral galaxy of dots, and a warm flare behind the content.
+    galaxy(c, W, H, t, lt) { if (pack()) packed(c, W, H, (w, h) => pack().galaxy(c, w / 2, h / 2, 0.062 * (0.7 + 0.3 * out(prog(lt, 0, 1.2))), t * 0.06, 0.45 * out(prog(lt, 0, 0.8)))); },
+    flare(c, W, H, t, lt) { if (pack()) packed(c, W, H, (w, h) => pack().flare(c, w / 2, h / 2, out(prog(lt, 0.1, 0.7)), t, 3)); },
     grid(c, W, H, t, lt, p) {
       const s = Math.min(W, H) / 12, a = out(prog(lt, 0, 0.6)), off = (t * s * 0.25) % s; c.fillStyle = rgba(p.text, 0.16 * a);
       for (let y = -s + off; y < H + s; y += s) for (let x = -s + off; x < W + s; x += s) dot(c, x, y, s * 0.045);
@@ -358,6 +368,44 @@
         }
       } };
     }
+    if (b.type === 'character') {
+      const F = pack(); if (!F) return null;
+      const name = CHARACTERS.includes(b.name) ? b.name : 'robot', R = U * 11, says = b.says ? fitText(c, parseWords(b.says), head, cw * 0.5, 2, U * 5.2, U * 3.4) : null, bh = says ? says.h + U * 4.5 : 0, lift = says ? bh + U * 3 : 0;
+      return { h: R * 3.3 + lift, draw(c2, cx, top, lt) {
+        const s = back(prog(lt, 0, 0.55)); if (s <= 0) return;
+        const cy = top + lift + R * 1.55 + Math.sin(lt * 2) * U * 0.7;
+        c2.save(); c2.translate(cx, cy); c2.scale(s, s); F[name](c2, 0, 0, R, { t: lt, happy: b.mood === 'happy' ? 1 : 0, worry: b.mood === 'worry' ? 1 : 0, brainGlow: b.mood === 'happy' ? 1 : 0.4 }); c2.restore();
+        if (says) {
+          const bw = says.w + U * 8, bx = cx + Math.min(R * 1.5, cw / 2 - bw / 2), by = top + bh / 2, bs = back(prog(lt, 0.55, 0.4));
+          F.bubble(c2, bx, by, bw, bh, cx + R * 0.5, cy - R * 0.95, bs, '#ffffff');
+          if (bs > 0.7) drawText(c2, says, bx, by - says.h / 2, lt - 0.85, 'fade', F.C.ink, F.C.pink);
+        }
+      } };
+    }
+    if (b.type === 'planet') {
+      const F = pack(); if (!F) return null;
+      const r = U * 13, h = r * 2.5, pal = F.PL[PLANETS.includes(b.color) ? b.color : 'teal'];
+      return { h, draw(c2, cx, top, lt) { F.planet(c2, cx + Math.sin(lt * 0.5) * U, top + h / 2 + Math.cos(lt * 0.6) * U * 0.6, r * back(prog(lt, 0, 0.7)), pal); } };
+    }
+    if (b.type === 'flow') {
+      const items = (Array.isArray(b.items) ? b.items : []).slice(0, 4).map((s) => fitText(c, parseWords(s), body(800), cw * 0.6, 1, U * 4.4, U * 3)), ph = U * 8.5, gap = U * 8;
+      if (items.length < 2) return null;
+      const widths = items.map((L) => L.w + U * 6), row = widths.reduce((a, w) => a + w + gap, -gap), across = row <= cw;
+      return { h: across ? ph : items.length * ph + (items.length - 1) * gap * 0.8, draw(c2, cx, top, lt) {
+        let x = cx - row / 2, y = top;
+        items.forEach((L, i) => {
+          const w = widths[i], px = across ? x + w / 2 : cx, py = y + ph / 2, s = back(prog(lt, i * 0.4, 0.45)), col = i % 2 ? p.accent2 : p.accent, ink = T.plaque ? p.text : bright(col) > 0.6 ? '#14151a' : '#ffffff';
+          if (i) { // dotted arrow from the pill before
+            const pr = out(prog(lt, i * 0.4 - 0.25, 0.4)), x0 = across ? x - gap + U : cx, y0 = across ? py : y - gap * 0.8 + U, x1 = across ? x - U : cx, y1 = across ? py : y - U, ex = lerp(x0, x1, pr), ey = lerp(y0, y1, pr), a = Math.atan2(y1 - y0, x1 - x0);
+            if (pr > 0) { c2.save(); c2.strokeStyle = c2.fillStyle = T.plaque ? T.ink : p.text; c2.lineWidth = U * 0.7; c2.lineCap = 'round'; c2.setLineDash([0.01, U * 1.5]); c2.beginPath(); c2.moveTo(x0, y0); c2.lineTo(ex, ey); c2.stroke(); c2.setLineDash([]);
+              c2.translate(ex, ey); c2.rotate(a); c2.beginPath(); c2.moveTo(U * 1.6, 0); c2.lineTo(-U * 0.6, -U * 1.3); c2.lineTo(-U * 0.6, U * 1.3); c2.fill(); c2.restore(); }
+          }
+          if (s > 0) { c2.save(); c2.translate(px, py); c2.scale(s, s); c2.fillStyle = 'rgba(0,0,0,0.25)'; c2.beginPath(); c2.roundRect(-w / 2, -ph / 2 + U * 0.8, w, ph, ph / 2); c2.fill();
+            c2.fillStyle = T.plaque ? T.ink : col; c2.beginPath(); c2.roundRect(-w / 2, -ph / 2, w, ph, ph / 2); c2.fill(); drawText(c2, L, 0, -L.h / 2, 9, 'none', ink, ink); c2.restore(); }
+          if (across) x += w + gap; else y += ph + gap * 0.8;
+        });
+      } };
+    }
     if (b.type === 'media') {
       const media = (typeof MEDIA !== 'undefined' && MEDIA && MEDIA[b.id]) || null; if (!media) return null;
       const mw = media.videoWidth || media.naturalWidth || 16, mh = media.videoHeight || media.naturalHeight || 9, h = Math.min(U * 62, cw * mh / mw), w = h * mw / mh;
@@ -372,6 +420,7 @@
   }
 
   const TRANSITIONS = ['fade', 'zoom', 'slide', 'wipe', 'flash'];
+  const CHARACTERS = ['robot', 'cat', 'dog'], PLANETS = ['magenta', 'coral', 'teal', 'moon'];
 
   /** A playable scene from a spec: { width, height, duration, theme, palette?, font?, scenes: [{ seconds, transition, align, decor, blocks }] }. */
   function build(spec) {
@@ -393,7 +442,7 @@
     }
     const ready = typeof document === 'undefined' ? Promise.resolve() : (() => {
       const names = [...new Set([T.head, T.body])];
-      document.head.append(Object.assign(document.createElement('link'), { rel: 'stylesheet', href: `https://fonts.googleapis.com/css2?${names.map((n) => `family=${n.replaceAll(' ', '+')}:wght@400;600;700;800`).join('&')}&display=block` }));
+      document.head.append(Object.assign(document.createElement('link'), { rel: 'stylesheet', href: `https://fonts.googleapis.com/css2?${names.map((n) => `family=${n.replaceAll(' ', '+')}:wght@400;600;700;800;900`).join('&')}&display=block` }));
       // Fonts that don't arrive in 4 s fall back to the system font instead of holding the video.
       return Promise.race([new Promise((r) => setTimeout(r, 4000)), new Promise((r) => setTimeout(r, 300)).then(() => Promise.all(names.flatMap((n) => [600, 700, 800].map((w) => document.fonts.load(`${w} 40px "${n}"`).catch(() => null)))))]).then(() => { layouts.length = 0; });
     })();
@@ -414,7 +463,7 @@
         if (tr === 'slide') c.translate((1 - enter) * W * 0.35, 0);
         if (nextTr === 'slide') c.translate(-exit * W * 0.35, 0);
         if (tr === 'wipe' && enter < 1) { c.beginPath(); c.arc(W / 2, H / 2, Math.hypot(W, H) * 0.6 * enter, 0, TAU); c.clip(); }
-        for (const name of (Array.isArray(sc.decor) ? sc.decor : []).slice(0, 3)) if (DECOR[name]) { c.save(); DECOR[name](c, W, H, t, lt, palette, U); c.restore(); }
+        for (const name of (Array.isArray(sc.decor) ? sc.decor : []).slice(0, 3)) if (DECOR[name]) { c.save(); DECOR[name](c, W, H, t, lt, palette, U, T); c.restore(); }
         const L = layout(c, i), th = L.total * L.k, y0 = sc.align === 'top' ? safeTop : sc.align === 'bottom' ? H - safeTop - th : (H - th) / 2;
         c.translate(W / 2, y0); c.scale(L.k, L.k);
         let y = 0;
@@ -427,7 +476,7 @@
     };
   }
 
-  const Kit = { build, THEMES: Object.keys(THEMES), FONTS, DECOR: Object.keys(DECOR), ICONS: Object.keys(ICONS), ANIMS, TRANSITIONS };
+  const Kit = { build, THEMES: Object.keys(THEMES), FONTS, DECOR: Object.keys(DECOR), ICONS: Object.keys(ICONS), ANIMS, TRANSITIONS, CHARACTERS, PLANETS };
   if (typeof window !== 'undefined') window.Kit = Kit;
   if (typeof module !== 'undefined') module.exports = Kit;
 })();
