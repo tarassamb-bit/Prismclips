@@ -321,7 +321,7 @@ function renderModelButton() {
 function renderModelMenu() {
   modelMenu.replaceChildren(...[
     menuItem({ label: 'Default', note: 'Each step uses its own model. Change them in Settings', role: 'menuitemradio', checked: picked === 'default', onClick: () => pickModel('default') }),
-    ...models.map((m) => menuItem({ label: m.label, role: 'menuitemradio', checked: picked === m.id, onClick: () => pickModel(m.id) })),
+    ...models.map((m) => menuItem({ label: m.label, note: m.price, role: 'menuitemradio', checked: picked === m.id, onClick: () => pickModel(m.id) })),
     el('div', { className: 'menu-sep', role: 'separator' }),
     showsEffort() ? menuItem({ label: 'Effort', value: EFFORTS.find(([key]) => key === effort)[1], opens: 'effort', onClick: () => openSub('effort', true) }) : null,
   ].filter(Boolean));
@@ -605,9 +605,8 @@ addEventListener('message', async (event) => {
     $('#empty').hidden = true;
     $('#result').hidden = true;
     $('#result').removeAttribute('src');
-    $('#download').hidden = true;
-    $('#download').removeAttribute('href');
     if (downloadUrl) { URL.revokeObjectURL(downloadUrl); downloadUrl = null; }
+    $('#export').innerHTML = '↓ &nbsp; Export MP4';
     let reviewMessage = '';
     if (!restoring) {
       try {
@@ -693,7 +692,15 @@ function playHtml() {
 }
 
 let exporter = null;
+// One button: "Export MP4" until an MP4 exists for the current video, then "Download MP4".
+const setExportLabel = (text) => { $('#export').innerHTML = `↓ &nbsp; ${text}`; };
+function showExportProgress(percent) {
+  const box = $('#export-progress');
+  box.hidden = percent == null;
+  if (percent != null) { box.querySelector('progress').value = percent; box.querySelector('span').textContent = `${percent}%`; }
+}
 function exportFailed(error) {
+  showExportProgress(null);
   player.contentWindow.postMessage({ type: 'cancel-export' }, '*');
   exporter = null;
   hideThinking();
@@ -703,6 +710,7 @@ function exportFailed(error) {
 }
 $('#export').addEventListener('click', async () => {
   if (!scene || engine !== 'canvas') return;
+  if (downloadUrl) { Object.assign(document.createElement('a'), { href: downloadUrl, download: 'relio-motion.mp4' }).click(); return; }
   setBusy(true);
   $('#export').disabled = true;
   showThinking('Preparing your export');
@@ -721,7 +729,9 @@ $('#export').addEventListener('click', async () => {
           ctx.drawImage(bitmap, 0, 0);
           bitmap.close();
           await source.add(i / fps, 1 / fps);
-          showThinking(`Exporting video · ${Math.round((i + 1) / count * 100)}%`);
+          const percent = Math.round((i + 1) / count * 100);
+          showThinking(`Exporting video · ${percent}%`);
+          showExportProgress(percent);
           player.contentWindow.postMessage({ type: 'next' }, '*');
         } catch (error) { bitmap.close(); exportFailed(error); }
       },
@@ -733,17 +743,19 @@ $('#export').addEventListener('click', async () => {
           if (downloadUrl) URL.revokeObjectURL(downloadUrl);
           downloadUrl = URL.createObjectURL(new Blob([output.target.buffer], { type: 'video/mp4' }));
           Object.assign($('#result'), { src: downloadUrl, hidden: false });
-          Object.assign($('#download'), { href: downloadUrl, hidden: false });
+          showExportProgress(null);
+          setExportLabel('Download MP4');
           exporter = null;
           hideThinking();
           setBusy(false);
           $('#export').disabled = false;
-          addAssistantMessage('Your MP4 is ready. Use Download MP4 below the preview to save it.');
+          addAssistantMessage('Your MP4 is ready. Press Download MP4 at the top to save it.');
           setStatus('Your MP4 is ready to download.');
         } catch (error) { exportFailed(error); }
       },
     };
     showThinking('Exporting video · 0%');
+    showExportProgress(0);
     player.contentWindow.postMessage({ type: 'export' }, '*');
   } catch (error) { exportFailed(error); }
 });
@@ -819,20 +831,28 @@ function showSetup(step) {
     step === 'style' ? Object.assign(el('span', { className: 'style-preview', ariaHidden: 'true' }), { innerHTML: '<svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5Z"/></svg>' }) : null,
     step === 'format' ? el('span', { className: 'setup-shape-box', ariaHidden: 'true' }, el('span', { className: 'setup-shape', style: `aspect-ratio:${FORMATS[value][0]}/${FORMATS[value][1]};${FORMATS[value][0] > FORMATS[value][1] ? 'width:70%' : 'height:96px'}` })) : null,
     el('span', { className: 'setup-text' }, el('strong', { textContent: step === 'format' ? `${name} · ${value}` : name }), el('small', { textContent: note }))));
-  if (step === 'style') cards.forEach((card, i) => {
-    const style = STYLE_CHOICES[i][0], box = card.firstChild;
+  // The style grid waits for every picture, up to 3 s each; a picture that isn't ready by then shows the style's name.
+  const pictures = step === 'style' ? Promise.all(cards.map((card, i) => {
+    const [style, name] = STYLE_CHOICES[i], box = card.firstChild;
     box.dataset.style = style;
-    if (!style) return;
+    if (!style) return null;
     if (!stylePictures.has(style)) stylePictures.set(style, captureStyleReference(style).catch(() => null));
-    stylePictures.get(style).then((image) => { if (image) box.replaceChildren(Object.assign(new Image(), { src: image, alt: '' })); });
-  });
+    const show = (image) => box.replaceChildren(Object.assign(new Image(), { src: image, alt: '' }));
+    return Promise.race([stylePictures.get(style), new Promise((resolve) => setTimeout(resolve, 3000, null))]).then((image) => {
+      if (image) return show(image);
+      box.replaceChildren(el('span', { className: 'style-fallback', textContent: name }));
+      stylePictures.get(style).then((late) => { if (late) show(late); });
+    });
+  })) : null;
   $('#setup').replaceChildren(el('div', { className: 'setup-inner' }, ...[
     index ? el('button', { type: 'button', className: 'setup-back', textContent: '← Back', onclick: () => showSetup(SETUP_STEPS[index - 1]) })
       : el('a', { className: 'setup-back', href: '/app/create/choose', textContent: '← Back' }),
     el('p', { className: 'setup-step', textContent: `Step ${index + 1} of ${SETUP_STEPS.length} · ${{ style: 'Style', format: 'Format' }[step]}` }),
     el('h2', { className: 'setup-title', textContent: { style: 'Choose a style', format: 'How big is it?' }[step] }),
-    el('div', { className: `setup-grid is-${step}` }, ...cards),
+    el('div', { className: `setup-grid is-${step}`, hidden: Boolean(pictures) }, ...cards),
+    pictures ? el('p', { className: 'setup-loading', textContent: 'Loading styles…' }) : null,
   ]));
+  pictures?.then(() => { $('#setup .setup-loading')?.remove(); const grid = $('#setup .setup-grid'); if (grid) { grid.hidden = false; grid.querySelector('.setup-card').focus(); } });
   $('#editor').hidden = true;
   $('#setup').hidden = false;
   $('#setup').querySelector('.setup-card').focus();
