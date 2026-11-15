@@ -273,7 +273,14 @@ console.log('word timing checks passed');
 console.log('title grounding checks passed');
 
 // Repeated lines within 20 s are dropped; the same line later on is kept.
-assert.deepEqual(Shorts.dropRepeats([{ text: 'Hello there.', start: 0 }, { text: 'hello there', start: 8 }, { text: 'hello there', start: 40 }]).map((c) => c.start), [0, 40]);
+assert.deepEqual(Shorts.dropRepeats([{ text: 'Hello there, everyone.', start: 0 }, { text: 'hello there everyone', start: 8 }, { text: 'hello there everyone', start: 40 }]).map((c) => c.start), [0, 40]);
+// A podcast exchange: repeated short replies are real speech, kept, and never make the Short look garbled.
+{
+  const talk = [['Did you actually quit your job?', 0, 2], ['Yeah.', 2.2, 0.4], ['Just like that?', 3, 1], ['Yeah.', 4.2, 0.4], ['No savings at all?', 5, 1.2],
+    ['No.', 6.4, 0.3], ['Not even a backup plan?', 7, 1.3], ['No.', 8.5, 0.3], ['That is insane, man.', 9, 1.2], ['It worked out though.', 10.5, 1.4]].map(([t, s, d]) => cue(t, s, d));
+  assert.equal(Shorts.dropRepeats(Shorts.dropImpossibleRate(talk)).length, talk.length);
+  assert.equal(Shorts.dropImpossibleRate([cue('I told you this would happen', 0, 1.05)]).length, 1);
+}
 
 // Lines with an impossible speaking rate are dropped; a normal line stays; too many removed means likely music.
 assert.deepEqual(Shorts.dropImpossibleRate([{ text: 'one two three', start: 0, duration: 2 }, { text: 'a b c d e f g h i j k l m n o p', start: 3, duration: 1 }]).map((c) => c.start), [0]);
@@ -321,4 +328,14 @@ assert.deepEqual(Shorts.dropImpossibleRate([{ text: 'one two three', start: 0, d
   assert.equal(T.keepTranscript(null, b), b);
   // The merged copy still serves later runs inside it.
   assert.deepEqual(T.cuesCovering(ab, 600, 1200).map((c) => c.text), ['three']);
+}
+
+// The first frame of a scene cut already uses the new shot's framing.
+assert.equal(cropPositionAt([{ time: 0, position: 0.2 }, { time: 3, position: 0.8, isSceneCut: true }, { time: 6, position: 0.8 }], 3, 0), 0.8);
+assert.equal(cropPositionAt([{ time: 0, position: 0.2 }, { time: 3, position: 0.8, isSceneCut: true }], 2.99, 0), 0.2);
+// Square and 4:5 sources pan with the subject; a vertical one stays centred.
+{
+  const seg = (p) => ({ cropKeyframes: [{ time: 0, position: p }, { time: 10, position: p }], cropZoom: 1.08 });
+  for (const [w, h] of [[1080, 1080], [1080, 1350]]) assert.notEqual(layoutAt(seg(0), 1, w, h)[0].sx, layoutAt(seg(1), 1, w, h)[0].sx);
+  assert.equal(layoutAt(seg(0), 1, 1080, 1920)[0].sx, layoutAt(seg(1), 1, 1080, 1920)[0].sx);
 }

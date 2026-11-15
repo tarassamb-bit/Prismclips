@@ -1843,7 +1843,7 @@ function renderInspector() {
         <label class="check"><input type="checkbox" data-field="splitScreen" ${segment.splitScreen ? 'checked' : ''}> Split screen (two speakers)</label>
         <label class="check"><input type="checkbox" data-field="fitToFrame" ${segment.fitToFrame ? 'checked' : ''}> Show the whole frame</label>
         <label class="check"><input type="checkbox" data-field="isMuted" ${segment.isMuted ? 'checked' : ''}> Mute audio</label>
-        <label>On-screen text <input data-field="caption" value="${esc(segment.caption ?? '')}"></label>
+        <label>On-screen text <input data-field="caption" maxlength="60" value="${esc(segment.caption ?? '')}"></label>
         <button class="link-button" data-action="retrack">Re-track the subject</button>
         </div>
       </details>
@@ -1864,6 +1864,8 @@ function applyTiming(s, start, duration) {
   start = clamp(start, 0, Math.max(0, total - 0.5));
   duration = clamp(duration, 0.5, total - start);
   const shift = start - s.start;
+  // Captions come from the old range; a part added before or after it has none until they are regenerated.
+  if (start < s.start - 1 || start + duration > s.start + s.duration + 1) s.captionNotice = 'Captions don’t cover the part you added yet. Press Regenerate subtitles.';
   const fit = (item) => {
     const from = Math.max(0, item.start - shift), to = Math.min(duration, item.start - shift + item.duration);
     return to > from ? { ...item, start: from, duration: to - from } : null;
@@ -2002,7 +2004,7 @@ function openExportDialog(onlyId = null) {
       <h2>Export Shorts</h2>
       ${list}
       <label>Quality <select name="quality">${qualities}</select></label>
-      <p class="muted small">Each Short downloads as an MP4.</p>
+      <p class="muted small">${'showDirectoryPicker' in window ? 'Next, choose a folder for your Shorts.' : `Each Short downloads as an MP4.${state.project.segments.length > 1 ? ' If your browser asks, allow multiple downloads.' : ''}`}</p>
       <p id="export-status" class="muted small" role="status"></p>
       <div class="row end">
         <button type="button" class="button ghost" data-action="close">Cancel</button>
@@ -2033,11 +2035,14 @@ async function exportShorts(ids, quality, folder = null) {
   const project = state.project;
   const task = beginTask('Exporting…');
   const settings = exportSettings(quality);
-  const seconds = [];
+  const seconds = [], failed = [], done = [];
   let made = 0;
-  try {
-    for (const [index, id] of ids.entries()) {
-      const segment = project.segments.find((s) => s.id === id);
+  // One Short failing doesn't stop the rest: each is tried, and the ones that failed are offered again at the end.
+  for (const [index, id] of ids.entries()) {
+    // Read by id each time: a Short deleted while the export runs is skipped.
+    const segment = project.segments.find((s) => s.id === id);
+    if (!segment) continue;
+    try {
       const media = project.media.find((m) => m.id === segment.mediaId);
       const source = await sourceFor(media);
       const label = segment.suggestedTitle?.trim() || `${project.title} Short ${project.segments.indexOf(segment) + 1}`;
@@ -2062,17 +2067,29 @@ async function exportShorts(ids, quality, folder = null) {
       await saveFile(folder, blob, `${base}.mp4`);
       track('clip_exported', { quality });
       seconds.push(segment.duration);
+      done.push(segment);
       made++;
+    } catch (error) {
+      if (task.cancelled) break;
+      console.warn('Export failed:', error);
+      failed.push({ id, label: segment.suggestedTitle?.trim() || `Short ${project.segments.indexOf(segment) + 1}`, message: error.message });
+      // A stalled Short aborts the task's signal; the next Short needs a fresh one.
+      if (task.controller.signal.aborted) task.controller = new AbortController();
     }
-  } catch (error) {
-    endTask(task);
-    if (task.cancelled) return;
-    return showError('Couldn’t export', error.message);
   }
   endTask(task);
-  openDialog(`<div class="stack"><h2>Exported</h2>
-    <p>${made} ${made === 1 ? 'Short' : 'Shorts'} ${folder ? `saved to the folder “${esc(folder.name)}”` : 'downloaded to your Downloads folder'}.</p>
-    <div class="row end"><button class="button primary" data-action="close">OK</button></div></div>`);
+  const retry = () => { if (state.project?.id === project.id) exportShorts(failed.map((f) => f.id), quality, folder); };
+  // A cancelled export shows nothing; what it made is still counted below.
+  if (task.cancelled) { /* nothing to show */ } else if (made === 0 && failed.length) showError('Couldn’t export', failed[0].message, '', retry);
+  else {
+    const descriptions = done.filter((s) => s.suggestedDescription?.trim()).map((s) => `${s.suggestedTitle?.trim() ?? ''}\n${s.suggestedDescription.trim()}`).join('\n\n');
+    openDialog(`<div class="stack"><h2>Exported</h2>
+      <p>${made} ${made === 1 ? 'Short' : 'Shorts'} ${folder ? `saved to the folder “${esc(folder.name)}”` : 'downloaded to your Downloads folder'}.</p>
+      ${failed.length ? `<p class="error">${failed.length === 1 ? 'This Short' : 'These Shorts'} couldn’t be exported: ${failed.map((f) => esc(f.label)).join(', ')}. ${esc(failed[0].message)}</p>` : ''}
+      <div class="row end">${descriptions ? '<button class="button ghost" id="copy-descriptions">Copy descriptions</button>' : ''}${failed.length ? '<button class="button ghost" id="export-retry">Retry</button>' : ''}<button class="button primary" data-action="close">OK</button></div></div>`);
+    $('#copy-descriptions')?.addEventListener('click', (event) => navigator.clipboard?.writeText(descriptions).then(() => { event.target.textContent = 'Copied'; }, () => {}));
+    $('#export-retry')?.addEventListener('click', () => { closeDialog(); retry(); });
+  }
   if (made > 0) {
     // Saved by ID, not through the open project, so an export that ends after the person went Home still restarts the 7 days.
     const saved = await store.loadProject(project.id);

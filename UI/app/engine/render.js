@@ -14,7 +14,8 @@ export function cropPositionAt(path, time, bias) {
   if (points.length === 1) return points[0].position;
   for (let i = 0; i < points.length - 1; i++) {
     const a = points[i], b = points[i + 1];
-    if (time > b.time) continue;
+    // At the cut's own time the new shot is already showing, so its framing applies from that frame.
+    if (time > b.time || (b.isSceneCut && time >= b.time)) continue;
     if (b.isSceneCut || b.time <= a.time) return a.position;
     const s = Math.min(1, Math.max(0, (time - a.time) / (b.time - a.time)));
     return a.position + (b.position - a.position) * s;
@@ -54,7 +55,8 @@ export function layoutAt(segment, time, sourceWidth, sourceHeight, bars = { top:
   }
   const scale = Math.max(1080 / ow, 1920 / oh) * Math.min(2, Math.max(1, segment.cropZoom ?? 1.08));
   const scaledWidth = ow * scale, scaledHeight = oh * scale;
-  const pan = ow / oh < 1.2 ? 0 : Math.max(0, scaledWidth - 1080);
+  // Vertical sources (9:16 is 0.56) stay centred; square, 4:5 and 3:4 sources pan to follow the subject.
+  const pan = ow / oh < 0.75 ? 0 : Math.max(0, scaledWidth - 1080);
   const y = Math.max(0, (scaledHeight - 1920) / 2);
   let x;
   if (pan <= 2) x = Math.max(0, (scaledWidth - 1080) / 2);

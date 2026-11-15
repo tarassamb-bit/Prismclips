@@ -146,17 +146,32 @@ function layerBitmap(element, height) {
   let canvas = layerCache.get(key);
   if (!canvas) {
     canvas = new OffscreenCanvas(940, height);
-    drawLayer(canvas.getContext('2d'), element.text, element.style, element.scale, element.highlighted);
+    drawLayer(canvas.getContext('2d'), element.text, element.style, element.scale, element.highlighted, height);
     layerCache.set(key, canvas);
-    if (layerCache.size > 300) layerCache.delete(layerCache.keys().next().value);
+    // Each bitmap is up to 940×375 px (1.4 MB): 80 covers the layers a Short shows around any moment.
+    if (layerCache.size > 80) layerCache.delete(layerCache.keys().next().value);
   }
   return canvas;
 }
 
+/** The scale at which the text fits its layer: `k` when it already fits, else 5% steps smaller (down to half), so nothing is cut off. */
+function fittedScale(ctx, shown, style, k, height) {
+  for (let fit = k; ; fit *= 0.95) {
+    const size = (style === 'minimal' ? 46 : style === 'podcast' ? 56 : style === 'oneWord' ? 104 : style === 'boldCaps' ? 76 : 66) * fit;
+    const room = style === 'minimal' ? 892 - 48 * fit : 892;
+    ctx.font = `${style === 'minimal' ? 500 : 800} ${size}px ${FONT}`;
+    const lines = wrap(ctx, shown, room);
+    const used = 15 * fit + fontMetrics(ctx).lineHeight * lines.length + (style === 'minimal' ? 20 : 5) * fit;
+    const widest = Math.max(0, ...shown.split(/\s+/).map((word) => ctx.measureText(word).width));
+    if ((used <= height && widest <= room) || fit <= k * 0.5) return fit;
+  }
+}
+
 /** A caption layer, 940 px wide, with its top-left at the context origin. */
-export function drawLayer(ctx, value, style, k, highlighted) {
+export function drawLayer(ctx, value, style, k, highlighted, height = layerHeight(resolvedStyle(style), k)) {
   style = resolvedStyle(style);
   const shown = style === 'boldCaps' ? value.toLocaleUpperCase() : value;
+  k = fittedScale(ctx, shown, style, k, height);
   const top = 15 * k, left = 24, width = 892;
   ctx.textBaseline = 'alphabetic';
   if (style === 'minimal') {

@@ -222,20 +222,22 @@ export function orderedShorts(segments, byScore) {
 /** Shift captions into the clip's timeline without extending them beyond its end. */
 export const MUSIC_NOTICE = 'Many caption lines looked wrong, so this may be sung or music-heavy audio. Captions are hidden; turn them on to check them.';
 /** Speech runs at about 2 to 4 words a second; a line with far more words than its time allows is invented text. */
-export function dropImpossibleRate(cues, maxWordsPerSecond = 5.5) {
+// 7, not 5.5: fast real speech ("I told you this would happen" in 1.05 s) reaches about 6.
+export function dropImpossibleRate(cues, maxWordsPerSecond = 7) {
   return cues.filter((cue) => {
     const words = cue.text.split(/\s+/).filter(Boolean).length;
     return words / Math.max(cue.duration, 0.3) <= maxWordsPerSecond;
   });
 }
 
-/** Speech models sometimes repeat a line they heard twice, or invent one: a line that repeats an earlier one within `window` seconds is dropped. */
+/** Speech models sometimes repeat a line they heard twice, or invent one: a line that repeats an earlier one within `window` seconds is dropped.
+ *  Short replies ("Yeah.", "No.", "Oh yeah.") really do repeat in conversation, so lines under 3 words are always kept. */
 export function dropRepeats(cues, window = 20) {
   const key = (text) => text.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
   const lastSeen = new Map();
   return cues.filter((cue) => {
     const text = key(cue.text);
-    if (!text) return true;
+    if (!text || text.split(' ').length < 3) return true;
     const previous = lastSeen.get(text);
     lastSeen.set(text, cue.start);
     return previous === undefined || cue.start - previous >= window;
