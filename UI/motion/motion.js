@@ -19,17 +19,31 @@ const canvasRunner = () => `<!doctype html><html><head><style>html,body{margin:0
 const c = document.getElementById('c'), ctx = c.getContext('2d');
 let scene = null, playing = false, startAt = 0, currentTime = 0, lastUpdate = 0, pending = null, exportCancelled = false;
 const say = (m, t) => parent.postMessage(m, '*', t || []);
+let videos = [];
+// Videos show their frame at scene time t (looping); exports and review frames seek and wait, so every frame is exact.
+const videoTime = (v, t) => t % Math.max(0.001, v.duration);
+const sync = (t) => Promise.all(videos.map((v) => new Promise((resolve) => { v.pause(); if (Math.abs(v.currentTime - videoTime(v, t)) < 0.001) return resolve(); v.onseeked = () => resolve(); v.currentTime = videoTime(v, t); })));
+function loadMedia(list) {
+  globalThis.MEDIA = {}; videos = [];
+  return Promise.all((list || []).map((m) => new Promise((resolve, reject) => {
+    const e = document.createElement(m.kind === 'video' ? 'video' : 'img');
+    e.onerror = () => reject(new Error('An uploaded file could not be opened.'));
+    if (m.kind === 'video') { e.muted = true; e.loop = true; e.playsInline = true; e.preload = 'auto'; e.onloadeddata = () => resolve(); videos.push(e); } else e.onload = () => resolve();
+    e.src = URL.createObjectURL(m.file); MEDIA[m.id] = e;
+  })));
+}
 const fail = (e) => { playing = false; say({ type: 'error', message: String((e && e.stack) || e).slice(0, 1500) }); };
 function frame(t) { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, ${W}, ${H}); scene.draw(ctx, t); ctx.restore(); }
 function loop() {
   if (!playing) return;
-  try { currentTime = ((performance.now() - startAt) / 1000) % scene.duration; frame(currentTime); if (performance.now() - lastUpdate > 100) { say({type:'playback', time:currentTime, playing:true}); lastUpdate = performance.now(); } } catch (e) { return fail(e); }
+  try { currentTime = ((performance.now() - startAt) / 1000) % scene.duration; for (const v of videos) { if (v.paused) v.play().catch(() => {}); if (Math.abs(v.currentTime - videoTime(v, currentTime)) > 0.3) v.currentTime = videoTime(v, currentTime); } frame(currentTime); if (performance.now() - lastUpdate > 100) { say({type:'playback', time:currentTime, playing:true}); lastUpdate = performance.now(); } } catch (e) { return fail(e); }
   requestAnimationFrame(loop);
 }
 addEventListener('message', async (event) => {
   const m = event.data || {};
   if (m.type === 'load') {
     try {
+      await loadMedia(m.media);
       scene = new Function(m.code + '\\n;return typeof scene === "undefined" ? undefined : scene;')();
       if (!scene || typeof scene.draw !== 'function') throw new Error('The code must define const scene = { width, height, fps, duration, draw(ctx, t) }.');
       scene.fps = Math.min(60, Math.max(12, Number(scene.fps) || 30));
@@ -45,21 +59,21 @@ addEventListener('message', async (event) => {
       const captureCtx = capture.getContext('2d');
       for (const fraction of [0.02, 0.24, 0.48, 0.72, 0.96]) {
         const time = Math.min(scene.duration - 1 / scene.fps, Math.max(0, scene.duration * fraction));
-        frame(time); captureCtx.drawImage(c, 0, 0, capture.width, capture.height);
+        await sync(time); frame(time); captureCtx.drawImage(c, 0, 0, capture.width, capture.height);
         frames.push({time, image:capture.toDataURL('image/jpeg', .7)});
       }
       frame(currentTime); say({type:'review-frames', requestId:m.requestId, frames});
     } catch (error) { say({type:'review-capture-error', requestId:m.requestId, message:String(error.message || error)}); }
   } else if (m.type === 'playback-control' && scene) {
-    if (m.action === 'pause') { playing = false; say({type:'playback', time:currentTime, playing:false}); }
-    if (m.action === 'seek') { currentTime = Math.max(0, Math.min(scene.duration - 1 / scene.fps, Number(m.time) || 0)); frame(currentTime); startAt = performance.now() - currentTime * 1000; say({type:'playback', time:currentTime, playing}); }
+    if (m.action === 'pause') { playing = false; videos.forEach((v) => v.pause()); say({type:'playback', time:currentTime, playing:false}); }
+    if (m.action === 'seek') { currentTime = Math.max(0, Math.min(scene.duration - 1 / scene.fps, Number(m.time) || 0)); if (!playing) await sync(currentTime); frame(currentTime); startAt = performance.now() - currentTime * 1000; say({type:'playback', time:currentTime, playing}); }
     if (m.action === 'play' && !playing) { playing = true; startAt = performance.now() - currentTime * 1000; loop(); say({type:'playback', time:currentTime, playing:true}); }
   } else if (m.type === 'export') {
     playing = false; exportCancelled = false;
     const count = Math.round(scene.duration * scene.fps);
     try {
       for (let i = 0; i < count; i++) {
-        frame(i / scene.fps);
+        await sync(i / scene.fps); frame(i / scene.fps);
         const bitmap = await createImageBitmap(c);
         await new Promise((resolve) => { pending = resolve; say({ type: 'frame', i, count, bitmap }, [bitmap]); });
         if (exportCancelled) break;
@@ -137,6 +151,76 @@ function addAssistantMessage(text) {
   $('#conversation').append(message);
   message.scrollIntoView({ block: 'nearest' });
 }
+
+// ---------- the user's photos and videos: they stay in this browser; only small JPEG frames go to /api/motion-index ----------
+const media = [];
+const loadMedia = (item) => new Promise((resolve, reject) => {
+  const element = document.createElement(item.kind === 'image' ? 'img' : 'video');
+  element.onerror = () => reject(new Error(`${item.name} could not be opened.`));
+  if (item.kind === 'image') element.onload = () => resolve(element);
+  else { element.muted = true; element.preload = 'auto'; element.onloadeddata = () => resolve(element); }
+  element.src = item.url;
+});
+const seekTo = (video, time) => new Promise((resolve) => { video.onseeked = () => resolve(); video.currentTime = time; });
+function jpeg(source, width, height, max = 512) {
+  const k = Math.min(1, max / Math.max(width, height));
+  const canvas = Object.assign(document.createElement('canvas'), { width: Math.round(width * k), height: Math.round(height * k) });
+  canvas.getContext('2d').drawImage(source, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/jpeg', 0.7);
+}
+function mediaThumbs(items, removable) {
+  const box = el('div', { className: 'attachments' });
+  for (const item of items) {
+    const thumb = el('div', { className: `media-thumb${item.description ? '' : ' pending'}`, title: item.description || 'Looking at this file…' }, el('img', { src: item.thumb || '', alt: item.description || item.name }), el('span', { className: 'media-kind' }, item.kind === 'video' ? `▶ ${formatTime(item.duration)}` : ''));
+    if (removable) thumb.append(el('button', { className: 'media-remove', type: 'button', ariaLabel: `Remove ${item.name}`, onclick: () => { media.splice(media.indexOf(item), 1); URL.revokeObjectURL(item.url); renderAttachments(); } }, '×'));
+    box.append(thumb);
+  }
+  return box;
+}
+function renderAttachments() {
+  const box = $('#attachments');
+  box.replaceChildren(...mediaThumbs(media, true).children);
+  box.hidden = !media.length;
+}
+async function addFiles(files) {
+  for (const file of files) {
+    const kind = file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : '';
+    if (!kind) { setStatus(`${file.name} is not a photo or video.`, true); continue; }
+    if (media.length >= 8) { setStatus('Add up to 8 photos or videos.', true); break; }
+    const base = file.name.replace(/\.[^.]*$/, '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^[^a-z]+/, '').slice(0, 18) || kind;
+    let id = base; for (let n = 2; media.some((m) => m.id === id); n++) id = `${base}_${n}`;
+    const item = { id, kind, name: file.name, file, url: URL.createObjectURL(file), description: '' };
+    try {
+      const element = await loadMedia(item);
+      item.width = element.naturalWidth || element.videoWidth; item.height = element.naturalHeight || element.videoHeight;
+      if (kind === 'video') item.duration = element.duration;
+      // One frame for a photo, three for a video (10%, 50%, 90%), as small JPEGs.
+      const frames = [];
+      if (kind === 'image') frames.push(jpeg(element, item.width, item.height));
+      else for (const f of [0.1, 0.5, 0.9]) { await seekTo(element, item.duration * f); frames.push(jpeg(element, item.width, item.height)); }
+      item.thumb = jpeg(element, item.width, item.height, 160);
+      media.push(item); renderAttachments();
+      // shortcut: hashes the whole file in memory; fine for phone clips, stream it if multi-GB uploads matter.
+      const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer()))].map((b) => b.toString(16).padStart(2, '0')).join('');
+      const response = await fetch('/api/motion-index', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hash, kind, frames }) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      item.description = data.description;
+    } catch (error) {
+      if (!media.includes(item)) URL.revokeObjectURL(item.url);
+      item.description = item.description || `A ${kind} named ${file.name}.`;
+      setStatus(`${file.name}: ${error.message}`, true);
+    }
+    renderAttachments();
+  }
+}
+const mediaList = () => media.map(({ id, kind, width, height, duration, description }) => ({ id, kind, width, height, ...(kind === 'video' ? { duration } : {}), description: description || `A ${kind}.` }));
+$('#attach').addEventListener('click', () => $('#attach-input').click());
+$('#attach-input').addEventListener('change', (event) => { addFiles([...event.target.files]); event.target.value = ''; });
+const composer = $('.composer');
+composer.addEventListener('dragover', (event) => { if ([...event.dataTransfer.types].includes('Files')) { event.preventDefault(); composer.classList.add('dragging'); } });
+composer.addEventListener('dragleave', () => composer.classList.remove('dragging'));
+composer.addEventListener('drop', (event) => { event.preventDefault(); composer.classList.remove('dragging'); addFiles([...event.dataTransfer.files]); });
 
 function fit() {
   const box = player.parentElement.getBoundingClientRect();
@@ -350,13 +434,13 @@ function run(source) {
   fit();
 }
 
-player.addEventListener('load', () => { if (engine !== 'html' && code) player.contentWindow.postMessage({ type: 'load', code, engine }, '*'); });
+player.addEventListener('load', () => { if (engine !== 'html' && code) player.contentWindow.postMessage({ type: 'load', code, engine, media: media.map(({ id, kind, file }) => ({ id, kind, file })) }, '*'); });
 
 async function generate(extra = {}) {
   const response = await fetch('/api/motion', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: workController?.signal,
     // Outside a send (a crash during playback) pendingBrief is null, so fall back to the accepted brief, history and style.
-    body: JSON.stringify({ prompt, engine, format, ...(seconds ? { seconds } : {}), originalPrompt: pendingBrief?.originalPrompt || originalPrompt || prompt, history: pendingBrief?.history || history, style: pendingBrief ? pendingBrief.style : lastGood?.style || '', ...choiceFor('code'), ...(stepModel('plan') ? { plan: choiceFor('plan') } : {}), ...extra }),
+    body: JSON.stringify({ prompt, engine, format, ...(seconds ? { seconds } : {}), originalPrompt: pendingBrief?.originalPrompt || originalPrompt || prompt, history: pendingBrief?.history || history, ...(engine === 'canvas' && media.length ? { media: mediaList() } : {}), style: pendingBrief ? pendingBrief.style : lastGood?.style || '', ...choiceFor('code'), ...(stepModel('plan') ? { plan: choiceFor('plan') } : {}), ...extra }),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
@@ -376,6 +460,7 @@ $('#make').addEventListener('click', async () => {
   const message = document.createElement('div');
   message.className = 'message';
   message.textContent = prompt;
+  if (media.length) message.prepend(mediaThumbs(media, false));
   $('#conversation').append(message);
   message.scrollIntoView({ block: 'nearest' });
   $('#prompt').value = '';
