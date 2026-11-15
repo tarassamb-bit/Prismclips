@@ -74,7 +74,7 @@
 .auth-meter[data-score="3"] span[data-on="true"], .auth-meter[data-score="4"] span[data-on="true"] { background: var(--a-ok); }
 .auth-forgot { justify-self: end; font-size: 13px; }
 .auth-check { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; color: var(--a-text2); }
-.auth-check input { margin: 3px 0 0; width: 16px; height: 16px; accent-color: var(--a-sky); }
+.auth-check input { flex: none; margin: 4px 0 0; width: 16px; height: 16px; min-height: 0; accent-color: var(--a-sky); }
 .auth a, .auth-link { color: var(--a-link); }
 .auth-link { border: 0; padding: 0; background: none; font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .auth-human:empty { display: none; }

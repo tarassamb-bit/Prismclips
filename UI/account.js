@@ -34,6 +34,7 @@
   function say(message, kind = 'info') {
     status.textContent = message;
     status.dataset.kind = kind;
+    if (kind === 'error') status.scrollIntoView({ block: 'nearest' });
   }
 
   function updateButtons(action = '') {

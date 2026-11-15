@@ -127,7 +127,7 @@ window.prismAuth = (() => {
       const form = root.querySelector('.auth-form');
       const status = root.querySelector('.auth-status');
       const submit = form.querySelector('.auth-submit');
-      const say = (text, kind = '') => { status.textContent = text; status.dataset.kind = kind; };
+      const say = (text, kind = '') => { status.textContent = text; status.dataset.kind = kind; if (kind === 'error') status.scrollIntoView({ block: 'nearest' }); };
       const field = (name) => form.elements.namedItem(name);
 
       for (const button of root.querySelectorAll('[data-mode]')) {
