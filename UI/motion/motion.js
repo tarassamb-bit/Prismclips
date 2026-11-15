@@ -12,7 +12,7 @@ const player = $('#player'), status = $('#status');
 try { const theme = localStorage.getItem('prism-theme'); if (theme) document.documentElement.dataset.theme = theme; } catch {}
 let engine = 'canvas', code = '', prompt = '', scene = null, repaired = false, preview = 0, previewTimeout = 0, downloadUrl = null, lastGood = null, restoring = false;
 let originalPrompt = '', history = [], pendingBrief = null;
-let reviewPass = 0, frameRequest = null, frameRequestId = 0, runToken = 0, workController = null;
+let previewShown = false, reviewPass = 0, frameRequest = null, frameRequestId = 0, runToken = 0, workController = null;
 
 const canvasRunner = () => `<!doctype html><html><head><style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block}</style></head>
 <body><canvas id="c" width="${W}" height="${H}"></canvas><script>
@@ -405,7 +405,8 @@ fetch('/motion/models.json').then((response) => response.json()).then((list) => 
   renderModelButton();
 }).catch(() => setStatus('The model list could not be loaded, so the server default is used.', true));
 $('#prompt').addEventListener('input', updateComposer);
-$('#prompt').addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('#make').click(); } });
+// Every send is a paid generation, so on touch screens Return makes a new line and only the send button sends.
+$('#prompt').addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && matchMedia('(pointer: fine)').matches) { event.preventDefault(); $('#make').click(); } });
 document.querySelectorAll('[data-suggestion]').forEach((button) => button.addEventListener('click', () => { $('#prompt').value = button.dataset.suggestion; updateComposer(); $('#prompt').focus(); }));
 
 function recoverPreview(message) {
@@ -643,7 +644,7 @@ addEventListener('message', async (event) => {
           return;
         }
         reviewMessage = issues.length ? `Your video is ready, but a few things may need fixing: ${issues.join(' ')} Ask me to fix them, or describe another change.`
-          : 'Your video is ready. Watch it on the right. Tell me what to change, or press Export MP4 to save it.';
+          : 'Your video is ready. Tell me what to change, or press Export MP4 to save it.';
       } catch (error) {
         if (token !== runToken) return;
         reviewMessage = 'Your video is ready. I couldn’t finish checking how it looks, so watch it through before you export.';
@@ -673,6 +674,9 @@ addEventListener('message', async (event) => {
     $('#export').disabled = engine !== 'canvas';
     setStatus(`Playing · ${m.duration.toFixed(1)} s at ${m.fps} fps${engine === 'canvas' ? '' : ' · preview only'}.`);
     if (engine === 'html') playHtml();
+    // On a phone the preview sits below the chat: bring it into view the first time a video is ready.
+    if (!previewShown && matchMedia('(max-width: 650px)').matches) $('.preview-panel').scrollIntoView({ block: 'start', behavior: 'smooth' });
+    previewShown = true;
   } else if (m.type === 'error') {
     runToken++;
     clearTimeout(previewTimeout);

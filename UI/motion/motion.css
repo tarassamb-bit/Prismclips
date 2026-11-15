@@ -63,3 +63,4 @@
 
 .export-progress{display:flex;align-items:center;gap:10px;padding:10px 0;font-size:12px;color:var(--muted)}.export-progress progress{flex:1;height:8px;accent-color:#3fa9f5}
 .style-fallback{padding:0 12px;text-align:center;font:500 15px Space,sans-serif;color:var(--muted)}.setup-loading{color:var(--muted);font-size:13px;min-height:200px}
+@media(max-width:650px){#attach,#model-button,#style,#make,#stop{min-height:44px;min-width:44px}}

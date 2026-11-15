@@ -2156,7 +2156,11 @@ document.addEventListener('click', async (event) => {
   else if (action === 'folder-menu') folderMenu(target.dataset.id, target);
   else if (action === 'open-folder') showHome({ folderId: target.dataset.id });
   else if (action === 'new-folder') newFolder();
-  else if (action === 'select') selectShort(target.dataset.id);
+  else if (action === 'select') {
+    // On a phone the preview sits below every card: a tap on a card brings it into view.
+    await selectShort(target.dataset.id);
+    if (matchMedia('(max-width: 900px)').matches) $('#stage')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }
   else if (action === 'make') startCreate({ project: state.project, media: state.project.media.find((m) => m.id === target.dataset.id) });
   else if (action === 'create') chooseCreate();
   else if (action === 'create-clips') startCreate();

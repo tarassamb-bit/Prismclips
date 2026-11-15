@@ -189,7 +189,11 @@ details.insp-section:not([open]) { gap: 0; }
 /* Settings */
 @media (max-width: 800px) {
   body { overflow: auto; }
-  .shell { grid-template-columns: 1fr; grid-template-rows: auto; height: auto; min-height: 100vh; }
+  .shell, .shell.collapsed { grid-template-columns: 1fr; grid-template-rows: auto 1fr; height: auto; min-height: 100vh; }
+  /* The shell is always .collapsed: on a phone the sidebar is a top bar, not a 64 px column. */
+  .collapsed .sidebar { padding: 10px 14px; }
+  .collapsed .brand-row { flex-direction: row; gap: 8px; padding: 0 6px; }
+  .collapsed .side-nav { margin-top: 0; }
   .sidebar { flex-direction: row; flex-wrap: wrap; align-items: center; border-right: 0; border-bottom: 1px solid var(--border); }
   .tagline { display: none; }
   .side-nav { display: flex; gap: 6px; flex-wrap: wrap; } .side-button { width: auto; }
