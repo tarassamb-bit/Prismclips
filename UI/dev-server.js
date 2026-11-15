@@ -6,6 +6,7 @@ const path = require('path');
 
 const root = __dirname;
 const apiDir = path.join(root, 'api');
+const modelsFile = path.join(root, 'motion', 'models.json');
 const port = Number(process.env.PORT) || 4173;
 const types = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -63,7 +64,8 @@ const server = http.createServer(async (req, res) => {
     // Like Vercel: files starting with "_" are shared code, not endpoints.
     if (!/^[a-z-]+$/.test(name) || !fs.existsSync(file)) return notFound(res);
     // Reload the functions on every request, so edits apply without a restart.
-    for (const key of Object.keys(require.cache)) if (key.startsWith(apiDir)) delete require.cache[key];
+    // motion/models.json is the api's model allowlist, so it reloads with them.
+    for (const key of Object.keys(require.cache)) if (key.startsWith(apiDir) || key === modelsFile) delete require.cache[key];
     try {
       await require(file)(req, res);
     } catch (error) {
