@@ -4,6 +4,7 @@ import { openSource, thumbnail, frameImage, letterbox } from './engine/media.js'
 import * as Shorts from './engine/shortmaker.js';
 import * as Framing from './engine/framing.js';
 import * as Selection from './engine/selection.js';
+import { keepTranscript } from './engine/transcript.js';
 import { render, preview, exportSettings, drawFrame, layoutAt } from './engine/render.js';
 import { STYLE_TITLES, STYLE_DETAILS, VIDEO_TYPE_TITLES, VIDEO_TYPE_DETAILS, REGION_TITLES, EXPORT_QUALITIES, CAPTION_STYLES, VIDEO_TYPES } from './engine/models.js';
 import { stylePreview } from './engine/captions.js';
@@ -237,6 +238,7 @@ async function expireUntouched() {
     if (project.id === state.project?.id || !(Date.parse(project.updated ?? project.created) < cutoff)) continue;
     await store.deleteProject(project);
     removed++;
+    (state.expiredNotice ??= []).push(project.title);
   }
   if (!removed) return;
   requestSync(0);
@@ -409,7 +411,10 @@ async function showHome(view = null) {
   // Day 5 on: a banner names the projects about to go, so nobody loses one without warning.
   const soon = all.filter((p) => daysLeft(p) <= 2).sort((a, b) => daysLeft(a) - daysLeft(b));
   const warning = soon.length ? `<div class="notice" role="status"><strong>${soon.length === 1 ? `“${esc(soon[0].title)}” will be deleted ${daysLeft(soon[0]) <= 1 ? 'tomorrow' : `in ${daysLeft(soon[0])} days`}.` : `${soon.length} projects will be deleted within 2 days.`}</strong> Export your Shorts now, or make any edit to keep a project for another ${UNTOUCHED_DAYS} days.</div>` : '';
-  $('#app').innerHTML = `<section class="dashboard">${warning}${html}</section>`;
+  // Projects removed by the 7-day rule are named once, on a banner (a dialog could replace an open export or stop dialog).
+  const gone = state.expiredNotice ?? [];
+  const expired = gone.length ? `<div class="notice" role="status"><strong>Relio deleted ${gone.length === 1 ? '1 project' : `${gone.length} projects`} you hadn’t edited in ${UNTOUCHED_DAYS} days: ${gone.map(esc).join(', ')}.</strong> Exported files on your computer are not affected. <button class="link" data-action="dismiss-expired">Dismiss</button></div>` : '';
+  $('#app').innerHTML = `<section class="dashboard">${expired}${warning}${html}</section>`;
 }
 
 // MARK: Menus and the small dialogs behind them
@@ -1082,6 +1087,7 @@ function showUpload(text, fraction = 0) {
 /** Sends each video that is on this device and has never been sent, one at a time. A video is stored once under its fingerprint, so a
  * second project with the same file just links to it. A video that was too big, that the person chose not to make room for, or that
  * was later removed to make room stays on its devices and is not sent again. */
+let uploadFailures = 0;
 async function uploadPending() {
   if (uploading || videoBlock || !userId()) return;
   uploading = true;
@@ -1116,9 +1122,16 @@ async function uploadPending() {
         }
       }
     }
+    uploadFailures = 0;
   } catch (error) {
     if (error instanceof CloudVideoError && error.kind === 'unavailable') videoBlock = error;
-    else { console.warn('Video upload paused:', error); uploadProblem = error?.message || String(error); setTimeout(uploadPending, 60_000); }
+    else {
+      console.warn('Video upload paused:', error);
+      uploadProblem = error?.message || String(error);
+      // Each try resends the whole video: wait longer each time, then only try again on the next sync or reload.
+      const minutes = [1, 5, 15, 60][uploadFailures++];
+      if (minutes) setTimeout(uploadPending, minutes * 60_000);
+    }
   } finally {
     uploading = false;
     showUpload(null);
@@ -1360,7 +1373,16 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
       duration: options.duration, count: options.count, region: options.region, customStart: options.region === 'custom' ? options.customStart : null,
       customEnd: options.region === 'custom' ? options.customEnd : null, excluding: usedRanges, videoType: options.videoType, language: options.language, cachedTranscript: saved,
       signal: task.controller.signal,
-      onTranscript: (transcript) => { project.transcripts ??= {}; project.transcripts[media.id] = transcript; },
+      onTranscript: (transcript) => {
+        project.transcripts ??= {};
+        project.transcripts[media.id] = keepTranscript(project.transcripts[media.id], transcript);
+        // Saved as it arrives, so a run that fails or is cancelled later keeps the transcription it already paid for.
+        store.patch('projects', projectId, (r) => {
+          r.transcripts ??= {};
+          r.transcripts[media.id] = keepTranscript(r.transcripts[media.id], transcript);
+          Object.assign(r, { dirty: true, changedAt: new Date().toISOString() });
+        }).catch((error) => console.warn('Couldn’t save the transcript yet.', error));
+      },
       onMissed: (n) => { missed = n; },
       progress: (fraction, stage) => setTask(stage, fraction),
     });
@@ -2075,11 +2097,13 @@ document.addEventListener('click', async (event) => {
     return showError('Shorts are still being made', 'This video is being made in another tab. Open it when it’s done.');
   }
   if (action === 'close') closeDialog();
-  else if (action === 'cancel') cancelTask();
+  // Stopping before any Short exists also removes the new project, so that is asked first.
+  else if (action === 'cancel') { if (state.task?.project?.segments.length === 0) { if (await confirmStop()) showHome(); } else cancelTask(); }
   else if (action === 'delete-project') deleteProjectNow(state.project.id);
   else if (action === 'games') showGames();
   else if (action === 'tutorial') showTutorial();
   else if (action === 'home') showHome();
+  else if (action === 'dismiss-expired') { state.expiredNotice = null; showHome(state.homeView); }
   else if (action === 'open') openProject(target.dataset.id);
   else if (action === 'retry-download' && lastDownload) fetchFromCloud(lastDownload.project, lastDownload.media, lastDownload.shortPart);
   else if (action === 'choose-instead' && lastDownload) attachVideo(lastDownload.project, { ...lastDownload.media, cloud: null }, lastDownload.shortPart);

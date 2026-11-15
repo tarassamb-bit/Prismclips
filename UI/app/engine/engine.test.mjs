@@ -307,3 +307,18 @@ assert.deepEqual(Shorts.dropImpossibleRate([{ text: 'one two three', start: 0, d
   assert.deepEqual(out.map((p) => p.text), ['Blu-ray disc', 'Top Gun']);
   assert.ok(out[0].end <= out[1].start + 1e-9);
 }
+
+// Saved transcripts: touching or overlapping runs are joined without duplicates; disjoint keeps the wider; the same range replaces.
+{
+  const a = { start: 0, end: 600, cues: [cue('one', 10, 5), cue('two', 590, 8)], language: 'en' };
+  const b = { start: 600, end: 1200, cues: [cue('three', 700, 5)], language: 'en' };
+  const ab = T.keepTranscript(a, b);
+  assert.deepEqual([ab.start, ab.end, ab.cues.map((c) => c.text)], [0, 1200, ['one', 'two', 'three']]);
+  const overlap = T.keepTranscript(a, { start: 300, end: 900, cues: [cue('two again', 590, 8), cue('four', 800, 3)] });
+  assert.deepEqual([overlap.start, overlap.end, overlap.cues.map((c) => c.text)], [0, 900, ['one', 'two again', 'four']]);
+  assert.equal(T.keepTranscript(a, { start: 900, end: 1000, cues: [] }), a);
+  assert.deepEqual(T.keepTranscript(a, { start: 0, end: 600, cues: [cue('new', 1, 1)] }).cues.map((c) => c.text), ['new']);
+  assert.equal(T.keepTranscript(null, b), b);
+  // The merged copy still serves later runs inside it.
+  assert.deepEqual(T.cuesCovering(ab, 600, 1200).map((c) => c.text), ['three']);
+}

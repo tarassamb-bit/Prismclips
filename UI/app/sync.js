@@ -133,9 +133,16 @@ async function syncKind({ kind, table, list, prepare }, userId, db, attempt = 1)
     await store.markSynced(kind, done[0].id, done[0].updated_at, item.changedAt);
   }
 
+  if (plan.dropLocal.length) {
+    // An expired or anonymous session reads an empty cloud, which would look like every item was deleted elsewhere.
+    const { data, error } = await db.auth.getUser();
+    if (error || data?.user?.id !== userId) throw new Error('Sign in again to keep your projects in sync.');
+    const still = new Set((await fetchCloud(db, table)).map((row) => row.id));
+    plan.dropLocal = plan.dropLocal.filter((id) => !still.has(id));
+  }
   for (const id of plan.dropLocal) {
-    if (kind === 'projects') await store.deleteProject(byId.get(id));
-    else await store.deleteFolder(id);
+    if (kind === 'projects') await store.removeLocal(byId.get(id));
+    else await store.removeFolderLocal(id);
   }
   if (problems.length) throw new Error(problems[0]);
   // Something changed in the cloud while sending: compare again (a few times at most).

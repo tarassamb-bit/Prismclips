@@ -202,6 +202,19 @@ export function cuesCovering(transcript, start, finish) {
   return transcript.cues.filter((c) => c.start >= start - 0.001 && end(c) <= finish + 0.001);
 }
 
+/**
+ * Two saved transcripts of one video: ranges that touch or overlap are joined (the newer cues win where both have speech),
+ * otherwise the wider one is kept, so a failed, cancelled or narrower run never throws away paid transcription.
+ */
+export function keepTranscript(old, next) {
+  if (!old?.cues || !next?.cues) return next ?? old ?? null;
+  if (next.start > old.end + 0.01 || old.start > next.end + 0.01) return next.end - next.start >= old.end - old.start ? next : old;
+  const inside = (c) => c.start >= next.start - 0.001 && end(c) <= next.end + 0.001;
+  const clash = (c) => next.cues.some((n) => n.start < end(c) && c.start < end(n));
+  const cues = [...old.cues.filter((c) => !inside(c) && !clash(c)), ...next.cues].sort((a, b) => a.start - b.start);
+  return { ...old, ...next, start: Math.min(old.start, next.start), end: Math.max(old.end, next.end), cues };
+}
+
 /** Speech in 10 ms loudness frames: loud stretches of at least 0.1 s, with gaps shorter than 0.15 s (inside a phrase) closed. */
 export function speechRuns(levels, from) {
   const frame = 0.01;

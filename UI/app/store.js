@@ -84,16 +84,19 @@ export const markSynced = (store, id, syncedAt, sentChangedAt) => update(store, 
   return { ...record, syncedAt, dirty: (record.changedAt ?? null) !== (sentChangedAt ?? null) };
 });
 
-export async function deleteProject(project) {
+async function removeProject(project, cloudToo) {
   await run('projects', 'readwrite', (s) => s.delete(project.id));
-  for (const media of project.media) {
+  for (const media of project.media ?? []) {
     memoryFiles.delete(media.id);
     await run('files', 'readwrite', (s) => s.delete(media.id));
     // A video kept in the account's cloud storage is removed there too, as soon as the cloud can be reached.
-    if (media.cloud?.uploaded) forget('videos', `${project.owner}/${media.cloud.key ?? media.id}`);
+    if (cloudToo && media.cloud?.uploaded) forget('videos', `${project.owner}/${media.cloud.key ?? media.id}`);
   }
-  forget('projects', project.id);
+  if (cloudToo) forget('projects', project.id);
 }
+export const deleteProject = (project) => removeProject(project, true);
+/** Deleted on another device: removed from this browser only, since that device already queued the cloud and video deletes. */
+export const removeLocal = (project) => removeProject(project, false);
 
 /** Removes a deleted account's projects, videos and folders from this browser. Nothing is queued for the cloud: the account is gone. */
 export async function deleteOwner(owner) {
@@ -118,6 +121,7 @@ export async function deleteFolder(id) {
   await run('folders', 'readwrite', (s) => s.delete(id));
   forget('folders', id);
 }
+export const removeFolderLocal = (id) => run('folders', 'readwrite', (s) => s.delete(id));
 
 // MARK: Deletions waiting to reach the cloud (kept so a deletion made offline isn't undone by the next sync)
 
