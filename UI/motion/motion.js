@@ -12,6 +12,8 @@ const player = $('#player'), status = $('#status');
 try { const theme = localStorage.getItem('prism-theme'); if (theme) document.documentElement.dataset.theme = theme; } catch {}
 let engine = 'canvas', code = '', prompt = '', scene = null, repaired = false, preview = 0, previewTimeout = 0, downloadUrl = null, lastGood = null, restoring = false;
 let originalPrompt = '', history = [], pendingBrief = null;
+// Every accepted video, newest last. A version is what the user can switch back to from the Versions menu.
+let versions = [], currentVersion = -1;
 let previewShown = false, reviewPass = 0, frameRequest = null, frameRequestId = 0, runToken = 0, workController = null;
 
 const canvasRunner = () => `<!doctype html><html><head><style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block}</style></head>
@@ -670,7 +672,11 @@ addEventListener('message', async (event) => {
         if (pendingBrief.isRevision) history = [...history, { role: 'user', content: pendingBrief.request }].slice(-8);
         pendingBrief = null;
       }
+      const label = (pendingBrief?.request || originalPrompt || prompt || 'Edited code').replace(/\s+/g, ' ').trim();
       lastGood = { engine, code, originalPrompt, history: history.slice(), style: selectedStyle };
+      if (versions.at(-1)?.code !== code) { versions = [...versions, { ...lastGood, label: label.length > 48 ? `${label.slice(0, 45)}…` : label, at: Date.now() }].slice(-20); }
+      currentVersion = versions.length - 1;
+      renderVersions();
       addAssistantMessage(reviewMessage);
       saveVideo();
     }
@@ -717,6 +723,42 @@ function playHtml() {
   tick();
 }
 
+// Versions menu: pick any earlier video. Switching reloads that video's code, like a restored preview; nothing is re-generated.
+function renderVersions() {
+  const button = $('#versions-button'), menu = $('#versions-menu');
+  button.hidden = versions.length === 0;
+  $('#versions-name').textContent = currentVersion >= 0 ? `Version ${currentVersion + 1} of ${versions.length}` : 'Versions';
+  menu.replaceChildren(...versions.map((v, i) => {
+    const item = el('button', { type: 'button', className: 'version-item', role: 'menuitemradio', onclick: () => switchVersion(i) });
+    item.setAttribute('aria-checked', String(i === currentVersion));
+    item.append(el('span', {}, `${i + 1}. ${v.label || 'Video'}`, el('small', { textContent: new Date(v.at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })));
+    if (i === currentVersion) item.append(el('span', { className: 'version-check', textContent: '✓', ariaHidden: 'true' }));
+    return item;
+  }));
+}
+function setVersionsOpen(open) { $('#versions-menu').hidden = !open; $('#versions-button').setAttribute('aria-expanded', String(open)); }
+$('#versions-button').addEventListener('click', (event) => { event.stopPropagation(); setVersionsOpen($('#versions-menu').hidden); });
+document.addEventListener('click', (event) => { if (!event.target.closest?.('.version-picker')) setVersionsOpen(false); });
+addEventListener('keydown', (event) => { if (event.key === 'Escape') setVersionsOpen(false); });
+function switchVersion(index) {
+  const version = versions[index];
+  setVersionsOpen(false);
+  if (!version || busy || index === currentVersion) return;
+  currentVersion = index;
+  originalPrompt = version.originalPrompt;
+  history = version.history.slice();
+  engine = version.engine;
+  $('#engine').value = engine;
+  $('#style').value = version.style || '';
+  fitComposerSelect($('#style'));
+  lastGood = { ...version };
+  renderVersions();
+  restoring = true;
+  repaired = true;
+  setBusy(true);
+  showThinking(`Opening version ${index + 1}`);
+  run(version.code);
+}
 let exporter = null;
 // One button: "Export MP4" until an MP4 exists for the current video, then "Download MP4".
 const setExportLabel = (text) => { $('#export').innerHTML = `↓ &nbsp; ${text}`; };
@@ -818,7 +860,7 @@ async function saveVideo() {
     await store.saveProject({
       ...(existing ?? { id: projectId, owner: signedInUser() ?? undefined, created: new Date().toISOString(), media: [], segments: [], transcripts: {} }),
       kind: 'motion', title: existing?.title ?? (title.length > 60 ? `${title.slice(0, 57)}…` : title || 'Motion video'),
-      motion: { ...lastGood, format, seconds, duration: scene?.duration ?? 0, thumbnail },
+      motion: { ...lastGood, versions, format, seconds, duration: scene?.duration ?? 0, thumbnail },
     });
     // `history` here is the chat history, so the browser's is named in full.
     window.history.replaceState(null, '', `/motion/?project=${projectId}`);
@@ -889,6 +931,9 @@ if (projectId) store.loadProject(projectId).then((project) => {
   const saved = project?.motion;
   if (!saved?.code) { projectId = null; window.history.replaceState(null, '', '/motion/'); showSetup('style'); return; }
   lastGood = { engine: saved.engine, code: saved.code, originalPrompt: saved.originalPrompt, history: saved.history ?? [], style: saved.style ?? '' };
+  versions = Array.isArray(saved.versions) && saved.versions.length ? saved.versions : [{ ...lastGood, label: 'First version', at: Date.now() }];
+  currentVersion = versions.findIndex((v) => v.code === saved.code); if (currentVersion < 0) currentVersion = versions.length - 1;
+  renderVersions();
   ({ engine, originalPrompt } = lastGood);
   setFormat(saved.format);
   seconds = saved.seconds || 0;

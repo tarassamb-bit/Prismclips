@@ -11,7 +11,7 @@ function harness(reviews) {
   const player={contentWindow:{postMessage(){}}};
   const context={console,Number,Boolean,String,Math,Error,URL:{revokeObjectURL(){}},clearTimeout(){},
     addEventListener(name,fn){listeners[name]=fn},player,frameRequest:null,runToken:1,previewTimeout:0,
-    scene:null,previewShown:false,matchMedia:()=>({matches:false}),$,formatTime:()=> '0:04',updatePlayback(){},downloadUrl:null,restoring:false,
+    scene:null,previewShown:false,versions:[],currentVersion:-1,renderVersions(){},matchMedia:()=>({matches:false}),$,formatTime:()=> '0:04',updatePlayback(){},downloadUrl:null,restoring:false,
     reviewPass:0,engine:'canvas',code:'old code',pendingBrief:{originalPrompt:'Original idea',history:[],style:'flat-vector-science',request:'Original idea',isRevision:false},
     originalPrompt:'',history:[],lastGood:null,repaired:false,prompt:'Original idea',exporter:null,
     hideThinking(){},setBusy(){},showThinking(){},setStatus(){},addAssistantMessage(text){messages.push(text)},
@@ -60,4 +60,17 @@ test('the composer exposes one style choice and no engine picker',()=>{
   assert.match(html,/<select id="style"/);
   assert.doesNotMatch(html,/<select id="engine"/);
   assert.match(html,/<input id="engine" type="hidden" value="canvas">/);
+});
+
+test('each accepted video is kept as a version, and an unchanged one is not added twice',async()=>{
+  const h=harness([[],[],[]]);
+  await h.listener({source:h.context.player.contentWindow,data:{type:'ready',fps:30,duration:4}});
+  await h.listener({source:h.context.player.contentWindow,data:{type:'ready',fps:30,duration:4}});
+  assert.equal(h.context.versions.length,1);
+  assert.equal(h.context.currentVersion,0);
+  assert.equal(h.context.versions[0].code,'corrected code');
+  assert.equal(h.context.versions[0].label,'Original idea');
+  await h.listener({source:h.context.player.contentWindow,data:{type:'ready',fps:30,duration:4}});
+  await h.listener({source:h.context.player.contentWindow,data:{type:'ready',fps:30,duration:4}});
+  assert.equal(h.context.versions.length,1);
 });
