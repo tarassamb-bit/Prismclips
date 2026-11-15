@@ -2,7 +2,7 @@
 
 > Every main page of relioclips.com as plain text. Summary and links: https://relioclips.com/llms.txt
 
-Relio is in beta. On Mac, sign in to try it; AI usage limits apply. Windows and Linux use your own Gemini API key. Paid plans are not available yet.
+Relio is in beta and runs in your browser. Create a free account to try it; AI usage limits apply. Paid plans are not available yet.
 
 ---
 
@@ -70,7 +70,7 @@ Your footage. Your brief. Your call.
 See the workflow
 
 #### Review every Short
-Fine-tune clip timing and framing in a native desktop editor before exporting.
+Fine-tune clip timing and framing in the editor before you export.
 
 #### Ask for an edit
 Use editor chat to request changes in plain language, from trimming to muting the audio.
@@ -120,11 +120,11 @@ Ready for the spotlight.1080 × 1920 · MP4
 Fine-tune the timing, framing, and captions. Export your favorites as vertical MP4s, ready to share.
 
 ### Before your first Short
-You’ll need a video and an internet connection. On Mac, sign in to your Relio account; on Windows and Linux, supply your own Gemini API key. Your source files and rendered videos stay on your computer. Audio, transcripts and sampled frames are sent for AI processing. See how your data is used
+You’ll need a video, an internet connection and a free Relio account. Relio runs in your browser, with nothing to install, and saves your projects and videos to your account. Audio, transcripts and sampled frames are sent for AI processing. See how your data is used
 
 YOUR NEXT CREATIVE SHORTCUT
 
-### One download. Plenty of potential.
+### One video. Plenty of potential.
 
 Choose your platform
 
@@ -203,7 +203,7 @@ Everything to know before your first Short.
 Relio is in beta and paid plans are not available yet. AI usage limits apply; check Settings in the app for your allowance. About beta access.
 
 **What happens to my footage?**
-Your source files, projects, preview, and rendering stay on your computer. Audio chunks, transcripts, sampled frames, and editor chat messages are sent for AI processing. On Mac, they go through Relio’s server and OpenRouter to an AI model; on Windows and Linux, they go to Google Gemini. Relio needs an internet connection; it has no offline AI mode.
+Relio cuts, previews and renders your video in your browser. Your projects and videos are saved to your account (up to 1 GB of video), so they open on any device you sign in on; deleting a project or your account deletes them for good, and a project you don’t edit for 7 days is deleted too (Home warns you 2 days before). Audio chunks, transcripts, sampled frames, and editor chat messages are sent for AI processing through Relio’s server and OpenRouter to an AI model. Relio needs an internet connection; it has no offline AI mode. See Privacy.
 
 **Can I change the Shorts Relio picks?**
 Yes. Review and adjust every Short before export. Change the timing, choose Fill, Fit, or Split framing, try seven caption styles, or ask the editor chat to help with edits.
@@ -212,13 +212,13 @@ Yes. Review and adjust every Short before export. Change the timing, choose Fill
 Relio exports vertical MP4 files at up to 1080 × 1920. Upload them yourself to your favorite short-form platforms, including YouTube Shorts, Instagram Reels, and TikTok. Direct publishing isn’t built in.
 
 **Is this ready for my daily workflow?**
-Relio is an early beta. The Mac pipeline works end to end, but you should review every clip and expect rough edges. Windows and Linux ports are available but still need verification on real devices. Read the current limits.
+Relio is an early beta. Making Shorts works end to end in the browser, but you should review every clip and expect rough edges. It needs a current Chrome, Edge, Safari or Firefox.
 
 **Do I need a Relio account?**
-On Mac, sign in to the app with your Relio account to use the AI service. Your dashboard also shows your export stats and history. Windows and Linux use your own Gemini API key instead. Create an account.
+Yes. A free account keeps your projects and gives you the AI minutes that find your Shorts. Settings in the app also shows your export stats and history. Create an account.
 
 **How do I get started?**
-Download Relio, sign in on Mac or add your Gemini API key on Windows or Linux, and import a video. See the three-step workflow for a quick tour.
+Create a free account, open Relio in your browser and choose a video. There is nothing to install. See the three-step workflow for a quick tour.
 
 ### Something else on your mind?
 Check the project documentation ↗ or share your feedback on GitHub ↗.
@@ -231,22 +231,22 @@ Title: About — Relio
 ABOUT RELIO
 
 # One video in. Many Shorts out.
-Relio is a desktop app that turns long videos into vertical Shorts with captions.
+Relio turns long videos into vertical Shorts with captions, right in your browser.
 
 ### What Relio does
-Import a podcast, lecture, interview or stream. Relio transcribes it, finds moments that stand on their own, and cuts them into vertical Shorts. It reframes each one for the small screen and adds captions in the language spoken in your video. You review every Short and make the final cut before you export.
+Choose a podcast, lecture, interview or stream. Relio transcribes it, finds moments that stand on their own, and cuts them into vertical Shorts. It reframes each one for the small screen and adds captions in the language spoken in your video. You review every Short and make the final cut before you export.
 
 ### Who it’s for
 Creators, podcasters and streamers who want more short-form videos from the long recordings they already make, without spending hours in an editor.
 
 ### Where it runs
-Relio is an early beta for macOS 14 or later on Apple Silicon. Windows and Linux ports have not yet been tested on real devices. Your source files and finished videos stay on your machine. See Privacy for what is sent for AI processing.
+Relio runs in your browser, with nothing to install: a current Chrome, Edge, Safari or Firefox on a computer. Your video is cut and rendered on your device, and your projects are saved to your account so they open wherever you sign in. See Privacy for what is sent for AI processing.
 
 ### Beta access
 Sign in to try Relio during the beta. AI usage limits apply; check Settings in the app for your allowance. About beta access.
 
 ### Learn more
-See features, how it works and the FAQs, or download Relio.
+See features, how it works and the FAQs, or try Relio free.
 
 ---
 
