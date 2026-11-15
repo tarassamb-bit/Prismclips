@@ -17,6 +17,16 @@ function styleReference(style, rich = false) {
   if (!style) return '';
   const config = STYLE_FILES[style];
   const text = fs.readFileSync(path.join(__dirname, '_motion-styles', config.file), 'utf8');
+  // Stronger models get the whole style file, the way it works best by hand (Nov 2026): style card, H library, the full
+  // reference and its "how to stay in the style" rules. Only the parts for a different harness are cut: storyboard, the
+  // HTML player brief, sound and the sound kit.
+  if (rich) {
+    const cut = (from, to) => { const a = text.indexOf(from), b = text.indexOf(to, a); return a < 0 || b < 0 ? '' : text.slice(a, b); };
+    let full = text;
+    for (const part of [cut('STORYBOARD FIRST', 'WHAT TO BUILD'), cut('WHAT TO BUILD', 'HOW TO STAY IN THE STYLE'), cut('SOUND (', 'STYLE CARD'), cut('SOUND KIT', 'REFERENCE STYLE SOURCE')]) if (part) full = full.replace(part, '');
+    full = full.replace(/MY CONTENT:\n\[[^\]]*\]/, 'MY CONTENT: the user request at the end of this message.');
+    return `Selected visual style: the complete style guide below is the primary visual direction (explicit user choices still win).\n\nMOTION HARNESS (replaces the guide's HTML player, storyboard and sound): output only \`const scene = { width, height, fps, duration, draw(ctx, t) }\` at the requested size. draw(ctx, t) draws the whole frame at time t; there is no explainer(ctx, W, H_, t) wrapper, no player, no sound and no font loading (use the guide's font names with a sans-serif fallback). Copy the H helper functions you use into your code.\n\n${full}\n\nEnd of style guide.`;
+  }
   const referenceStart = text.indexOf('REFERENCE STYLE SOURCE');
   if (referenceStart < 0) throw new Error('The selected style reference is incomplete.');
   const reference = text.slice(referenceStart);
