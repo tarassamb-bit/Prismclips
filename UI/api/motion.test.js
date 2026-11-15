@@ -134,33 +134,22 @@ test('styled generation includes a validated, private production plan', async ()
   assert.match(text, /user brief takes priority/i);
 });
 
-test('rejects an invalid style plan instead of generating without it', async () => {
-  const oldFetch = global.fetch, oldKey = process.env.MOTION_OPENROUTER_API_KEY;
-  let calls = 0;
-  process.env.MOTION_OPENROUTER_API_KEY = 'local-test-key';
-  global.fetch = async () => { calls++; return {ok:true, text:async () => JSON.stringify({choices:[{finish_reason:'stop', message:{content:'{"duration":8,"beats":[]}'}}]})}; };
-  const req = {method:'POST', headers:{host:'localhost:4173'}, async *[Symbol.asyncIterator]() {yield JSON.stringify({engine:'remotion', prompt:original, style:'flat-vector-science'});}};
-  const res = {setHeader() {}, end(value) {this.body = value;}};
-  try { await handler(req, res); } finally { global.fetch = oldFetch; if (oldKey === undefined) delete process.env.MOTION_OPENROUTER_API_KEY; else process.env.MOTION_OPENROUTER_API_KEY = oldKey; }
-  assert.equal(res.statusCode, 502);
-  assert.match(JSON.parse(res.body).error, /plan needs another try/);
-  assert.equal(calls, 2);
-});
-
-
-test('rejects a plan that puts a decorative rule through text', async () => {
-  const oldFetch = global.fetch, oldKey = process.env.MOTION_OPENROUTER_API_KEY;
-  let calls = 0;
-  const plan = {duration:8,beats:[{start:0,end:4,visual:'Headline with a line',motion:'Reveal',text:[{content:'IDEAS',box:{x:0.2,y:0.4,w:0.6,h:0.1}}],decorations:[{x:0.1,y:0.45,w:0.8,h:0.01}]},{start:4,end:8,visual:'Final scene',motion:'Hold',text:[],decorations:[]}]};
-  process.env.MOTION_OPENROUTER_API_KEY = 'local-test-key';
-  global.fetch = async () => { calls++; return {ok:true,text:async()=>JSON.stringify({choices:[{finish_reason:'stop',message:{content:JSON.stringify(plan)}}]})}; };
-  const req = {method:'POST',headers:{host:'localhost:4173'},async *[Symbol.asyncIterator](){yield JSON.stringify({engine:'remotion',prompt:original,style:'flat-vector-science'});}};
-  const res = {setHeader(){},end(value){this.body=value}};
-  try { await handler(req,res); } finally { global.fetch=oldFetch; if (oldKey === undefined) delete process.env.MOTION_OPENROUTER_API_KEY; else process.env.MOTION_OPENROUTER_API_KEY=oldKey; }
-  assert.equal(res.statusCode,502);
-  assert.match(JSON.parse(res.body).error,/must not overlap/);
-  assert.equal(calls,2);
-});
+// A plan that keeps breaking the layout rules is dropped after two tries; the video is still written, without it.
+for (const [name, planText] of [['an invalid style plan', '{"duration":8,"beats":[]}'],
+  ['a plan that puts a decorative rule through text', JSON.stringify({duration:8,beats:[{start:0,end:4,visual:'Headline with a line',motion:'Reveal',text:[{content:'IDEAS',box:{x:0.2,y:0.4,w:0.6,h:0.1}}],decorations:[{x:0.1,y:0.45,w:0.8,h:0.01}]},{start:4,end:8,visual:'Final scene',motion:'Hold',text:[],decorations:[]}]})]]) {
+  test(`drops ${name} after two tries and writes the video without it`, async () => {
+    const oldFetch = global.fetch, oldKey = process.env.MOTION_OPENROUTER_API_KEY;
+    const sent = [];
+    process.env.MOTION_OPENROUTER_API_KEY = 'local-test-key';
+    global.fetch = async (url, init) => { sent.push(JSON.parse(init.body).messages[0].content); const content = sent.length <= 2 ? planText : '```js\nconst scene = {};\n```'; return {ok:true, text:async () => JSON.stringify({choices:[{finish_reason:'stop', message:{content}}]})}; };
+    const req = {method:'POST', headers:{host:'localhost:4173'}, async *[Symbol.asyncIterator]() {yield JSON.stringify({engine:'remotion', prompt:original, style:'flat-vector-science'});}};
+    const res = {setHeader() {}, end(value) {this.body = value;}};
+    try { await handler(req, res); } finally { global.fetch = oldFetch; if (oldKey === undefined) delete process.env.MOTION_OPENROUTER_API_KEY; else process.env.MOTION_OPENROUTER_API_KEY = oldKey; }
+    assert.equal(sent.length, 3);
+    assert.doesNotMatch(sent[2], /Private production plan/);
+    assert.notEqual(res.statusCode, 502, res.body);
+  });
+}
 
 test('visual corrections receive the prior code and specific observed issues without replanning', async () => {
   const text = await request({engine:'remotion',prompt:'Make it clearer',originalPrompt:original,previous,style:'flat-vector-science',visualFeedback:'At 2 seconds a line crosses the subtitle.'});

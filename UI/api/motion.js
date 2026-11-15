@@ -247,15 +247,18 @@ module.exports = async (req, res) => {
         catch { problem = 'Return valid JSON in the specified format.'; }
         if (!problem) break;
       }
-      if (problem) throw new HttpError(502, `The video plan needs another try: ${problem}`);
+      // A plan that still breaks the layout rules is dropped, not fatal: the code writer has the same rules and the frame check follows.
+      if (problem) { logRun({kind: 'plan', choice: planChoice, tally: planTally, ms: Date.now() - planStarted, style: body.style, failed: `dropped: ${problem}`.slice(0, 200)}); planResult = null; }
       } catch (error) {
         logRun({kind: 'plan', choice: planChoice, tally: planTally, ms: Date.now() - planStarted, style: body.style, failed: String(error.message || error).slice(0, 200)});
         run = null;
         throw error;
       }
-      logRun({kind: 'plan', choice: planChoice, tally: planTally, ms: Date.now() - planStarted, style: body.style});
+      if (planResult) {
+        logRun({kind: 'plan', choice: planChoice, tally: planTally, ms: Date.now() - planStarted, style: body.style});
+        planResult.code = JSON.stringify({duration:plan.duration, beats:plan.beats});
+      }
       run.started = Date.now();
-      planResult.code = JSON.stringify({duration:plan.duration, beats:plan.beats});
     }
     const result = await callWithLengthRetry(forFormat(prompt({...body, creativePlan: planResult?.code, rich: !choice.id.startsWith('xiaomi/')}), body.format) + length, 24000, 32000, 'writing the animation', cancellation.signal, choice, tally);
     const {code, model, provider} = result;
