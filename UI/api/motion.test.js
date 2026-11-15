@@ -12,7 +12,7 @@ async function request(body) {
     sent = JSON.parse(init.body);
     assert.equal(init.headers['X-Title'], 'Relio Clips');
     assert.equal(sent.model, process.env.MOTION_MODEL || 'xiaomi/mimo-v2.6-flash');
-    assert.equal(sent.reasoning.effort, 'medium');
+    if (body.style) assert.ok(sent.reasoning.max_tokens >= 2000); else assert.equal(sent.reasoning.effort, 'medium');
     const content = sent.max_tokens === 3000 ? JSON.stringify({duration:8, beats:[{start:0,end:4,visual:'A prominent headline',motion:'Ease in',text:[{content:'MAKE IT MOVE',box:{x:0.1,y:0.3,w:0.8,h:0.1}}],decorations:[]},{start:4,end:8,visual:'A new layout',motion:'Transition and hold',text:[{content:'Ideas in motion',box:{x:0.1,y:0.55,w:0.8,h:0.1}}],decorations:[]}]}) : '```js\nfunction Video() {}\n```';
     return {ok: true, text: async () => JSON.stringify({choices: [{finish_reason: 'stop', message: {content}}]})};
   };
@@ -114,12 +114,13 @@ test('rejects unrecognized style keys', async () => {
   assert.match(JSON.parse(res.body).error, /Unknown video style/);
 });
 
-test('flat vector keeps the user-provided style and full visual drawing reference', async () => {
+test('flat vector keeps the style card and drawing primitives, not the whole reference', async () => {
   const text = await request({engine:'remotion', prompt:original, style:'flat-vector-science'});
   assert.match(text, /Flat-Vector Science/);
   assert.match(text, /deep navy-to-violet space gradients/);
   assert.match(text, /function planet\(/);
-  assert.match(text, /function robot\(/);
+  assert.doesNotMatch(text, /function robot\(/);
+  assert.ok(text.length < 40000, `prompt is ${text.length} chars`);
   assert.match(text, /selected style supersedes conflicting generic instructions/i);
   assert.match(text, /AI-learning example is not the user's script/);
   assert.doesNotMatch(text, /Do not draw planets, orbital rings/);
@@ -208,4 +209,24 @@ test('instructions follow the chosen format', () => {
   assert.match(wide, /1920x1080/); assert.match(wide, /width: 1920, height: 1080/); assert.match(wide, /short 16:9 animation/);
   assert.doesNotMatch(wide, /vertical|1080x1920|220 px/);
   assert.match(forFormat(text, '3:4'), /1080x1440/);
+});
+
+test('uploaded media reaches the canvas prompt as MEDIA entries, and a bad list is refused', async () => {
+  const media = [{id:'xbox', kind:'image', width:1200, height:800, description:'A black Xbox Series X on a desk.'}, {id:'ps5', kind:'video', width:1920, height:1080, duration:6.5, description:'A PlayStation 5 rotating on a turntable.'}];
+  const text = await request({engine:'canvas', prompt:'Compare Xbox vs PlayStation with my shots', media});
+  assert.match(text, /MEDIA\.xbox: image, 1200x800\. A black Xbox/);
+  assert.match(text, /MEDIA\.ps5: video, 1920x1080, 6\.5 s/);
+  assert.doesNotMatch(await request({engine:'remotion', prompt:'x', media}), /MEDIA\./);
+  const oldKey = process.env.MOTION_OPENROUTER_API_KEY; process.env.MOTION_OPENROUTER_API_KEY = 'k';
+  const req = {method:'POST', headers:{host:'localhost:4173'}, async *[Symbol.asyncIterator]() { yield JSON.stringify({engine:'canvas', prompt:'x', media:[{id:'1bad', kind:'image', width:1, height:1, description:''}]}); }};
+  const res = {setHeader() {}, end(value) { this.body = value; }};
+  await handler(req, res);
+  if (oldKey === undefined) delete process.env.MOTION_OPENROUTER_API_KEY; else process.env.MOTION_OPENROUTER_API_KEY = oldKey;
+  assert.equal(res.statusCode, 400);
+});
+
+test('styled briefs cap reasoning and get a palette hint; the no-style prompt has neither', async () => {
+  const styled = await request({engine:'canvas', prompt:'How vaccines work', style:'flat-vector-science'});
+  assert.match(styled, /Palette: within this style/);
+  assert.doesNotMatch(await request({engine:'canvas', prompt:'How vaccines work'}), /Palette: within this style/);
 });

@@ -23,11 +23,12 @@ function styleReference(style) {
     const cardStart = text.indexOf('STYLE CARD');
     const helperStart = text.indexOf('H HELPER LIBRARY');
     const soundStart = text.indexOf('SOUND KIT');
-    const soundMethod = reference.indexOf('    explainerSound(k)');
+    // Only the palette and drawing primitives: the full reference (~30k tokens) made cheap models reason away their whole output budget.
+    const soundMethod = reference.indexOf('  function eye(');
     if (cardStart < 0 || helperStart < 0 || soundStart < 0 || soundMethod < 0) throw new Error('The selected style reference is incomplete.');
     const card = text.slice(cardStart, helperStart);
     const helpers = text.slice(helperStart, soundStart);
-    const visual = reference.slice(0, soundMethod);
+    const visual = `${reference.slice(0, soundMethod)}  // ... characters, scenes and player omitted ...\n}\n\`\`\``;
     return `Selected visual style: the following user-supplied style card and original visual reference are the primary visual direction. Follow the reference’s vivid space gradients, rounded dimensional illustration, playful appealing characters, glow, texture, big scale changes and animation energy, where they suit the user’s topic. The selected style supersedes conflicting generic instructions to avoid stars, gradients, characters, or playful elements. Respect any specific style or color choices in the user's request. Use the user’s own subject and words: the reference’s AI-learning example is not the user's script. Do not reproduce its claims or add labels and captions the user did not request. Interpret its example props as visual inspiration, not mandatory content.\n\nThe reference code is written for a different canvas harness and aspect ratio. Adapt its visual and animation techniques to the requested engine, dimensions, and brief; do not emit its player, registry, storyboard, sound kit or sample script. Inline or reimplement any helpers you need.\n\n${card}\n\n${helpers}\n\n${visual}\n\nEnd of reference excerpt.`;
   }
   const excerpts = config.extracts.map(([start, end]) => {
@@ -93,7 +94,20 @@ const scene = { width: 1080, height: 1920, fps: 30, duration: SECONDS, draw(ctx,
 - Keep the composition fully deterministic and preserve the safe area around important content.`,
 };
 
-function prompt({ prompt: idea, engine, previous, error, originalPrompt, history, style, creativePlan, visualFeedback }) {
+// The user's own uploads, already described by motion-index. Only the canvas engine can draw them (the runner preloads MEDIA).
+function mediaBlock(media) {
+  if (!media?.length) return '';
+  const list = media.map((m) => `- MEDIA.${m.id}: ${m.kind}, ${m.width}x${m.height}${m.kind === 'video' ? `, ${m.duration.toFixed(1)} s` : ''}. ${m.description}`).join('\n');
+  return `\n\nThe user uploaded these photos and videos. Use them where they fit the brief, as the real subject rather than a drawn stand-in:\n${list}\nEach MEDIA entry is an already-loaded image or video element: draw it with ctx.drawImage(MEDIA.id, ...), cropping or fitting it to keep its aspect ratio (sizes listed above). A video shows its frame at scene time t, looping past its length; do not play, pause or seek it. Images from MEDIA are allowed despite the no-images rule; still use no other images. Animate around the media: frames, masks, labels and moves.`;
+}
+
+function validMedia(media) {
+  return Array.isArray(media) && media.length <= 8 && media.every((m) => m && /^[a-z][a-z0-9_]{0,23}$/.test(m.id) && ['image', 'video'].includes(m.kind)
+    && Number.isInteger(m.width) && Number.isInteger(m.height) && m.width > 0 && m.height > 0 && m.width <= 10000 && m.height <= 10000
+    && (m.kind === 'image' || (Number.isFinite(m.duration) && m.duration > 0)) && typeof m.description === 'string' && m.description.length <= 300);
+}
+
+function prompt({ prompt: idea, engine, previous, error, originalPrompt, history, style, creativePlan, visualFeedback, media }) {
   const latest = String(idea || '').slice(0, 2000);
   const original = typeof originalPrompt === 'string' && originalPrompt.trim()
     ? originalPrompt.slice(0, 2000) : latest;
@@ -118,7 +132,9 @@ function prompt({ prompt: idea, engine, previous, error, originalPrompt, history
   const codeContext = previous
     ? `\n\n${error ? `The current implementation failed with this error: ${JSON.stringify(String(error).slice(0, 800))}\nCorrect the failure while preserving the user's brief and changes.\n` : 'Revise the current implementation according to the latest request.\n'}Current implementation (may contain mistakes or invented text):\n${String(previous)}\nReturn the whole corrected implementation.`
     : '';
-  return `${RULES[engine]}\n\n${ART_DIRECTION}\n\n${styleReference(style)}\n\nReturn only the complete code, in one fenced code block. Keep the implementation concise and avoid lengthy comments.\n\n${request}${creativePlan ? `\n\nPrivate production plan (not on-screen copy; the user brief takes priority). Keep each text block fully inside its planned box for its entire visible lifetime, including entrances and exits. Do not cross text with a line or foreground graphic, and do not crop text. Follow the planned positions and spacing:\n${creativePlan}` : ''}${review}${codeContext}`;
+  // Styled briefs only: the no-style path stays as it is (its outputs were the favorites).
+  const palette = style ? '\n\nPalette: within this style, pick colors that fit the topic or brand (its known colors when it names one) rather than copying the reference palette for every video; keep them consistent across scenes.' : '';
+  return `${RULES[engine]}\n\n${ART_DIRECTION}\n\n${styleReference(style)}${palette}\n\nReturn only the complete code, in one fenced code block. Keep the implementation concise and avoid lengthy comments.\n\n${request}${engine === 'canvas' ? mediaBlock(media) : ''}${creativePlan ? `\n\nPrivate production plan (not on-screen copy; the user brief takes priority). Keep each text block fully inside its planned box for its entire visible lifetime, including entrances and exits. Do not cross text with a line or foreground graphic, and do not crop text. Follow the planned positions and spacing:\n${creativePlan}` : ''}${review}${codeContext}`;
 }
 
 /** The code inside the answer's first fenced block, or the whole answer when there is none. */
@@ -157,7 +173,8 @@ async function callModel(instruction, maxTokens, signal, pick, tally) {
     const {response, data:answer} = await requestProvider('https://openrouter.ai/api/v1/chat/completions', {
       method:'POST',
       headers:{Authorization:`Bearer ${motionKey()}`, 'Content-Type':'application/json', 'HTTP-Referer':'https://relioclips.com', 'X-Title':'Relio Clips'},
-      body:JSON.stringify({model:pick.id, max_tokens:maxTokens, reasoning:reasoningFor(pick), provider:PROVIDER, messages:[{role:'user',content:instruction}]}),
+      // Styled runs only: models without a level setting (MiMo) got an uncapped "medium" and could spend the whole output on reasoning, returning no code; a budget leaves room to write it.
+      body:JSON.stringify({model:pick.id, max_tokens:maxTokens, reasoning:pick.effort || !pick.cap ? reasoningFor(pick) : {max_tokens:Math.max(2000, Math.round(maxTokens / 3)), exclude:true}, provider:PROVIDER, messages:[{role:'user',content:instruction}]}),
     }, {signal});
     if (!response.ok || !answer.choices?.length) throw new HttpError(502, `The model provider: ${answer.error?.message || `HTTP ${response.status}`}`);
     addUsage(tally, answer.usage);
@@ -197,15 +214,16 @@ module.exports = async (req, res) => {
     if (body.seconds !== undefined && ![6, 10, 15].includes(body.seconds)) throw new HttpError(400, 'Unknown video length.');
     // A length chosen in the page; a duration the brief itself names still wins, as every explicit choice does.
     const length = body.seconds ? `\n\nLength: make the video ${body.seconds} seconds long, unless the brief names another duration.` : '';
+    if (body.media !== undefined && !validMedia(body.media)) throw new HttpError(400, 'The uploaded media list could not be read.');
     if (typeof body.prompt !== 'string' || !body.prompt.trim()) throw new HttpError(400, 'Describe the video first.');
     if (body.prompt.length > 2000) throw new HttpError(400, 'Keep your message to 2,000 characters or fewer.');
     if (typeof body.originalPrompt === 'string' && body.originalPrompt.length > 2000) throw new HttpError(400, 'Keep the original brief to 2,000 characters or fewer.');
     if (body.visualFeedback !== undefined && (typeof body.visualFeedback !== 'string' || body.visualFeedback.length > 2000 || !body.previous)) throw new HttpError(400, 'Invalid visual review feedback.');
     if (body.previous != null && (typeof body.previous !== 'string' || body.previous.length > 100000)) throw new HttpError(413, 'The existing video code is too large to revise.');
-    const choice = pickModel(body, MODEL), tally = newTally();
+    const choice = {...pickModel(body, MODEL), cap: Boolean(body.style)}, tally = newTally();
     // Planning can use its own model (the page's per-step defaults); without one it uses the code model.
     if (body.plan !== undefined && (typeof body.plan !== 'object' || body.plan === null)) throw new HttpError(400, 'Invalid planning model.');
-    const planChoice = body.plan ? pickModel(body.plan, choice.id) : choice, planTally = newTally();
+    const planChoice = body.plan ? {...pickModel(body.plan, choice.id), cap: true} : choice, planTally = newTally();
     const cancellation = new AbortController();
     res.once?.('close', () => { if (!res.writableEnded) cancellation.abort(); });
     const started = Date.now();
@@ -216,7 +234,7 @@ module.exports = async (req, res) => {
       const reference = fs.readFileSync(path.join(__dirname, '_motion-styles', config.file), 'utf8');
       const styleCard = reference.slice(reference.indexOf('STYLE CARD'), reference.indexOf('H HELPER LIBRARY'));
       const earlier = Array.isArray(body.history) ? body.history.filter((item) => item?.role === 'user' && typeof item.content === 'string').slice(-8).map((item) => item.content.slice(0, 2000)) : [];
-      const planningPrompt = forFormat(`You are a motion-design director. Produce a concise production plan for a short 9:16 animation. This plan will be used by a code generator, not shown on screen.\nOriginal user brief: ${JSON.stringify(body.originalPrompt || body.prompt)}\nEarlier user changes: ${JSON.stringify(earlier)}\nLatest request: ${JSON.stringify(body.prompt)}\nSelected reference style:\n${styleCard}\n\nPlan 2–4 timed beats with a specific subject-relevant visual composition, its motion, transitions and exact visible words for each. Define how the first frame is already visually engaging and the ending resolves. Give concrete layout and scale, not vague adjectives, random decoration, or invented claims. Treat qualitative feedback as direction, never literal text. The user's explicit wording, requested duration and colors override the style example. When exact words are supplied, do not invent any other visible words. The reference example is a style reference, not a script; do not borrow its topic or props unless relevant. Use only artwork the generator can draw with code; no photographs, external assets, sound, or unsupported libraries. Avoid generic title cards. Give each visible text block and each foreground decorative graphic a bounding box using normalized frame coordinates 0 to 1. Text boxes must remain inside x=0.06 to 0.94 and y=0.08 to 0.92, and stay at least 0.015 apart from other text and foreground graphics. Do not put a rule, line or shape through text. A full-frame background is not a foreground decoration. Keep text in its safe box throughout transitions, do not crop headlines. Output only valid JSON with this shape: {"duration":8,"beats":[{"start":0,"end":2,"visual":"...","motion":"...","text":[{"content":"...","box":{"x":0.1,"y":0.3,"w":0.8,"h":0.1}}],"decorations":[{"x":0.2,"y":0.6,"w":0.6,"h":0.02}]}]}. The decorations array contains bounding box objects directly, never strings or nested boxes. If there are no foreground lines or shapes, use an empty decorations array. All four coordinates are numbers. Use 2–4 beats; they must start at zero, be continuous and finish exactly at duration. Duration must be between 4 and 15 seconds. Include no markdown or code.`, body.format) + length;
+      const planningPrompt = forFormat(`You are a motion-design director. Produce a concise production plan for a short 9:16 animation. This plan will be used by a code generator, not shown on screen.\nOriginal user brief: ${JSON.stringify(body.originalPrompt || body.prompt)}\nEarlier user changes: ${JSON.stringify(earlier)}\nLatest request: ${JSON.stringify(body.prompt)}\nSelected reference style:\n${styleCard}\n\nPlan 2–4 timed beats with a specific subject-relevant visual composition, its motion, transitions and exact visible words for each. Define how the first frame is already visually engaging and the ending resolves. Give concrete layout and scale, not vague adjectives, random decoration, or invented claims. Treat qualitative feedback as direction, never literal text. The user's explicit wording, requested duration and colors override the style example. When exact words are supplied, do not invent any other visible words. The reference example is a style reference, not a script; do not borrow its topic or props unless relevant. Use only artwork the generator can draw with code${body.media?.length ? ` plus the user's own uploads: ${JSON.stringify(body.media.map((m) => `${m.id} (${m.kind}): ${m.description}`))}` : ''}; no other photographs, external assets, sound, or unsupported libraries. Avoid generic title cards. Give each visible text block and each foreground decorative graphic a bounding box using normalized frame coordinates 0 to 1. Text boxes must remain inside x=0.06 to 0.94 and y=0.08 to 0.92, and stay at least 0.015 apart from other text and foreground graphics. Do not put a rule, line or shape through text. A full-frame background is not a foreground decoration. Keep text in its safe box throughout transitions, do not crop headlines. Output only valid JSON with this shape: {"duration":8,"beats":[{"start":0,"end":2,"visual":"...","motion":"...","text":[{"content":"...","box":{"x":0.1,"y":0.3,"w":0.8,"h":0.1}}],"decorations":[{"x":0.2,"y":0.6,"w":0.6,"h":0.02}]}]}. The decorations array contains bounding box objects directly, never strings or nested boxes. If there are no foreground lines or shapes, use an empty decorations array. All four coordinates are numbers. Use 2–4 beats; they must start at zero, be continuous and finish exactly at duration. Duration must be between 4 and 15 seconds. Include no markdown or code.`, body.format) + length;
       let plan, problem = '';
       const planStarted = Date.now();
       try {
