@@ -202,7 +202,8 @@ test('instructions follow the chosen format', () => {
 
 test('uploaded media reaches the canvas prompt as MEDIA entries, and a bad list is refused', async () => {
   const media = [{id:'xbox', kind:'image', width:1200, height:800, description:'A black Xbox Series X on a desk.'}, {id:'ps5', kind:'video', width:1920, height:1080, duration:6.5, description:'A PlayStation 5 rotating on a turntable.'}];
-  const text = await request({engine:'canvas', prompt:'Compare Xbox vs PlayStation with my shots', media});
+  // Hand-written code is still revised as code; new videos go through the kit (tested below).
+  const text = await request({engine:'canvas', prompt:'Compare Xbox vs PlayStation with my shots', media, previous:'const scene = {};'});
   assert.match(text, /MEDIA\.xbox: image, 1200x800\. A black Xbox/);
   assert.match(text, /MEDIA\.ps5: video, 1920x1080, 6\.5 s/);
   assert.doesNotMatch(await request({engine:'remotion', prompt:'x', media}), /MEDIA\./);
@@ -215,9 +216,9 @@ test('uploaded media reaches the canvas prompt as MEDIA entries, and a bad list 
 });
 
 test('styled briefs cap reasoning and get a palette hint; the no-style prompt has neither', async () => {
-  const styled = await request({engine:'canvas', prompt:'How vaccines work', style:'flat-vector-science'});
+  const styled = await request({engine:'canvas', prompt:'How vaccines work', style:'flat-vector-science', previous:'const scene = {};'});
   assert.match(styled, /Palette: within this style/);
-  assert.doesNotMatch(await request({engine:'canvas', prompt:'How vaccines work'}), /Palette: within this style/);
+  assert.doesNotMatch(await request({engine:'canvas', prompt:'How vaccines work', previous:'const scene = {};'}), /Palette: within this style/);
 });
 
 test('stronger models get the fuller style reference; composition rules only apply to styled briefs', () => {
@@ -229,4 +230,33 @@ test('stronger models get the fuller style reference; composition rules only app
   }
   assert.match(prompt({prompt: 'x', engine: 'canvas', style: 'shadow-puppet-theatre'}), /fill the frame/);
   assert.doesNotMatch(prompt({prompt: 'x', engine: 'canvas'}), /fill the frame/);
+});
+
+test('a new canvas video is designed from the kit: the model returns a spec, the reply is Kit.build code', async () => {
+  const oldFetch = global.fetch, oldKey = process.env.MOTION_OPENROUTER_API_KEY;
+  const sent = [];
+  process.env.MOTION_OPENROUTER_API_KEY = 'local-test-key';
+  const spec = {duration: 8, theme: 'neon', font: {head: 'Anton', body: 'Comic Sans'}, scenes: [{seconds: 4, transition: 'zoom', decor: ['orbits', 'lasers'], blocks: [{type: 'headline', text: 'MAKE IT *MOVE*'}, {type: 'hologram'}, {type: 'media', id: 'nope'}]}, {seconds: 4, blocks: [{type: 'media', id: 'xbox'}]}]};
+  global.fetch = async (url, init) => { sent.push(JSON.parse(init.body).messages[0].content); return {ok: true, text: async () => JSON.stringify({choices: [{finish_reason: 'stop', message: {content: sent.length === 1 ? 'Sure! Here it is' : JSON.stringify(spec)}}]})}; };
+  const media = [{id: 'xbox', kind: 'image', width: 1200, height: 800, description: 'A black Xbox.'}];
+  const req = {method: 'POST', headers: {host: 'localhost:4173'}, async *[Symbol.asyncIterator]() { yield JSON.stringify({engine: 'canvas', prompt: 'An opening title', style: 'watercolor-wash', format: '16:9', media}); }};
+  const res = {setHeader() {}, end(value) { this.body = value; }};
+  try { await handler(req, res); } finally { global.fetch = oldFetch; if (oldKey === undefined) delete process.env.MOTION_OPENROUTER_API_KEY; else process.env.MOTION_OPENROUTER_API_KEY = oldKey; }
+  // An unreadable first answer is sent back once with the problem.
+  assert.equal(sent.length, 2);
+  assert.match(sent[0], /You do not write code/);
+  assert.match(sent[0], /use "theme": "paper"/);
+  assert.match(sent[0], /id "xbox" \(image\)/);
+  assert.match(sent[1], /could not be used/);
+  const {code} = JSON.parse(res.body);
+  assert.ok(code.startsWith('const scene = Kit.build('));
+  const out = JSON.parse(code.slice('const scene = Kit.build('.length, -2));
+  // The chosen style sets the look, the format sets the size, and unknown names are dropped.
+  assert.deepEqual([out.theme, out.width, out.height], ['paper', 1920, 1080]);
+  assert.deepEqual(out.font, {head: 'Anton'});
+  assert.deepEqual(out.scenes[0].decor, ['orbits']);
+  assert.deepEqual(out.scenes[0].blocks.map((b) => b.type), ['headline']);
+  assert.equal(out.scenes[1].blocks[0].id, 'xbox');
+  // The library accepts the spec.
+  assert.equal(require('../motion/kit.js').build(out).duration, 8);
 });

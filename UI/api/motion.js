@@ -2,6 +2,7 @@
 // the Motion key (MOTION_OPENROUTER_API_KEY, see _motion-provider.js); the live site refuses, so nothing here costs money or leaks a key in production.
 //   POST { prompt, engine, originalPrompt?, history?, previous?, error? } -> { code }
 const { HttpError, send, fail } = require('./_lib');
+const {isKit, kitPrompt, normalize} = require('./_motion-kit');
 const {modelsFor, requestProvider, motionKey, PROVIDER, assertLocal, readJson, pickModel, reasoningFor, newTally, addUsage, logRun} = require('./_motion-provider');
 const fs = require('fs');
 const path = require('path');
@@ -241,6 +242,20 @@ module.exports = async (req, res) => {
     res.once?.('close', () => { if (!res.writableEnded) cancellation.abort(); });
     const started = Date.now();
     run = {kind: body.visualFeedback ? 'correction' : body.error ? 'repair' : body.previous ? 'revision' : 'generation', choice, tally, started, style: body.style || null};
+    // New videos, and changes to them, are designed from the kit (motion/kit.js): the model picks ready-made pieces and
+    // writes no drawing code. Hand-written or older code is still revised the old way below.
+    if (body.engine === 'canvas' && (!body.previous || isKit(body.previous))) {
+      let made = null, answer, problem = '';
+      for (let attempt = 0; attempt < 2 && !made?.code; attempt++) {
+        answer = await callWithLengthRetry(kitPrompt(body) + (problem ? `\n\nYour last answer could not be used: ${problem}` : ''), 6000, 12000, 'designing the video', cancellation.signal, choice, tally);
+        made = normalize(answer.code, {format: FORMATS[body.format || '9:16'], style: body.style, media: body.media});
+        problem = made.problem;
+      }
+      if (!made.code) throw new HttpError(502, 'The video design could not be read. Please try again.');
+      logRun({...run, started: undefined, ms: Date.now() - started, provider: answer.provider, kit: true});
+      run = null;
+      return send(res, 200, {code: made.code, model: answer.model, provider: answer.provider, usd: tally.usdKnown ? tally.usd : null, ms: Date.now() - started});
+    }
     let planResult = null;
     if (body.style && !body.previous) {
       const config = STYLE_FILES[body.style];

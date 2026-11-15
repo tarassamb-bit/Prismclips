@@ -15,7 +15,7 @@ let originalPrompt = '', history = [], pendingBrief = null;
 let previewShown = false, reviewPass = 0, frameRequest = null, frameRequestId = 0, runToken = 0, workController = null;
 
 const canvasRunner = () => `<!doctype html><html><head><style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block}</style></head>
-<body><canvas id="c" width="${W}" height="${H}"></canvas><script>
+<body><canvas id="c" width="${W}" height="${H}"></canvas><script src="/motion/kit.js"></script><script>
 const c = document.getElementById('c'), ctx = c.getContext('2d');
 let scene = null, playing = false, startAt = 0, currentTime = 0, lastUpdate = 0, pending = null, exportCancelled = false;
 const say = (m, t) => parent.postMessage(m, '*', t || []);
@@ -46,6 +46,7 @@ addEventListener('message', async (event) => {
       await loadMedia(m.media);
       scene = new Function(m.code + '\\n;return typeof scene === "undefined" ? undefined : scene;')();
       if (!scene || typeof scene.draw !== 'function') throw new Error('The code must define const scene = { width, height, fps, duration, draw(ctx, t) }.');
+      if (scene.ready) await scene.ready; // kit videos wait for their fonts
       scene.fps = Math.min(60, Math.max(12, Number(scene.fps) || 30));
       if (!(scene.duration > 0 && scene.duration <= 60)) throw new Error('scene.duration must be between 0 and 60 seconds.');
       // Every part of the video runs once now, so a crash shows before playback, not halfway through an export.
@@ -633,10 +634,12 @@ addEventListener('message', async (event) => {
         reviewThumb = frames[Math.floor(frames.length / 2)]?.image ?? null;
         if (token !== runToken) return;
         const stillIssues = (frames.still || []).map(([from, to]) => `From ${from.toFixed(1)}s to ${to.toFixed(1)}s almost nothing moves: keep something animating the whole time.`);
-        const issues = [...stillIssues, ...await reviewFrames(frames, reference)].slice(0, 4);
+        // Kit videos are laid out and animated by the library, so the paid frame check has nothing to fix.
+        const kitVideo = code.trimStart().startsWith('const scene = Kit.build(');
+        const issues = kitVideo ? [] : [...stillIssues, ...await reviewFrames(frames, reference)].slice(0, 4);
         if (token !== runToken) return;
         // Every new video gets one polish pass (the test's best setup), fixing any issues the check found.
-        if (reviewPass === 1 && pendingBrief) {
+        if (reviewPass === 1 && pendingBrief && !kitVideo) {
           showThinking(issues.length ? 'Fixing issues found in the video' : 'Polishing your video');
           const polish = 'Second pass: make this video much better. Add detail and craft to every illustration and the background, fill empty areas of the frame, make the visual story clearer, and keep something moving at every moment. Keep the exact text and its order.';
           const correction = await generate({previous:code, visualFeedback:[...issues, polish].join('\n')});
