@@ -36,6 +36,17 @@ assert.deepEqual(calls.map((c) => c[0]), ['upload', 'finish']);
 assert.deepEqual(puts, ['https://r2.test/put']);
 assert.deepEqual(progress, [0.5]);
 
+// Cancellation after obtaining a signed URL must not start a PUT (even if the API mock ignores abort).
+{
+  const controller = new AbortController();
+  reset([200, { url: 'https://r2.test/put', evicted: [] }]);
+  await assert.rejects(uploadVideo({
+    token: async () => { controller.abort(); return 'fixture-only'; }, media, file, askRoom: never, signal: controller.signal,
+  }), { name: 'AbortError' });
+  assert.deepEqual(puts, []);
+  assert.deepEqual(calls.map((c) => c[0]), ['upload']);
+}
+
 // Already stored (the same file in another project): nothing is sent.
 reset([200, { already: true, evicted: [] }]);
 assert.deepEqual(await uploadVideo({ token, media, file, askRoom: never }), { bytes: 300, evicted: [], already: true });

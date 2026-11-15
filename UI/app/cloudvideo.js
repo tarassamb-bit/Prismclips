@@ -29,6 +29,7 @@ async function api(action, body, token, signal) {
 
 /** Sends the file to a signed link with upload progress (fetch can't report it). */
 function put(url, file, onProgress, signal) {
+  signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
     request.open('PUT', url);

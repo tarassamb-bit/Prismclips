@@ -28,6 +28,7 @@ export async function openSource(file) {
     if (!Number.isFinite(duration) || duration <= 0) throw new ShortMakerError('noVideo');
     return { file, input, video, audio: hasAudio ? audio : null, duration, width: video.displayWidth, height: video.displayHeight, hasAudio };
   } catch (error) {
+    input.dispose();
     if (error instanceof ShortMakerError) throw error;
     throw new ShortMakerError('noVideo');
   }

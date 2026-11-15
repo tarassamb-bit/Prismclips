@@ -395,7 +395,7 @@ export async function transcribe(source, interval, configuration, { progress, gr
   const results = new Array(chunks.length).fill(null);
   let done = 0, handedBack = 0;
   progress?.(0);
-  await map(chunks, (chunk, token) => transcribeChunk(source, chunk.start, chunk.length, granularity, reference, configuration, token), signal, PARALLEL_REQUESTS, (index, words) => {
+  await map(chunks, (chunk, token) => transcribeChunk(source, chunk.start, chunk.length, granularity, reference, configuration, token), signal, PARALLEL_REQUESTS, async (index, words) => {
     results[index] = words;
     done += chunks[index].length;
     progress?.(Math.min(1, done / total));
@@ -403,7 +403,7 @@ export async function transcribe(source, interval, configuration, { progress, gr
     while (prefix < chunks.length && results[prefix] !== null) prefix++;
     if (prefix <= handedBack) return;
     handedBack = prefix;
-    finished?.(results.slice(0, prefix).flat(), chunks[prefix - 1].start + chunks[prefix - 1].length);
+    await finished?.(results.slice(0, prefix).flat(), chunks[prefix - 1].start + chunks[prefix - 1].length);
   });
   const words = results.flat();
   if (granularity !== 'words' || words.length === 0) return words;

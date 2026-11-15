@@ -8,6 +8,16 @@ import { EXPORT_QUALITIES } from './models.js';
 
 const FPS = 30;
 
+/** Keep only PCM frames inside the edit, then express their timestamp relative to its start. */
+export function trimAudioSample(sample, start, duration) {
+  const first = Math.max(0, Math.ceil((start - sample.timestamp) * sample.sampleRate - 1e-7));
+  const end = Math.min(sample.numberOfFrames, Math.floor((start + duration - sample.timestamp) * sample.sampleRate + 1e-7));
+  if (end <= first) return null;
+  const trimmed = sample.trim(first, end);
+  trimmed.setTimestamp(Math.max(0, trimmed.timestamp - start));
+  return trimmed;
+}
+
 /** The camera's left edge in source pixels for one time: the eased path, offset by the framing bias, holding until each scene cut. */
 export function cropPositionAt(path, time, bias) {
   const points = path.map((p) => ({ ...p, position: Math.min(1, Math.max(0, p.position + bias)) }));
@@ -137,6 +147,7 @@ export function drawFrame(ctx, sample, segment, sourceWidth, sourceHeight, time,
  */
 export async function render(source, segment, options) {
   const { width = 1080, height = 1920, codec = 'avc', bitrate = 12e6, metadata = {}, progress = () => {}, step = () => {}, signal } = options;
+  signal?.throwIfAborted();
   if (![segment.start, segment.duration].every(Number.isFinite) || segment.start < 0 || segment.duration <= 0 || segment.start + segment.duration > source.duration + 0.05) {
     throw new ShortMakerError('invalidRange');
   }
@@ -148,6 +159,7 @@ export async function render(source, segment, options) {
     throw new ShortMakerError('cannotExport', codec === 'hevc' ? "This browser can't encode HEVC; choose 1080p · H.264." : 'This browser cannot encode H.264 video.');
   }
   const bars = await letterbox(source, segment.start, segment.duration);
+  signal?.throwIfAborted();
   // Layout and captions are drawn in 1080×1920 units and scaled onto the output canvas.
   const canvas = new OffscreenCanvas(width, height);
   const ctx = canvas.getContext('2d');
@@ -160,60 +172,76 @@ export async function render(source, segment, options) {
   const keepAudio = segment.isMuted !== true && source.audio;
   const audioSource = keepAudio ? new AudioSampleSource({ codec: 'aac', bitrate: 160_000 }) : null;
   if (audioSource) output.addAudioTrack(audioSource);
-  step('starting the encoder');
-  await output.start();
-  step('reading the first frame');
   const count = Math.max(1, Math.round(segment.duration * FPS));
   const start = segment.start;
   const cancelled = () => signal?.throwIfAborted();
   const emit = async (sample, index) => {
+    cancelled();
     const time = index / FPS;
     ctx.setTransform(width / 1080, 0, 0, height / 1920, 0, 0);
     drawFrame(ctx, sample, segment, source.width, source.height, time, bars);
     drawCaptions(ctx, layers, time);
     await videoSource.add(time, 1 / FPS);
+    cancelled();
     progress(Math.min(1, (index + 1) / count));
+    cancelled();
   };
   const videoSink = new VideoSampleSink(source.video);
   let next = 0, previous = null;
   try {
+    step('starting the encoder');
+    cancelled();
+    await output.start();
+    step('reading the first frame');
+    cancelled();
     // Output frame k shows the latest decoded frame at or before its time.
     for await (const sample of videoSink.samples(start, start + segment.duration)) {
-      cancelled();
-      const at = sample.timestamp - start;
-      while (next < count && next / FPS < at) {
-        await emit(previous ?? sample, next);
-        next++;
+      try {
+        cancelled();
+        const at = sample.timestamp - start;
+        while (next < count && next / FPS < at) {
+          await emit(previous ?? sample, next);
+          next++;
+        }
+      } catch (error) {
+        sample.close();
+        throw error;
       }
       previous?.close();
       previous = sample;
     }
     while (next < count && previous) { await emit(previous, next); next++; }
-    previous?.close();
+    previous?.close(); previous = null;
     if (next === 0) throw new ShortMakerError('noVideo');
     if (audioSource) {
       step('adding the sound');
       const audioSink = new AudioSampleSink(source.audio);
       for await (const sample of audioSink.samples(start, start + segment.duration)) {
-        cancelled();
-        // Stop at the Short's end; a sample that starts just before its start is moved to 0.
-        if (sample.timestamp - start >= segment.duration) { sample.close(); break; }
-        const copy = sample.clone();
-        copy.setTimestamp(Math.max(0, sample.timestamp - start));
-        await audioSource.add(copy);
-        copy.close();
-        sample.close();
+        let copy;
+        try {
+          cancelled();
+          copy = trimAudioSample(sample, start, segment.duration);
+          if (copy) await audioSource.add(copy);
+          cancelled();
+        } finally {
+          copy?.close();
+          sample.close();
+        }
       }
     }
     videoSource.close();
     audioSource?.close();
     step('finishing the file');
+    cancelled();
     await output.finalize();
+    cancelled();
   } catch (error) {
     await output.cancel().catch(() => {});
     if (error instanceof ShortMakerError) throw error;
     if (signal?.aborted) throw error;
     throw new ShortMakerError('cannotExport', error?.message);
+  } finally {
+    previous?.close();
   }
   return new Blob([output.target.buffer], { type: 'video/mp4' });
 }

@@ -58,7 +58,7 @@ export async function analyze(source, configuration_, options) {
       progress(0.55 * overall, `Relio AI · transcribing audio · ${Math.floor(overall * 100)}%`);
     }, (cues, end) => onTranscript({ start: interval.start, end, cues: [...keptCues, ...cues], language }), signal);
     transcript = [...keptCues, ...fresh];
-    onTranscript({ start: interval.start, end: interval.end, cues: transcript, language });
+    await onTranscript({ start: interval.start, end: interval.end, cues: transcript, language });
   }
   progress(0.55, 'Selecting distinct moments');
   if (videoType === 'auto') {

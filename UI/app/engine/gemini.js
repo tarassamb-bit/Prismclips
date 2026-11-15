@@ -199,7 +199,7 @@ export async function map(items, transform, signal, limit = 6, onEach) {
         const index = next++;
         linked.throwIfAborted();
         results[index] = await transform(items[index], linked);
-        onEach?.(index, results[index]);
+        await onEach?.(index, results[index]);
       }
     } catch (error) {
       // Only a stop caused by another worker's failure is skipped.
