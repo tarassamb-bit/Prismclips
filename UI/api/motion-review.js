@@ -1,6 +1,6 @@
 // Reviews only the generated video frames and user brief. Local development only.
 const {HttpError, send, fail} = require('./_lib');
-const {requestProvider, motionKey, PROVIDER, assertLocal, readJson, pickModel, reasoningFor, newTally, addUsage, logRun} = require('./_motion-provider');
+const {modelsFor, requestProvider, motionKey, PROVIDER, assertLocal, readJson, pickModel, reasoningFor, newTally, addUsage, logRun} = require('./_motion-provider');
 const MODEL = process.env.MOTION_REVIEW_MODEL || 'xiaomi/mimo-v2.6-flash';
 module.exports = async (req, res) => {
   let choice = null, tally = newTally(), started = Date.now();
@@ -21,7 +21,7 @@ module.exports = async (req, res) => {
         const {response, data:payload} = await requestProvider('https://openrouter.ai/api/v1/chat/completions', {
           method:'POST',
           headers:{Authorization:`Bearer ${motionKey()}`,'Content-Type':'application/json','HTTP-Referer':'https://relioclips.com','X-Title':'Relio Clips'},
-          body:JSON.stringify({model:choice.id, max_tokens:attempt ? maxTokens*2 : maxTokens, reasoning:reasoningFor(choice), provider:PROVIDER,messages:[{role:'user',content:[{type:'text',text},{type:'image_url',image_url:{url:image}}]}]}),
+          body:JSON.stringify({model:choice.id, models:modelsFor(choice.id), max_tokens:attempt ? maxTokens*2 : maxTokens, reasoning:reasoningFor(choice), provider:PROVIDER,messages:[{role:'user',content:[{type:'text',text},{type:'image_url',image_url:{url:image}}]}]}),
         }, {signal:cancellation.signal});
         if (!response.ok || !payload.choices?.length) throw new HttpError(502, `The visual review provider: ${payload.error?.message || `HTTP ${response.status}`}`);
         addUsage(tally, payload.usage);

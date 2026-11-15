@@ -32,3 +32,9 @@ test('a planning model outside the list is refused before any model call', async
   assert.equal(res.statusCode, 400);
   assert.match(JSON.parse(res.body).error, /Unknown model/);
 });
+
+test('a model with a backup lists both, in order', () => {
+  const {modelsFor} = require('./_motion-provider');
+  assert.deepEqual(modelsFor('openai/gpt-6-luna-pro'), ['openai/gpt-6-luna-pro', 'openai/gpt-6-luna']);
+  assert.deepEqual(modelsFor('meta/muse-ember'), ['meta/muse-ember']);
+});

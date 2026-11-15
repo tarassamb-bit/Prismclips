@@ -119,4 +119,7 @@ async function requestProvider(url, init, {signal, delays = [1000, 3000], fetche
     await sleep(delays[attempt]);
   }
 }
-module.exports = {requestProvider, motionKey, PROVIDER, assertLocal, readJson, MODELS, pickModel, reasoningFor, newTally, addUsage, logRun};
+// OpenRouter tries the listed backup model when the first one errors or is down.
+const modelsFor = (id) => [id, MODELS.find((m) => m.id === id)?.fallback].filter(Boolean);
+
+module.exports = {modelsFor, requestProvider, motionKey, PROVIDER, assertLocal, readJson, MODELS, pickModel, reasoningFor, newTally, addUsage, logRun};

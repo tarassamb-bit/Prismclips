@@ -302,8 +302,9 @@ const STEPS = [['code', 'Writing the code'], ['plan', 'Planning'], ['check', 'Ch
 const EFFORTS = [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']];
 const modelButton = $('#model-button'), modelMenu = $('#model-menu'), modelSub = $('#model-sub');
 let models = [], picked = 'default', effort = 'medium', sub = null;
-// Relio picks the models: GPT-6 Luna Pro was the best cheap model in the 20-model test (Nov 2026), for every step.
-let defaults = { code: 'openai/gpt-6-luna-pro', plan: 'openai/gpt-6-luna-pro', check: 'openai/gpt-6-luna-pro' };
+// Relio picks the models: GPT-6 Luna Pro writes and polishes (best cheap coder in the Nov 2026 test); cheap MiMo plans and checks frames.
+// Each has a backup model in models.json.
+let defaults = { code: 'openai/gpt-6-luna-pro', plan: 'xiaomi/mimo-v2.6-flash', check: 'xiaomi/mimo-v2.6-flash' };
 const remember = (key, value) => { try { localStorage.setItem(key, value); } catch {} };
 const recall = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
 const stepModel = (step) => models.find((m) => m.id === (picked === 'default' ? defaults[step] : picked));

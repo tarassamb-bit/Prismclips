@@ -2,7 +2,7 @@
 // the Motion key (MOTION_OPENROUTER_API_KEY, see _motion-provider.js); the live site refuses, so nothing here costs money or leaks a key in production.
 //   POST { prompt, engine, originalPrompt?, history?, previous?, error? } -> { code }
 const { HttpError, send, fail } = require('./_lib');
-const {requestProvider, motionKey, PROVIDER, assertLocal, readJson, pickModel, reasoningFor, newTally, addUsage, logRun} = require('./_motion-provider');
+const {modelsFor, requestProvider, motionKey, PROVIDER, assertLocal, readJson, pickModel, reasoningFor, newTally, addUsage, logRun} = require('./_motion-provider');
 const fs = require('fs');
 const path = require('path');
 
@@ -177,7 +177,7 @@ async function callModel(instruction, maxTokens, signal, pick, tally) {
       method:'POST',
       headers:{Authorization:`Bearer ${motionKey()}`, 'Content-Type':'application/json', 'HTTP-Referer':'https://relioclips.com', 'X-Title':'Relio Clips'},
       // Styled runs only: models without a level setting (MiMo) spent the whole output on reasoning and returned no code; a reasoning max_tokens budget was ignored (18k of 24k), so reasoning is off.
-      body:JSON.stringify({model:pick.id, max_tokens:maxTokens, reasoning:pick.effort || !pick.cap ? reasoningFor(pick) : {enabled:false}, provider:PROVIDER, messages:[{role:'user',content:instruction}]}),
+      body:JSON.stringify({model:pick.id, models:modelsFor(pick.id), max_tokens:maxTokens, reasoning:pick.effort || !pick.cap ? reasoningFor(pick) : {enabled:false}, provider:PROVIDER, messages:[{role:'user',content:instruction}]}),
     }, {signal});
     if (!response.ok || !answer.choices?.length) throw new HttpError(502, `The model provider: ${answer.error?.message || `HTTP ${response.status}`}`);
     addUsage(tally, answer.usage);
