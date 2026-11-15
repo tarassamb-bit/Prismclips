@@ -942,8 +942,9 @@ if (projectId) store.loadProject(projectId).then((project) => {
   $('#engine').value = engine;
   $('#style').value = lastGood.style;
   fitComposerSelect($('#style'));
-  const brief = Object.assign(document.createElement('div'), { className: 'message', textContent: originalPrompt });
-  $('#conversation').append(brief);
+  // A reopened video shows its own brief, not the start-up welcome.
+  $('#conversation .welcome')?.remove();
+  if (originalPrompt) $('#conversation').append(Object.assign(document.createElement('div'), { className: 'message', textContent: originalPrompt }));
   opening = restoring = true;
   setBusy(true);
   showThinking('Opening your video');
