@@ -1,4 +1,5 @@
 [
+  {"id": "anthropic/claude-opus-5.5", "label": "Claude Opus 5.5", "effort": true},
   {"id": "xiaomi/mimo-v2.6-flash", "label": "MiMo-V2.6-Flash", "effort": false},
   {"id": "google/gemini-4-hydrogen", "label": "Gemini 4 Hydrogen", "effort": true},
   {"id": "google/gemini-4-carbon:batch", "label": "Gemini 4 Carbon", "effort": true},

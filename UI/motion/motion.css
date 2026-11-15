@@ -49,11 +49,11 @@
 .frame.wide{height:auto;width:100%;max-height:none}
 
 /* The sidebar is always collapsed; hovering it opens it over the page. */
-@media(min-width:651px){.collapsed .sidebar{position:sticky;top:0;height:100vh;width:64px;z-index:30;overflow:hidden;transition:width .15s}
-.collapsed .sidebar:hover{width:210px;padding-inline:14px;box-shadow:8px 0 24px rgba(0,0,0,.25)}
-.collapsed .sidebar:hover .brand-row{flex-direction:row;gap:8px;padding:0 6px}
-.collapsed .sidebar:hover .brand-name{display:block}
-.collapsed .sidebar:hover .label{display:inline}
-.collapsed .sidebar:hover .side-button{justify-content:flex-start;padding-inline:12px}}
-@media(prefers-reduced-motion:reduce){.collapsed .sidebar{transition:none}}
+@media(min-width:651px){.collapsed .sidebar{position:sticky;top:0;height:100vh;width:64px;z-index:30;overflow:hidden;transition:width .28s cubic-bezier(.2,.8,.2,1),box-shadow .28s}
+.collapsed .sidebar:hover{width:210px;box-shadow:8px 0 24px rgba(0,0,0,.25)}
+.collapsed .brand-row{flex-direction:row;gap:8px;padding:0 0 0 9px}
+.collapsed .brand-name,.collapsed .label{display:inline;white-space:nowrap;opacity:0;transition:opacity .12s}
+.collapsed .sidebar:hover .brand-name,.collapsed .sidebar:hover .label{opacity:1;transition:opacity .2s .1s}
+.collapsed .side-button{justify-content:flex-start;padding-inline:15px;white-space:nowrap}}
+@media(prefers-reduced-motion:reduce){.collapsed .sidebar,.collapsed .brand-name,.collapsed .label{transition:none}}
 .style-preview[data-style=""]{background:linear-gradient(135deg,color-mix(in srgb,var(--sky) 22%,var(--raised)),var(--raised) 60%,color-mix(in srgb,#f5b83f 20%,var(--raised)))}
