@@ -77,7 +77,7 @@ public sealed partial class PrismWindow
         var status = Text("", 12, muted: true);
         async Task SignIn() { await account.SignIn(address.Text, password.Password); if (account.IsSignedIn) password.Clear(); }
         var signIn = Button("Sign in", SignIn, true);
-        var create = Button("Create account", async () => { await account.SignUp(address.Text, password.Password); password.Clear(); });
+        var create = Button("Create account", () => WindowsPlatform.OpenExternal(Account.SignUpPage(address.Text)));
         password.KeyDown += async (_, args) => { if (args.Key == Key.Enter && signIn.IsEnabled) { args.Handled = true; await SignIn(); } };
         body.Children.Add(address); body.Children.Add(hint); body.Children.Add(password); body.Children.Add(status);
         body.Children.Add(Footer(create, signIn));

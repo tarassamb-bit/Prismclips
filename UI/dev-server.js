@@ -9,7 +9,7 @@ const apiDir = path.join(root, 'api');
 const port = Number(process.env.PORT) || 4173;
 const types = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.ttf': 'font/ttf', '.txt': 'text/plain; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.ttf': 'font/ttf', '.woff2': 'font/woff2', '.webp': 'image/webp', '.txt': 'text/plain; charset=utf-8',
   '.xml': 'application/xml', '.webmanifest': 'application/manifest+json', '.ico': 'image/x-icon',
 };
 
@@ -37,7 +37,7 @@ const server = http.createServer(async (req, res) => {
   // Never serve dotfiles (.env.local holds secret keys) or step outside this folder.
   if (pathname.split('/').some((part) => part.startsWith('.'))) return notFound(res);
 
-  // Local stand-in for the AI call: the browser can't reach Prism's AI function directly until it allows browser requests (CORS),
+  // Local stand-in for the AI call: the browser can't reach Relio's AI function directly until it allows browser requests (CORS),
   // so on localhost the app posts here and this server forwards the request, headers and all.
   if (pathname === '/gateway' && req.method === 'POST') {
     const chunks = [];
@@ -52,7 +52,7 @@ const server = http.createServer(async (req, res) => {
       res.end(Buffer.from(await upstream.arrayBuffer()));
     } catch (error) {
       res.statusCode = 502;
-      res.end(JSON.stringify({ error: { message: `The local server could not reach Prism AI: ${error.message}` } }));
+      res.end(JSON.stringify({ error: { message: `The local server could not reach Relio AI: ${error.message}` } }));
     }
     return;
   }
@@ -76,6 +76,8 @@ const server = http.createServer(async (req, res) => {
 
   // Mirrors vercel.json: clean URLs, plus /dashboard_<user id> served by dashboard.html.
   let file = pathname === '/' ? '/index' : /^\/dashboard_[^/]+$/.test(pathname) ? '/dashboard' : pathname;
+  // Vercel serves its analytics scripts only on deployments; locally they are empty.
+  if (pathname.startsWith('/_vercel/')) { res.setHeader('Content-Type', 'application/javascript'); return res.end(''); }
   // Prices are switched off for now: the pricing page sends people to the app, as vercel.json does.
   if (pathname === '/pricing' || pathname === '/pricing.html') { res.statusCode = 307; res.setHeader('Location', '/app'); return res.end(); }
   // The web app has an address per screen (/app/settings/usage, /app/project/...): any of them without a file extension is the app.
@@ -102,4 +104,4 @@ server.on('error', (error) => {
   process.exit(1);
 });
 // Only this Mac can connect: the api/ functions run with the secret keys from .env.local.
-server.listen(port, '127.0.0.1', () => console.log(`Prism site: http://localhost:${port}`));
+server.listen(port, '127.0.0.1', () => console.log(`Relio site: http://localhost:${port}`));

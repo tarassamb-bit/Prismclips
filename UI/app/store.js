@@ -23,14 +23,17 @@ function database() {
   return dbPromise;
 }
 
+/** Safari can fail a transaction with no error object at all; callers always get an Error with a message. */
+const storageError = (error) => (error instanceof Error || error instanceof DOMException ? error : new Error('This browser couldn’t save to its storage.'));
+
 async function run(store, mode, action) {
   const db = await database();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(store, mode);
     const request = action(transaction.objectStore(store));
     transaction.oncomplete = () => resolve(request?.result);
-    transaction.onerror = () => reject(transaction.error);
-    transaction.onabort = () => reject(transaction.error ?? new Error('Storage was interrupted.'));
+    transaction.onerror = () => reject(storageError(transaction.error ?? request?.error));
+    transaction.onabort = () => reject(storageError(transaction.error));
   });
 }
 
@@ -46,8 +49,8 @@ async function update(store, id, change) {
       if (next) objects.put(next);
     };
     transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
-    transaction.onabort = () => reject(transaction.error ?? new Error('Storage was interrupted.'));
+    transaction.onerror = () => reject(storageError(transaction.error ?? read.error));
+    transaction.onabort = () => reject(storageError(transaction.error));
   });
 }
 
@@ -63,39 +66,128 @@ export const listProjects = async () => (await run('projects', 'readonly', (s) =
 export const loadProject = (id) => run('projects', 'readonly', (s) => s.get(id));
 
 /** A change made here. `touch: false` keeps the project's last-changed time, for moves, renames and trashing that don't change its content. */
-export async function saveProject(project, { touch = true } = {}) {
+export async function saveProject(project, { touch = true, isCurrent = null } = {}) {
   const now = new Date().toISOString();
-  await update('projects', project.id, (existing) => ({
-    ...project, ...(touch ? { updated: now } : {}), dirty: true, changedAt: now, syncedAt: existing?.syncedAt ?? project.syncedAt,
-  }));
-  changed();
+  let saved = false;
+  await update('projects', project.id, (existing) => {
+    if (isCurrent && (!existing || !isCurrent())) return null;
+    saved = true;
+    return { ...project, ...(touch ? { updated: now } : {}), dirty: true, changedAt: now, syncedAt: existing?.syncedAt ?? project.syncedAt };
+  });
+  if (saved) changed();
+  return saved;
+}
+
+/** Upload completion changes one media record, never a stale copy of the editor. */
+export async function saveMediaCloud(projectId, mediaId, cloud, isCurrent) {
+  let saved = false;
+  await update('projects', projectId, (record) => {
+    const media = record?.media.find((m) => m.id === mediaId);
+    if (!media || !isCurrent(record)) return null;
+    const now = new Date().toISOString();
+    media.cloud = { ...cloud, at: now };
+    Object.assign(record, { dirty: true, changedAt: now });
+    saved = true;
+    return record;
+  });
+  if (saved) changed();
+  return saved;
+}
+
+/** Patch an existing project only: a delayed checkpoint must never recreate a cancelled/deleted project. */
+export async function saveTranscript(projectId, mediaId, transcript, isCurrent) {
+  let saved = false;
+  await update('projects', projectId, (record) => {
+    if (!record || !isCurrent() || !record.media.some((m) => m.id === mediaId)) return null;
+    const previous = record.transcripts?.[mediaId];
+    if (previous?.start === transcript.start && previous.end > transcript.end) return null;
+    const now = new Date().toISOString();
+    record.transcripts ??= {};
+    record.transcripts[mediaId] = transcript;
+    Object.assign(record, { updated: now, changedAt: now, dirty: true });
+    saved = true;
+    return record;
+  });
+  if (saved) changed();
+}
+
+/** Count committed exports atomically without overwriting edits or reviving a deleted project. */
+export async function addExportCount(projectId, count) {
+  let exported = null;
+  await update('projects', projectId, (record) => {
+    if (!record) return null;
+    const now = new Date().toISOString();
+    exported = (record.exported ?? 0) + count;
+    Object.assign(record, { exported, updated: now, changedAt: now, dirty: true });
+    return record;
+  });
+  if (exported !== null) changed();
+  return exported;
 }
 
 /** A copy that came from the cloud, or a fix-up that isn't a change of content: stored as is, and nothing is queued to sync. */
 export const saveRaw = (store, record) => run(store, 'readwrite', (s) => s.put(record));
+
+// Millisecond timestamps alone cannot distinguish two edits saved in the same tick.
+const sameRevision = (record, expected) => JSON.stringify(record) === JSON.stringify(expected);
+
+/** A network response may only replace the local revision the sync actually compared. */
+export async function applyCloud(kind, record, expected, isCurrent) {
+  let applied = false;
+  await update(kind, record.id, (existing) => {
+    if (!isCurrent()) return null;
+    if (!sameRevision(existing, expected)) return null;
+    applied = true;
+    return record;
+  });
+  return applied;
+}
+
+/** Mirror a cloud deletion only if this device has not edited the item while syncing. */
+export async function dropSynced(kind, expected, isCurrent) {
+  const db = await database();
+  let removed = false;
+  await new Promise((resolve, reject) => {
+    const transaction = db.transaction(kind === 'projects' ? ['projects', 'files'] : ['folders'], 'readwrite');
+    const objects = transaction.objectStore(kind), read = objects.get(expected.id);
+    read.onsuccess = () => {
+      const record = read.result;
+      if (!isCurrent() || !record || record.dirty || !sameRevision(record, expected)) return;
+      objects.delete(record.id);
+      if (kind === 'projects') for (const media of record.media ?? []) transaction.objectStore('files').delete(media.id);
+      removed = true;
+    };
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(storageError(transaction.error ?? read.error));
+    transaction.onabort = () => reject(storageError(transaction.error));
+  });
+  if (removed && kind === 'projects') for (const media of expected.media ?? []) memoryFiles.delete(media.id);
+  return removed;
+}
 export const patch = (store, id, mutate) => update(store, id, (record) => { if (!record) return null; mutate(record); return record; });
 
 /** Marks what was sent as synced, unless it changed again while it was being sent. */
-export const markSynced = (store, id, syncedAt, sentChangedAt) => update(store, id, (record) => {
+export const markSynced = (store, id, syncedAt, sent) => update(store, id, (record) => {
   if (!record) return null;
-  return { ...record, syncedAt, dirty: (record.changedAt ?? null) !== (sentChangedAt ?? null) };
+  return { ...record, syncedAt, dirty: !sameRevision(record, sent) };
 });
 
 export async function deleteProject(project) {
   await run('projects', 'readwrite', (s) => s.delete(project.id));
   for (const media of project.media) {
+    memoryFiles.delete(media.id);
     await run('files', 'readwrite', (s) => s.delete(media.id));
     // A video kept in the account's cloud storage is removed there too, as soon as the cloud can be reached.
     if (media.cloud?.uploaded) forget('videos', `${project.owner}/${media.cloud.key ?? media.id}`);
   }
-  forget('projects', project.id);
+  forget('projects', project.owner ? `${project.owner}/${project.id}` : project.id);
 }
 
 /** Removes a deleted account's projects, videos and folders from this browser. Nothing is queued for the cloud: the account is gone. */
 export async function deleteOwner(owner) {
   for (const project of (await run('projects', 'readonly', (s) => s.getAll())).filter((p) => p.owner === owner)) {
     await run('projects', 'readwrite', (s) => s.delete(project.id));
-    for (const media of project.media) await run('files', 'readwrite', (s) => s.delete(media.id));
+    for (const media of project.media) { memoryFiles.delete(media.id); await run('files', 'readwrite', (s) => s.delete(media.id)); }
   }
   for (const folder of (await run('folders', 'readonly', (s) => s.getAll())).filter((f) => f.owner === owner)) {
     await run('folders', 'readwrite', (s) => s.delete(folder.id));
@@ -111,8 +203,9 @@ export async function saveFolder(folder) {
   changed();
 }
 export async function deleteFolder(id) {
+  const folder = await run('folders', 'readonly', (s) => s.get(id));
   await run('folders', 'readwrite', (s) => s.delete(id));
-  forget('folders', id);
+  forget('folders', folder?.owner ? `${folder.owner}/${id}` : id);
 }
 
 // MARK: Deletions waiting to reach the cloud (kept so a deletion made offline isn't undone by the next sync)
@@ -142,6 +235,23 @@ export function deletionReached(kind, ids) {
 
 // MARK: Video files (device only)
 
-export const saveFile = (id, file) => run('files', 'readwrite', (s) => s.put(file, id));
-export const loadFile = (id) => run('files', 'readonly', (s) => s.get(id));
-export const hasFile = async (id) => (await run('files', 'readonly', (s) => s.count(id))) > 0;
+// Safari Private Browsing refuses to store any Blob in IndexedDB ("Error preparing Blob/File data to be stored in object store"),
+// so a video chosen or downloaded there could never be kept and the project never opened. Such a video is held in memory for
+// this tab instead: the project opens and works until the tab closes, which is all Private Browsing keeps anyway.
+const memoryFiles = new Map();
+export async function deleteFile(id) {
+  await run('files', 'readwrite', (s) => s.delete(id));
+  memoryFiles.delete(id);
+}
+export async function saveFile(id, file) {
+  try {
+    await run('files', 'readwrite', (s) => s.put(file, id));
+    memoryFiles.delete(id);
+  } catch (error) {
+    if (!/Blob\/File data/i.test(error?.message ?? '')) throw error;
+    console.warn('This browser won’t store videos (Safari Private Browsing?); keeping it for this tab only.', error);
+    memoryFiles.set(id, file);
+  }
+}
+export const loadFile = async (id) => memoryFiles.get(id) ?? run('files', 'readonly', (s) => s.get(id));
+export const hasFile = async (id) => memoryFiles.has(id) || (await run('files', 'readonly', (s) => s.count(id))) > 0;

@@ -8,3 +8,8 @@ obj/
 
 # Built update archives, copied in by macOS/scripts/publish-update.sh and deployed with the site
 UI/updates/
+
+# Secrets: every .env file, anywhere in the repo. Only the examples are committed.
+.env
+.env.*
+!.env.example

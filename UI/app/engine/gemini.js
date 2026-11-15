@@ -1,27 +1,29 @@
-// Prism AI requests (Gemini's generateContent shape) with structured JSON output and retries, a port of Shared/Prism.Core/Gemini.cs.
-// Requests go through Prism's server with the signed-in person's session; the server holds the AI key and picks the model.
+// Relio AI requests (Gemini's generateContent shape) with structured JSON output and retries, a port of Shared/Prism.Core/Gemini.cs.
+// Requests go through Relio's server with the signed-in person's session; the server holds the AI key and picks the model.
 
 export const PROJECT_URL = 'https://isdplhahgggundbohmlr.supabase.co/';
 export const PUBLISHABLE_KEY = 'sb_publishable_ATTcp2-mrca0swMStHHdYQ_Le851b8l';
-// On localhost the call goes through the dev server's /gateway, which forwards it; the function itself allows browsers once deployed.
-export const GATEWAY_URL = ['localhost', '127.0.0.1'].includes(globalThis.location?.hostname) ? '/gateway' : PROJECT_URL + 'functions/v1/gemini';
+// On localhost the call goes through the dev server's /gateway, which forwards it. On the website it goes to the site's own
+// Vercel function (api/gemini.js), which may run 300 s; Supabase's function stops at 150 s, too soon for slow Mimo answers.
+export const GATEWAY_URL = ['localhost', '127.0.0.1'].includes(globalThis.location?.hostname) ? '/gateway' : '/api/gemini';
 
 const MESSAGES = {
-  signIn: 'Sign in to your Prism account to use Prism AI.',
+  signIn: 'Sign in to your Relio account to use Relio AI.',
   usageLimit: "You've reached your beta usage limit. Ask for a promo code to get more, then enter it in Settings › Usage.",
-  audioExport: 'Could not prepare audio for Prism AI. Your existing Shorts were kept.',
-  requestTooLarge: 'This Prism AI request exceeds the safe upload size. Choose a shorter source region.',
+  audioExport: 'Could not prepare audio for Relio AI. Your existing Shorts were kept.',
+  requestTooLarge: 'This Relio AI request exceeds the safe upload size. Choose a shorter source region.',
   noDistinctClips: 'No new distinct moments were found in this range. Try another region or length. Your existing clips were kept.',
-  noStrongClips: 'Prism could not find a strong, self-contained Short in this part of the video. Try another part of the video or a different clip length.',
-  invalidTiming: 'Prism AI returned speech timestamps that could not be aligned safely.',
-  invalidResponse: 'Prism AI returned an incomplete or invalid response. Your existing edits were kept.',
+  noStrongClips: 'Relio could not find a strong, self-contained Short in this part of the video. Try another part of the video or a different clip length.',
+  musicVideo: 'This is a music video. Its words are sung, and music videos don’t have spoken captions, so Relio can’t make Shorts from it. Try a video with someone speaking.',
+  invalidTiming: 'Relio AI returned speech timestamps that could not be aligned safely.',
+  invalidResponse: 'Relio AI returned an incomplete or invalid response. Your existing edits were kept.',
 };
 
 function requestMessage(status) {
-  if (status === 401 || status === 403) return 'Your Prism sign-in was not accepted. Sign in again in Settings › Account.';
-  if (status === 429) return 'Prism AI is handling too many requests right now. Wait a moment, then try again.';
-  if (status === 503) return 'Prism AI is overloaded right now (HTTP 503). Wait a moment, then try again.';
-  return `Prism AI could not complete the request (HTTP ${status}). Please try again.`;
+  if (status === 401 || status === 403) return 'Your Relio sign-in was not accepted. Sign in again in Settings › Account.';
+  if (status === 429) return 'Relio AI is handling too many requests right now. Wait a moment, then try again.';
+  if (status === 503) return 'Relio AI is overloaded right now. Wait a moment, then try again.';
+  return 'Relio AI could not complete the request. Please try again.';
 }
 
 export class GeminiError extends Error {
@@ -75,30 +77,32 @@ const sleep = (seconds, signal) => new Promise((resolve, reject) => {
  * @typedef {{ accessToken: () => Promise<string|null>, usage: Usage, onRetry?: (message: string) => void, fetch?: typeof fetch }} Configuration
  */
 
-/** Sends one request and decodes the JSON answer. */
-export async function generate(parts, schema, configuration, signal) {
-  const answer = await generateText(parts, schema, configuration, signal);
+/** Sends one request and decodes the JSON answer. `judge` marks an editorial decision (which clips, where they start and
+ *  end): the server gives those to its stronger judging model first. */
+export async function generate(parts, schema, configuration, signal, { judge = false } = {}) {
+  const answer = await generateText(parts, schema, configuration, signal, { judge });
   try { return JSON.parse(answer); } catch { throw new GeminiError('invalidResponse'); }
 }
 
 /** Sends one request and returns the answer's text as the model wrote it. */
-export async function generateText(parts, schema, configuration, signal) {
+export async function generateText(parts, schema, configuration, signal, { judge = false } = {}) {
   // Every request names its video, so the server can count it against the limit. No video, no request.
   if (!configuration.usage.video) throw new GeminiError('signIn');
-  const token = await configuration.accessToken();
-  if (!token) throw new GeminiError('signIn');
+  if (!(await configuration.accessToken())) throw new GeminiError('signIn');
   const body = JSON.stringify({
     contents: [{ role: 'user', parts }],
     generationConfig: { temperature: 0.2, responseMimeType: 'application/json', responseSchema: schema },
+    ...(judge ? { judge: true } : {}),
   });
   if (body.length > 19_000_000) throw new GeminiError('requestTooLarge');
-  const response = await send(token, body, configuration, signal);
+  const response = await send(body, configuration, signal);
   signal?.throwIfAborted();
   if (!response) throw new GeminiError('invalidResponse');
   if (response.status !== 200) {
     // The reason is in the body; show it instead of guessing from the status code.
     const { code, message } = serverError(response.body);
-    throw new GeminiError(code === 'usage_limit' ? 'usageLimit' : 'request', response.status, message);
+    // Server errors name models and timeouts, which mean nothing to people; those get the plain message instead.
+    throw new GeminiError(code === 'usage_limit' ? 'usageLimit' : 'request', response.status, response.status >= 500 ? null : message);
   }
   try {
     const candidate = JSON.parse(response.body).candidates[0];
@@ -110,7 +114,7 @@ export async function generateText(parts, schema, configuration, signal) {
 }
 
 /** Server errors and short rate-limit waits are retried; the last response is returned as is. */
-async function send(token, body, configuration, signal) {
+async function send(body, configuration, signal) {
   const { usage } = configuration;
   const waits = retry.waits;
   for (let attempt = 0; attempt <= waits.length; attempt++) {
@@ -118,8 +122,11 @@ async function send(token, body, configuration, signal) {
     const canRetry = attempt < waits.length;
     // A little randomness keeps the batches that run side by side from retrying in lockstep.
     const wait = canRetry ? waits[attempt] * (1 + Math.random() * 0.25) : 0;
-    const timeout = AbortSignal.timeout(180_000);
+    const timeout = AbortSignal.timeout(310_000);
     try {
+      // Fresh on every attempt: retries can run longer than a sign-in token lasts (1 hour), and Safari may skip the auto-refresh.
+      const token = await configuration.accessToken();
+      if (!token) throw new GeminiError('signIn');
       const headers = {
         'Content-Type': 'application/json', Authorization: `Bearer ${token}`, apikey: PUBLISHABLE_KEY,
         'x-prism-video': usage.video, 'x-prism-minutes': String(usage.minutes), 'x-prism-day': usage.day,
@@ -131,25 +138,23 @@ async function send(token, body, configuration, signal) {
       const responseText = await response.text();
       const status = response.status;
       if (canRetry && [500, 502, 503, 504, 546].includes(status)) {
-        const pause = Math.min(60, Math.max(wait, retryDelay(response, responseText) ?? 0));
-        configuration.onRetry?.(`Prism AI is busy (HTTP ${status}) · retrying in ${Math.round(pause)} s`);
-        await sleep(pause, signal);
+        // Silent: the server already tried Mimo twice and the fallback; the progress bar just keeps going.
+        await sleep(Math.min(60, Math.max(wait, retryDelay(response, responseText) ?? 0)), signal);
         continue;
       }
       // A per-minute limit says how long to wait; a usage limit or a daily limit doesn't, so it still fails.
       const delay = status === 429 ? retryDelay(response, responseText) : null;
       if (canRetry && delay !== null && delay <= 60) {
-        configuration.onRetry?.(`Prism AI rate limit · retrying in ${Math.round(delay) + 1} s`);
         await sleep(delay + 1, signal);
         continue;
       }
       return { status, body: responseText };
     } catch (error) {
-      if (signal?.aborted) throw error;
+      if (signal?.aborted || error instanceof GeminiError) throw error;
       // The browser says only "Failed to fetch"; give the person something they can act on.
-      if (attempt >= 2) throw new GeminiError('request', 0, 'Could not reach Prism AI. Check your internet connection and try again.');
-      // Requests may run three minutes before timing out, so lost connections get only two more tries.
-      configuration.onRetry?.(`Connection to Prism AI dropped · retrying in ${Math.round(wait)} s`);
+      if (attempt >= 2) throw new GeminiError('request', 0, 'Could not reach Relio AI. Check your internet connection and try again.');
+      // Requests may run five minutes before timing out, so lost connections get only two more tries.
+      configuration.onRetry?.(`Connection to Relio AI dropped · retrying in ${Math.round(wait)} s`);
       await sleep(wait, signal);
     }
   }
@@ -194,7 +199,7 @@ export async function map(items, transform, signal, limit = 6, onEach) {
         const index = next++;
         linked.throwIfAborted();
         results[index] = await transform(items[index], linked);
-        onEach?.(index, results[index]);
+        await onEach?.(index, results[index]);
       }
     } catch (error) {
       // Only a stop caused by another worker's failure is skipped.

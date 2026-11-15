@@ -13,19 +13,32 @@ export const autoCount = (seconds) => Math.min(MAX_SHORTS, Math.max(1, Math.floo
 const truncate = (value, length) => (value.length > length ? value.slice(0, length) : value);
 
 /**
- * @param options { duration, count, region, customStart, customEnd, excluding, videoType, cachedTranscript, onTranscript, progress, signal }
+ * @param options { duration, count, region, customStart, customEnd, excluding, videoType, language, cachedTranscript, onTranscript, onMissed, progress, signal }
+ *   language is a name ("Ukrainian") or 'auto'; Auto detects it once and saves it with the transcript.
+ *   onMissed(n) hears how many Shorts couldn't be made because Relio AI failed on part of the video, after every retry.
  * @returns Shorts as { start, duration, captions, cropKeyframes, speechWords, warning, title, reason, fit, videoType, score, description }
  */
-export async function analyze(source, configuration, options) {
+export async function analyze(source, configuration_, options) {
+  // Moments lost to failed requests: scoring or refining batches that failed after every retry and fallback.
+  let missed = 0;
+  const configuration = { ...configuration_, onMissed: (n) => { missed += n; } };
   const { excluding = [], cachedTranscript = null, onTranscript = () => {}, progress = () => {}, signal } = options;
   let videoType = options.videoType ?? 'general';
   const interval = regionInterval(options.region, source.duration, options.customStart, options.customEnd);
   if (excluding.some((e) => e.start <= interval.start && e.end >= interval.end)) throw new GeminiError('noDistinctClips');
-  // 0 is Auto length; Prism AI sizes each clip within lengthRange.
+  // 0 is Auto length; Relio AI sizes each clip within lengthRange.
   const clipDuration = options.duration > 0 ? Math.min(Math.max(1, options.duration), interval.end - interval.start) : 0;
-  // A count of 0 means Auto: room for one Short per minute, and only clips Prism AI scores as strong fill it.
+  // A count of 0 means Auto: room for one Short per minute, and only clips Relio AI scores as strong fill it.
   const targetCount = options.count > 0 ? Math.min(options.count, MAX_SHORTS) : autoCount(interval.end - interval.start);
-  progress(0, 'Preparing audio for Prism AI');
+  progress(0, 'Preparing audio for Relio AI');
+  // One language for the whole video, chosen or detected once, so no piece of it is transcribed in another one.
+  const chosen = options.language && options.language !== 'auto' ? options.language : null;
+  configuration.language = chosen ?? cachedTranscript?.language ?? null;
+  if (!configuration.language && source.hasAudio) {
+    progress(0, 'Relio AI · recognizing the language');
+    configuration.language = await S.detectLanguage(source, interval, configuration, signal);
+  }
+  const language = configuration.language ?? undefined;
   let transcript;
   const saved = T.cuesCovering(cachedTranscript, interval.start, interval.end);
   if (!source.hasAudio) transcript = [];
@@ -42,44 +55,47 @@ export async function analyze(source, configuration, options) {
     const keptCues = kept ?? [];
     const fresh = await S.transcribeSentences(source, { start: from, end: interval.end }, configuration, (fraction) => {
       const overall = (from - interval.start + fraction * (interval.end - from)) / (interval.end - interval.start);
-      progress(0.55 * overall, `Prism AI · transcribing audio · ${Math.floor(overall * 100)}%`);
-    }, (cues, end) => onTranscript({ start: interval.start, end, cues: [...keptCues, ...cues] }), signal);
+      progress(0.55 * overall, `Relio AI · transcribing audio · ${Math.floor(overall * 100)}%`);
+    }, (cues, end) => onTranscript({ start: interval.start, end, cues: [...keptCues, ...cues], language }), signal);
     transcript = [...keptCues, ...fresh];
-    onTranscript({ start: interval.start, end: interval.end, cues: transcript });
+    await onTranscript({ start: interval.start, end: interval.end, cues: transcript, language });
   }
   progress(0.55, 'Selecting distinct moments');
   if (videoType === 'auto') {
-    progress(0.55, 'Prism AI · recognizing the kind of video');
-    videoType = transcript.length === 0 ? 'general' : await S.detectVideoType(transcript, configuration, signal);
-    progress(0.55, `Prism AI · ${VIDEO_TYPE_TITLES[videoType]}`);
+    progress(0.55, 'Relio AI · recognizing the kind of video');
+    videoType = await S.detectVideoType(transcript, configuration, signal, source, interval);
+    progress(0.55, `Relio AI · ${VIDEO_TYPE_TITLES[videoType]}`);
   }
-  progress(0.55, 'Prism AI · choosing complete stories and layouts');
+  progress(0.55, 'Relio AI · choosing complete stories and layouts');
   let clips = await S.select(source, transcript, interval, clipDuration, targetCount, configuration, excluding, SELECTION_GUIDANCE[videoType] ?? '',
     (fraction, stage) => progress(0.55 + 0.15 * fraction, stage), signal);
-  // Auto keeps only strong picks; when Prism AI found none, the single best weaker one beats failing.
+  // Auto keeps only strong picks; when Relio AI found none, the single best weaker one beats failing.
   const strong = clips.filter((c) => !c.reason?.startsWith('Weaker pick'));
   if (!(options.count > 0)) clips = strong.length === 0 ? clips.slice(0, 1) : strong;
   // Screens and gameplay lose their edges in a vertical crop, whatever the picker suggested.
   // Only screens and gameplay are forced to the whole frame. The picker's own 'fit' guess is ignored: from a few sparse frames it
   // calls too many talking heads "slides". Framing looks at every second and still shows the whole frame when it really is a screen.
-  const picks = clips.map((c) => ({ ...c, duration: c.end - c.start, fit: forcesFit(videoType) }));
+  // A video that is already vertical keeps its whole frame: no zoom or crop that could cut off burned-in text.
+  const vertical = source.height / source.width >= 1.6;
+  const picks = clips.map((c) => ({ ...c, duration: c.end - c.start, fit: vertical || forcesFit(videoType) }));
   let steps = 0;
   const reportStep = (stage) => { steps++; progress(0.7 + 0.29 * Math.min(1, steps / (targetCount * 2)), stage); };
   // Picks are prepared a wave at a time; a pick that now overlaps an earlier one gives way to the next backup.
   const accepted = [];
-  let aligning = true, next = 0;
+  // Word timing stops being requested only after two failures, so one bad request doesn't cost every later Short its timing.
+  let alignmentFailures = 0, next = 0;
   while (accepted.length < targetCount && next < picks.length) {
     signal?.throwIfAborted();
     const wave = [];
     for (let i = next; i < Math.min(picks.length, next + targetCount - accepted.length); i++) wave.push(i);
     next += wave.length;
     const prepared = await map(wave, async (index, token) => {
-      const shot = await prepareShort(source, picks[index].start, picks[index].duration, transcript, interval, clipDuration, aligning, configuration, token);
+      const shot = await prepareShort(source, picks[index].start, picks[index].duration, transcript, interval, clipDuration, alignmentFailures < 2, configuration, token);
       reportStep(`Aligning speech and pauses · Short ${index + 1}`);
       return { index, shot };
     }, signal);
     for (const { index, shot } of prepared) {
-      if (shot.alignmentFailed) aligning = false;
+      if (shot.alignmentFailed) alignmentFailures++;
       const clash = (other) => T.overlaps(shot.start, shot.duration, other.start, other.duration);
       if (excluding.some((e) => clash({ start: e.start, duration: e.end - e.start })) || accepted.some((a) => clash(a.shot))) continue;
       accepted.push({ index, shot });
@@ -89,26 +105,45 @@ export async function analyze(source, configuration, options) {
   const results = await map(accepted, async ({ index, shot }, token) => {
     const candidate = picks[index];
     const { start, duration } = shot;
-    const source_ = shot.words.length > 0 ? S.captionCues(shot.words, { start, end: start + duration }) : T.sentenceCaptionGroups(shot.referenceCues);
-    const captions = clipCaptions(source_, start, duration);
-    const words = shot.words.filter((w) => w.start >= start - 0.01 && w.start + w.duration <= start + duration + 0.01).map((w) => ({ ...w, start: w.start - start }));
+    // Verified word timing first, then words placed on the heard speech, then even spreading over each sentence.
+    const timed = shot.words.length > 0 ? shot.words : shot.heard;
+    const source_ = timed.length > 0 ? S.captionCues(timed, { start, end: start + duration }) : T.sentenceCaptionGroups(shot.referenceCues);
+    const raw = clipCaptions(source_, start, duration);
+    const captions = dropRepeats(dropImpossibleRate(raw));
+    // Many lines removed as impossible or repeated: most likely sung lyrics or music, which the speech model garbles.
+    const garbled = raw.length > 0 && (raw.length - captions.length) / raw.length >= 0.2;
+    const words = timed.filter((w) => w.start >= start - 0.01 && w.start + w.duration <= start + duration + 0.01).map((w) => ({ ...w, start: w.start - start }));
     const cropKeyframes = candidate.fit
       ? [{ time: 0, position: 0.5, preserveWholeFrame: true }, { time: duration, position: 0.5, preserveWholeFrame: true }]
       : await Framing.analyze(source, start, duration, 1.08, configuration, captions, token);
-    reportStep('Prism AI · framing the subject');
+    reportStep('Relio AI · framing the subject');
     return {
       start, duration, captions, cropKeyframes, speechWords: words,
-      warning: shot.referenceCues.length === 0 || shot.words.length > 0 ? null : S.SENTENCE_TIMING_NOTICE,
-      title: candidate.title ? truncate(candidate.title, 100) : captions[0] ? truncate(captions[0].text, 100) : null,
+      warning: garbled ? MUSIC_NOTICE : shot.referenceCues.length === 0 || shot.words.length > 0 ? null : S.SENTENCE_TIMING_NOTICE,
+      title: groundedTitle(candidate.title, captions),
       reason: candidate.reason ? truncate(candidate.reason, 400) : null, fit: candidate.fit, videoType,
       score: Math.round(candidate.score * 10), description: candidate.description ? truncate(candidate.description, 1000) : null,
     };
   }, signal);
   // Keep existing edits intact and ask for another range instead of silently inventing a selection.
+  // Nothing made because Relio AI kept failing is a temporary failure the person can retry, not "no strong moments".
+  if (results.length === 0 && missed > 0) throw new GeminiError('request', 503);
   if (results.length === 0) throw new GeminiError(excluding.length > 0 ? 'noDistinctClips' : 'noStrongClips');
   signal?.throwIfAborted();
+  if (missed > 0) options.onMissed?.(Math.min(missed, Math.max(0, targetCount - results.length)));
   progress(1, 'Shorts ready');
   return results.sort((a, b) => a.start - b.start);
+}
+
+/** The AI's title when it is built from the clip's own words; otherwise a short quote from the clip, so a title never carries an
+ * invented or misspelled word: every word of four letters or more must be heard in the clip, ignoring case and punctuation. */
+export function groundedTitle(title, captions) {
+  const words = (value) => (value.toLocaleLowerCase().match(/[\p{L}\p{N}'’]+/gu) ?? []).filter((w) => w.length >= 4);
+  const spoken = new Set(captions.flatMap((c) => words(c.text)));
+  const proposed = words(title ?? '');
+  if (proposed.length > 0 && proposed.every((w) => spoken.has(w))) return truncate(title.trim(), 100);
+  const quote = captions.map((c) => c.text).join(' ').trim().split(/\s+/).slice(0, 8).join(' ').replace(/[,;:–-]+$/, '');
+  return quote ? truncate(quote, 100) : title ? truncate(title, 100) : null;
 }
 
 /** Turns a rough clip into exact boundaries: whole sentences, no filler at the edges, breathing room, no cut word, a strong first
@@ -138,7 +173,8 @@ export async function prepareShort(source, start, duration, transcript, interval
   const whole = speechSafeRange(phrase.start, phrase.duration, clipWords, interval);
   const safe = strongOpening(whole.start, whole.duration, clipWords, range.min);
   const quiet = await silenceSnapped(source, safe.start, safe.duration, interval, clipWords);
-  return { start: quiet.start, duration: quiet.duration, words: clipWords, referenceCues, alignmentFailed };
+  const heard = clipWords.length === 0 && referenceCues.length > 0 ? await S.heardWords(source, referenceCues, phrase.start, phrase.start + phrase.duration) : [];
+  return { start: quiet.start, duration: quiet.duration, words: clipWords, heard, referenceCues, alignmentFailed };
 }
 
 /** Moves a Short's start and end into the nearest pause in its audio, so it never opens or closes on a clipped sound. */
@@ -184,6 +220,28 @@ export function orderedShorts(segments, byScore) {
 }
 
 /** Shift captions into the clip's timeline without extending them beyond its end. */
+export const MUSIC_NOTICE = 'Many caption lines looked wrong, so this may be sung or music-heavy audio. Captions are hidden; turn them on to check them.';
+/** Speech runs at about 2 to 4 words a second; a line with far more words than its time allows is invented text. */
+export function dropImpossibleRate(cues, maxWordsPerSecond = 5.5) {
+  return cues.filter((cue) => {
+    const words = cue.text.split(/\s+/).filter(Boolean).length;
+    return words / Math.max(cue.duration, 0.3) <= maxWordsPerSecond;
+  });
+}
+
+/** Speech models sometimes repeat a line they heard twice, or invent one: a line that repeats an earlier one within `window` seconds is dropped. */
+export function dropRepeats(cues, window = 20) {
+  const key = (text) => text.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const lastSeen = new Map();
+  return cues.filter((cue) => {
+    const text = key(cue.text);
+    if (!text) return true;
+    const previous = lastSeen.get(text);
+    lastSeen.set(text, cue.start);
+    return previous === undefined || cue.start - previous >= window;
+  });
+}
+
 export function clipCaptions(cues, start, duration) {
   return cues.map((c) => ({ text: c.text, from: Math.max(0, c.start - start), to: Math.min(duration, c.start + c.duration - start) }))
     .filter((c) => c.to > c.from).map((c) => ({ text: c.text, start: c.from, duration: c.to - c.from }));

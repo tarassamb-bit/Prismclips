@@ -118,6 +118,20 @@
     return;
   }
   available = true;
+  // The sign-up page shows the beta's free spots, and the waitlist once they're gone.
+  const beta = signInButton?.value === 'up' && window.prismBeta
+    ? window.prismBeta.attach(db, form, { note: 'beta-spots', field: 'form-field', button: 'button button-primary' })
+    : null;
+  // The desktop apps open the sign-up page with the email they were given.
+  const givenEmail = new URLSearchParams(location.search).get('email');
+  if (givenEmail && emailInput && !emailInput.value) emailInput.value = givenEmail.slice(0, 254);
+  // The "I'm human" check sits above the button on the sign-up page; sign-in doesn't need it.
+  let human = null;
+  if (signInButton?.value === 'up' && window.prismTurnstile) {
+    const slot = Object.assign(document.createElement('div'), { className: 'turnstile-slot' });
+    signInButton.before(slot);
+    human = window.prismTurnstile.mount(slot);
+  }
 
   // ?next=/pricing returns the user where they came from. Only same-site paths are allowed; parsing
   // the URL also catches tricks like "/\evil.com" that a simple prefix check lets through.
@@ -187,7 +201,7 @@
       if (byId('minutes')) byId('minutes').textContent = minuteFormat.format(totalSeconds / 60);
       account.dataset.state = 'signed-in';
       say(totalExports === 0
-        ? 'No exports yet. Sign in to Prism for Mac and export your first Short.'
+        ? 'No exports yet. Sign in to Relio for Mac and export your first Short.'
         : totalExports > 50 ? 'Showing your latest 50 exports. Totals include your full history.' : 'Your export history is up to date.');
     } catch (error) {
       if (request !== statsRequest) return;
@@ -207,6 +221,8 @@
       return 'Too many sign-up emails were sent in the last hour. Please try again a bit later.';
     }
     if (error?.status === 429) return 'Too many attempts. Wait a minute, then try again.';
+    // Supabase's wording for any failure in the database during sign-up; never show it as is.
+    if (/Database error/i.test(error?.message ?? '')) return 'Couldn’t create your account right now. Please try again in a moment.';
     return error?.message || 'Couldn’t connect. Please try again.';
   }
 
@@ -241,7 +257,7 @@
     signedIn.hidden = !userId;
     if (pageTitle) pageTitle.textContent = userId ? 'Your export history' : signedOutTitle;
     if (pageDescription) pageDescription.textContent = userId
-      ? 'Track your exports, Shorts, and time created with Prism for Mac.'
+      ? 'Track your exports, Shorts, and time created with Relio for Mac.'
       : signedOutDescription;
     document.querySelectorAll('.nav-signin').forEach((link) => { link.textContent = userId ? 'Your account' : 'Sign in'; });
     if (!changed) {
@@ -255,7 +271,7 @@
       say('');
       return;
     }
-    if (byId('who')) byId('who').textContent = user.email || 'Your Prism account';
+    if (byId('who')) byId('who').textContent = user.email || 'Your Relio account';
     void loadStats();
   }
 
@@ -267,21 +283,25 @@
     setPending(true, action);
     say(action === 'up' ? 'Creating your account…' : 'Signing in…');
     try {
+      const turnstile = action === 'up' && human ? await human.token() : undefined;
       const { data, error } = action === 'up'
         ? await db.auth.signUp({
           ...credentials,
-          options: { emailRedirectTo: new URL('/login', window.location.origin).href },
+          options: { emailRedirectTo: new URL('/login', window.location.origin).href, ...(turnstile ? { data: { turnstile } } : {}) },
         })
         : await db.auth.signInWithPassword(credentials);
       if (error) throw error;
+      if (action === 'up') window.prismTrack?.('signup_completed');
       passwordInput.value = '';
       if (data?.session) showSession(data.session);
       else say(action === 'up'
         ? 'Check your inbox to confirm your email, then sign in here.'
         : 'Your session couldn’t be established. Please try signing in again.');
     } catch (error) {
-      say(authErrorMessage(error), 'error');
+      if (action === 'up' && await beta?.signUpFailed(error)) say('');
+      else say(authErrorMessage(error), 'error');
     } finally {
+      if (action === 'up') human?.reset();
       setPending(false);
     }
   });

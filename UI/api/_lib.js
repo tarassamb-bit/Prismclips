@@ -102,7 +102,7 @@ async function syncSubscription(id) {
     headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
     body: JSON.stringify(row),
   });
-  // 409: the user ID isn't a Prism account (deleted, or forged customData). Retrying won't help.
+  // 409: the user ID isn't a Relio account (deleted, or forged customData). Retrying won't help.
   if (insert.response.status === 409) return 'unknown user';
   if (!insert.response.ok) throw new HttpError(502, `Supabase returned ${insert.response.status}: ${insert.text}`);
   // Only overwrite an older copy, so a slow sync can't replace a newer one.

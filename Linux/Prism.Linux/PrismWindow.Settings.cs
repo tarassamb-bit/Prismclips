@@ -85,7 +85,7 @@ public sealed partial class PrismWindow
             var password = Entry("", "Password (at least 6 characters)");
             password.Visibility = false;
             var signIn = Button("Sign in", async () => { await account.SignIn(address.GetText(), password.GetText()); if (account.IsSignedIn) password.SetText(""); }, "primary");
-            var create = Button("Create account", async () => { await account.SignUp(address.GetText(), password.GetText()); password.SetText(""); });
+            var create = Button("Create account", () => LinuxPlatform.OpenExternal(Account.SignUpPage(address.GetText())));
             enable = () => signIn.Sensitive = create.Sensitive = !account.IsWorking && address.GetText().Trim().Length > 0 && password.GetText().Length > 0;
             address.OnChanged += (_, _) => enable(); password.OnChanged += (_, _) => enable();
             password.OnActivate += async (_, _) => { if (signIn.Sensitive) { await account.SignIn(address.GetText(), password.GetText()); if (account.IsSignedIn) password.SetText(""); } };

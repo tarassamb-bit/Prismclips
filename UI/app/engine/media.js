@@ -1,7 +1,10 @@
 // Reading the source video in the browser with WebCodecs (Mediabunny): probe, frames, gray grids for cut detection, audio
-// for Prism AI and audio levels. The browser counterpart of Shared/Prism.Core/Media.cs; the video never leaves the computer.
-import { Input, ALL_FORMATS, BlobSource, CanvasSink, AudioSampleSink } from '../../vendor/mediabunny-1.61.5.min.mjs';
+// for Relio AI and audio levels. The browser counterpart of Shared/Prism.Core/Media.cs; the video never leaves the computer.
 import { ShortMakerError, GeminiError } from './gemini.js';
+
+/** Mediabunny (about 690 KB) loads on first use, so the page and the editor open without waiting for it. */
+let library = null;
+export const mediabunny = () => (library ??= import('../../vendor/mediabunny-1.61.5.min.mjs'));
 
 /** Decoding runs a couple at a time; the AI requests around it still run six side by side. */
 let running = 0;
@@ -14,6 +17,7 @@ async function decoding(work) {
 
 /** Opens a File. `video` and `audio` are Mediabunny tracks; width and height are as displayed (rotation applied). */
 export async function openSource(file) {
+  const { Input, ALL_FORMATS, BlobSource } = await mediabunny();
   const input = new Input({ formats: ALL_FORMATS, source: new BlobSource(file) });
   try {
     const video = await input.getPrimaryVideoTrack();
@@ -24,9 +28,59 @@ export async function openSource(file) {
     if (!Number.isFinite(duration) || duration <= 0) throw new ShortMakerError('noVideo');
     return { file, input, video, audio: hasAudio ? audio : null, duration, width: video.displayWidth, height: video.displayHeight, hasAudio };
   } catch (error) {
+    input.dispose();
     if (error instanceof ShortMakerError) throw error;
     throw new ShortMakerError('noVideo');
   }
+}
+
+/** Black bars burned into a Short's picture (a widescreen film in a 16:9 file), in source pixels, from eight of its frames;
+ *  bars can change from shot to shot. Crops leave them out, so the Short fills the screen. Cached per source and range. */
+export function letterbox(source, start, duration) {
+  source.bars ??= new Map();
+  const key = `${start.toFixed(2)}|${duration.toFixed(2)}`;
+  if (!source.bars.has(key)) source.bars.set(key, measureBars(source, start, duration).catch(() => ({ top: 0, bottom: 0 })));
+  return source.bars.get(key);
+}
+
+async function measureBars(source, start, duration) {
+  const size = fitWithin(source, 160);
+  const sink = new (await mediabunny()).CanvasSink(source.video, { ...size, fit: 'fill' });
+  const times = Array.from({ length: 8 }, (_, i) => start + (i + 0.5) / 8 * duration);
+  const frames = [];
+  for await (const wrapped of sink.canvasesAtTimestamps(times)) {
+    if (!wrapped) continue;
+    const data = wrapped.canvas.getContext('2d').getImageData(0, 0, size.width, size.height).data;
+    frames.push(Array.from({ length: size.height }, (_, y) => {
+      let max = 0;
+      for (let i = y * size.width * 4; i < (y + 1) * size.width * 4; i += 4) max = Math.max(max, data[i], data[i + 1], data[i + 2]);
+      return max;
+    }));
+  }
+  return barsFromFrames(frames, source.height);
+}
+
+/** Each frame's brightest value per row, to bars: a run of black rows from an edge counts only where it meets the picture
+ *  at a sharp edge (a dark scene fades out instead). Bars change between shots, so the widest real one wins, at most a
+ *  quarter of the picture. */
+export function barsFromFrames(frames, sourceHeight) {
+  const BLACK = 28, PICTURE = 60;
+  const bar = (rows) => {
+    let n = 0;
+    while (n < rows.length && rows[n] <= BLACK) n++;
+    return n > 0 && n < rows.length && rows[n] >= PICTURE ? n : 0;
+  };
+  let top = 0, bottom = 0, height = 0;
+  for (const rows of frames) {
+    height = rows.length;
+    top = Math.max(top, bar(rows));
+    bottom = Math.max(bottom, bar([...rows].reverse()));
+  }
+  if (height === 0) return { top: 0, bottom: 0 };
+  const limit = Math.floor(height / 4), scale = sourceHeight / height;
+  // One extra row on each side clears the soft line where the bar meets the picture.
+  const pixels = (rows) => rows ? Math.ceil((Math.min(limit, rows) + 1) * scale) : 0;
+  return { top: pixels(top), bottom: pixels(bottom) };
 }
 
 function fitWithin(source, maxSize) {
@@ -56,7 +110,7 @@ export async function framesJpeg(source, start, duration, step, maxSize = 512) {
 
 async function framesAt(source, timestamps, maxSize) {
   return decoding(async () => {
-    const sink = new CanvasSink(source.video, { ...fitWithin(source, maxSize), fit: 'fill' });
+    const sink = new (await mediabunny()).CanvasSink(source.video, { ...fitWithin(source, maxSize), fit: 'fill' });
     const result = [];
     for await (const wrapped of sink.canvasesAtTimestamps(timestamps)) result.push(wrapped ? { jpeg: await jpegBytes(wrapped.canvas) } : null);
     return result;
@@ -67,7 +121,7 @@ async function framesAt(source, timestamps, maxSize) {
 /** One decoded frame as a canvas (not encoded to JPEG), for drawing into thumbnails. */
 export async function frameImage(source, time, maxSize = 480) {
   return decoding(async () => {
-    const sink = new CanvasSink(source.video, { ...fitWithin(source, maxSize), fit: 'fill' });
+    const sink = new (await mediabunny()).CanvasSink(source.video, { ...fitWithin(source, maxSize), fit: 'fill' });
     // A file's first frame can come after time 0, and asking for a time before it gives nothing; start at the first frame at the earliest.
     const first = await source.video.getFirstTimestamp().catch(() => 0);
     return (await sink.getCanvas(Math.max(time, first)))?.canvas ?? null;
@@ -87,7 +141,7 @@ export async function thumbnail(source, time, maxSize = 480) {
 /** 32×18 luminance grids at 10 fps across a range, for scene-cut detection. */
 export async function grayGrids(source, start, duration) {
   return decoding(async () => {
-    const sink = new CanvasSink(source.video, { width: 32, height: 18, fit: 'fill' });
+    const sink = new (await mediabunny()).CanvasSink(source.video, { width: 32, height: 18, fit: 'fill' });
     const times = [];
     for (let i = 0; i < Math.floor(duration * 10); i++) times.push(start + i / 10);
     const grids = [];
@@ -104,7 +158,7 @@ export async function grayGrids(source, start, duration) {
 
 const SPEECH_RATE = 16000;
 
-/** A stretch of audio for Prism AI as 16 kHz mono 16-bit WAV: { mime, bytes }. Plain PCM needs no encoder, so it is identical in every
+/** A stretch of audio for Relio AI as 16 kHz mono 16-bit WAV: { mime, bytes }. Plain PCM needs no encoder, so it is identical in every
  * browser and every AI provider can read it. Throws audioExport when it can't be prepared. */
 export async function audioChunk(source, start, length, signal) {
   if (!source.audio) throw new GeminiError('audioExport');
@@ -112,7 +166,20 @@ export async function audioChunk(source, start, length, signal) {
   const decoded = await monoSamples(source, start, Math.min(source.duration, start + length)).catch(() => null);
   signal?.throwIfAborted();
   if (!decoded) throw new GeminiError('audioExport');
-  return { mime: 'audio/wav', bytes: wav(resample(decoded.samples, decoded.sampleRate, SPEECH_RATE), SPEECH_RATE) };
+  return { mime: 'audio/wav', bytes: wav(resample(decoded.samples, decoded.sampleRate, SPEECH_RATE), SPEECH_RATE), quiet: isQuiet(decoded.samples, decoded.sampleRate) };
+}
+
+/** True when no 10 ms stretch is louder than about -46 dBFS: nothing a person could be saying. Audio models sometimes
+ *  invent words for silence, so such audio is never sent to them. */
+export function isQuiet(samples, rate) {
+  const frame = Math.max(1, Math.round(rate / 100));
+  for (let first = 0; first < samples.length; first += frame) {
+    let sum = 0;
+    const count = Math.min(frame, samples.length - first);
+    for (let i = 0; i < count; i++) sum += samples[first + i] ** 2;
+    if (Math.sqrt(sum / count) > 0.005) return false;
+  }
+  return true;
 }
 
 /** Averages each stretch of input into one output sample, which also filters what the lower rate can't hold. */
@@ -145,7 +212,7 @@ export function wav(samples, rate) {
 export async function monoSamples(source, from, to) {
   if (!source.audio || to <= from) return null;
   return decoding(async () => {
-    const sink = new AudioSampleSink(source.audio);
+    const sink = new (await mediabunny()).AudioSampleSink(source.audio);
     let mono = null, rate = 0;
     for await (const sample of sink.samples(from, to)) {
       if (!mono) { rate = sample.sampleRate; mono = new Float32Array(Math.ceil((to - from) * rate)); }

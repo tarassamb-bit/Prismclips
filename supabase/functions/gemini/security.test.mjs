@@ -5,7 +5,8 @@ const env = { SUPABASE_URL: 'https://example.invalid', SUPABASE_SERVICE_ROLE_KEY
 let handler;
 globalThis.Deno = { env: { get: (key) => env[key] }, serve: (fn) => { handler = fn; } };
 const calls = [];
-let providerFails = false, providerBody = null;
+let providerFails = false, providerBody = null, slowAnswer = false;
+const providerBodies = [];
 let identityStatus = 200, reservationStatus = 200, allowed = true, spendStatus = 200, runAllowed = true;
 globalThis.fetch = async (url, options = {}) => {
   calls.push({ url, ...options });
@@ -13,10 +14,15 @@ globalThis.fetch = async (url, options = {}) => {
   if (url.endsWith('/rpc/prism_reserve_beta_usage')) return Response.json(allowed, { status: reservationStatus });
   if (url.endsWith('/rpc/prism_record_beta_spend')) return new Response(null, { status: spendStatus });
   if (url.endsWith('/rpc/prism_begin_analysis_run')) return Response.json(runAllowed);
+  if (url.endsWith('/rest/v1/ai_failures') || url.endsWith('/rest/v1/ai_spend')) return new Response(null, { status: 201 });
   if (url === 'https://openrouter.ai/api/v1/chat/completions') {
     providerBody = JSON.parse(options.body);
+    providerBodies.push(providerBody);
     if (providerFails) return Response.json({ error: { message: 'Provider returned error', metadata: { raw: 'unsupported audio data' } } }, { status: 400 });
-    return Response.json({ choices: [{ message: { content: 'ok' } }], usage: { cost: 0 } });
+    const body = JSON.stringify({ choices: [{ message: { content: 'ok' } }], usage: { cost: 0 } });
+    // A slow answer: OpenRouter sends keep-alive comment lines before the JSON.
+    if (slowAnswer) return new Response(': OPENROUTER PROCESSING\n\n: OPENROUTER PROCESSING\n\n' + body, { headers: { 'Content-Type': 'application/json' } });
+    return new Response(body, { headers: { 'Content-Type': 'application/json' } });
   }
   throw new Error(`Unexpected URL: ${url}`);
 };
@@ -50,7 +56,14 @@ assert.equal(calls.length, 2, 'a refused allowance must not call the provider');
 allowed = true;
 calls.length = 0;
 assert.equal((await handler(request())).status, 200);
-assert.equal(calls.length, 4);
+assert.equal(calls.length, 5);
+{
+  const { ms, ...row } = JSON.parse(calls[4].body);
+  assert.deepEqual(row, { user_id: '12345678-1234-1234-1234-123456789abc', source: 'desktop', model: null, provider: null, usd: 0, prompt_tokens: null, completion_tokens: null, kind: 'text' }, 'the real cost is logged per answer');
+  assert.ok(Number.isInteger(ms) && ms >= 0, 'answer time is logged');
+}
+assert.equal(calls[4].headers.Authorization, 'Bearer server-only-test-key');
+assert.deepEqual(providerBody.reasoning, { effort: 'low', exclude: true }, 'reasoning models must answer within the function time limit');
 assert.equal(calls[1].headers.Authorization, 'Bearer server-only-test-key');
 assert.equal(JSON.parse(calls[1].body).p_user, '12345678-1234-1234-1234-123456789abc');
 assert.equal(calls[3].headers.Authorization, 'Bearer server-only-test-key');
@@ -109,9 +122,27 @@ for (const [mimeType, format] of [['audio/wav', 'wav'], ['audio/mpeg', 'mp3'], [
   assert.equal(providerBody.messages.at(-1).content.find((part) => part.type === 'input_audio').input_audio.format, format);
 }
 providerFails = true;
+calls.length = 0;
 const refused = await handler(audioRequest('audio/wav'));
 assert.equal(refused.status, 400);
 const reason = (await refused.json()).error.message;
-assert.ok(reason.includes('nemotron-3-nano-omni') && reason.includes('unsupported audio data'), reason);
+assert.ok(reason.includes('mimo-v2.6-flash') && reason.includes('gemini-3.8-flash') && reason.includes('unsupported audio data'), reason);
+assert.ok(!providerBody.model.endsWith(':free'), 'no free models');
+const audioTries = providerBodies.slice(-2);
+assert.deepEqual(audioTries[0].provider, { zdr: true, data_collection: 'deny', sort: 'latency', order: ['makora'], allow_fallbacks: false }, 'audio on MiMo: one no-retention provider');
+assert.deepEqual(audioTries[1].provider, { zdr: true, data_collection: 'deny', sort: 'latency' }, 'the fallback is not pinned');
+const logged = calls.filter((call) => call.url.endsWith('/rest/v1/ai_failures')).map((call) => JSON.parse(call.body));
+assert.deepEqual(logged.map((row) => [row.model, row.error_type, row.source]),
+  [['xiaomi/mimo-v2.6-flash', 'bad_request', 'desktop'], ['google/gemini-3.8-flash', 'bad_request', 'desktop'], ['all', 'gave_up', 'desktop']]);
+assert.equal(logged[0].user_id, '12345678-1234-1234-1234-123456789abc');
+assert.equal(calls.find((call) => call.url.endsWith('/rest/v1/ai_failures')).headers.Authorization, 'Bearer server-only-test-key');
 providerFails = false;
-console.log('PASS audio format by type, and every model failure reported with the provider reason');
+console.log('PASS audio format by type, Mimo then the paid fallback on no-retention providers, every failure reported and logged');
+
+// A slow answer arrives after OpenRouter's keep-alive lines; it is the answer, not a failure.
+slowAnswer = true;
+const slow = await handler(request());
+assert.equal(slow.status, 200);
+assert.equal((await slow.json()).candidates[0].content.parts[0].text, 'ok');
+slowAnswer = false;
+console.log('PASS slow answers after OpenRouter keep-alive lines are read, not thrown away');
