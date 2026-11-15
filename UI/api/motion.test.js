@@ -230,3 +230,14 @@ test('styled briefs cap reasoning and get a palette hint; the no-style prompt ha
   assert.match(styled, /Palette: within this style/);
   assert.doesNotMatch(await request({engine:'canvas', prompt:'How vaccines work'}), /Palette: within this style/);
 });
+
+test('stronger models get the fuller style reference; composition rules only apply to styled briefs', () => {
+  const {styleReference, prompt} = require('./motion.js');
+  for (const style of ['shadow-puppet-theatre', 'watercolor-wash']) {
+    assert.ok(styleReference(style, true).length > styleReference(style).length * 3, style);
+    assert.match(styleReference(style, true), /STYLE CARD/);
+    assert.doesNotMatch(styleReference(style, true), /SOUND KIT/);
+  }
+  assert.match(prompt({prompt: 'x', engine: 'canvas', style: 'shadow-puppet-theatre'}), /fill the frame/);
+  assert.doesNotMatch(prompt({prompt: 'x', engine: 'canvas'}), /fill the frame/);
+});

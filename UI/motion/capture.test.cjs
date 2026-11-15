@@ -11,7 +11,7 @@ test('canvas review captures five frames without changing the current preview ti
   assert.match(runner, /capture\.width = 1280; capture\.height = 720;/);
   const script = runner.slice(runner.indexOf('<script>') + 8, runner.lastIndexOf('</script>'));
   const sent = [], drawn = [];
-  const ctx = {save(){},restore(){},setTransform(){},clearRect(){},drawImage(){}};
+  const ctx = {save(){},restore(){},setTransform(){},clearRect(){},drawImage(){},getImageData(){return {data:new Uint8ClampedArray(27*48*4)}}};
   const canvas = {getContext(){return ctx},toDataURL(){return 'data:image/jpeg;base64,YWJj'}};
   const document = {getElementById(){return canvas},createElement(){return {...canvas}}};
   let listener;
@@ -25,6 +25,9 @@ test('canvas review captures five frames without changing the current preview ti
   assert.equal(sent[0].type,'review-frames');
   assert.equal(sent[0].requestId,42);
   assert.equal(sent[0].frames.length,5);
-  assert.equal(drawn.length,6); // five samples, then restore the current frame
+  // Five samples, eight stillness probes (every 0.5 s), then restore the current frame.
+  assert.equal(drawn.length,14);
+  // The test scene draws nothing that changes, so the whole video counts as still.
+  assert.equal(JSON.stringify(sent[0].still),"[[0,3.5]]");
   assert.equal(drawn.at(-1),0);
 });

@@ -8,11 +8,12 @@ const path = require('path');
 
 const STYLE_FILES = Object.freeze({
   'flat-vector-science': {file:'flat-vector-science.txt', name:'Flat-Vector Science', useFullVisualReference:true},
-  'watercolor-wash': {file:'watercolor-wash.txt', name:'Watercolor Wash', look:'Translucent layered pigment on textured cold-press paper, with soft edges, subtle pooling, natural blooms and faint pencil detail. Reveal paint with gentle organic motion. Use only illustrations that fit the user’s subject.', extracts:[['  function deform(', '  function cachedExplainer(']]},
-  'shadow-puppet-theatre': {file:'shadow-puppet-theatre.txt', name:'Shadow Puppet Theatre', look:'A backlit textured cloth stage with dark cut-paper silhouettes, fine cutwork and warm amber light. Animate subject-appropriate silhouettes with physical, jointed motion and a gently breathing light. Do not introduce reference characters or props unless the subject calls for them.', extracts:[['  const STOPS =', '  function valance(']]},
+  'watercolor-wash': {file:'watercolor-wash.txt', name:'Watercolor Wash', look:'Translucent layered pigment on textured cold-press paper, with soft edges, subtle pooling, natural blooms and faint pencil detail. Reveal paint with gentle organic motion. Use only illustrations that fit the user’s subject.', extracts:[['  function deform(', '  function cachedExplainer(']], richExtracts:[['  const PAPER', '  function cachedExplainer('], ['  function wcText(', '  const INDIGO']]},
+  'shadow-puppet-theatre': {file:'shadow-puppet-theatre.txt', name:'Shadow Puppet Theatre', look:'A backlit textured cloth stage with dark cut-paper silhouettes, fine cutwork and warm amber light. Animate subject-appropriate silhouettes with physical, jointed motion and a gently breathing light. Do not introduce reference characters or props unless the subject calls for them.', extracts:[['  const STOPS =', '  function valance(']], richExtracts:[['  const INK', '  const STOPS ='], ['  const STOPS =', '  function fernShape('], ['  function stage(', '  function owl('], ['  function cat(', '  function dog('], ['  function sceneA(', '  function flyOver(']]},
 });
 
-function styleReference(style) {
+/** rich: stronger models get the style card, helpers and the drawing code for figures and sets; MiMo gets the short version. */
+function styleReference(style, rich = false) {
   if (!style) return '';
   const config = STYLE_FILES[style];
   const text = fs.readFileSync(path.join(__dirname, '_motion-styles', config.file), 'utf8');
@@ -31,13 +32,14 @@ function styleReference(style) {
     const visual = `${reference.slice(0, soundMethod)}  // ... characters, scenes and player omitted ...\n}\n\`\`\``;
     return `Selected visual style: the following user-supplied style card and original visual reference are the primary visual direction. Follow the reference’s vivid space gradients, rounded dimensional illustration, playful appealing characters, glow, texture, big scale changes and animation energy, where they suit the user’s topic. The selected style supersedes conflicting generic instructions to avoid stars, gradients, characters, or playful elements. Respect any specific style or color choices in the user's request. Use the user’s own subject and words: the reference’s AI-learning example is not the user's script. Do not reproduce its claims or add labels and captions the user did not request. Interpret its example props as visual inspiration, not mandatory content.\n\nThe reference code is written for a different canvas harness and aspect ratio. Adapt its visual and animation techniques to the requested engine, dimensions, and brief; do not emit its player, registry, storyboard, sound kit or sample script. Inline or reimplement any helpers you need.\n\n${card}\n\n${helpers}\n\n${visual}\n\nEnd of reference excerpt.`;
   }
-  const excerpts = config.extracts.map(([start, end]) => {
+  const useRich = rich && config.richExtracts;
+  const excerpts = (useRich ? config.richExtracts : config.extracts).map(([start, end]) => {
     const from = reference.indexOf(start);
     const to = reference.indexOf(end, from + start.length);
     if (from < 0 || to < 0) throw new Error('The selected style reference is incomplete.');
     return reference.slice(from, to).split('\n').filter((line) => !line.includes('How does AI learn?')).join('\n').trim();
   });
-  return `Selected visual style (takes priority over generic editorial defaults; explicit user choices still take priority):\nName: ${config.name}\n${config.look}\n\nThe following snippets from the user-provided style reference show medium-specific techniques. They are not a template for content. Adapt them to the requested subject and engine, rather than copying example props, labels, layout or subject. If code relies on H or other helpers, implement only the necessary pieces in the generated code. Do not produce a storyboard, external assets, sound, a player, or a different aspect ratio.\n\nREFERENCE STYLE TECHNIQUES:\n${excerpts.join('\n\n')}`;
+  return `Selected visual style (takes priority over generic editorial defaults; explicit user choices still take priority):\nName: ${config.name}\n${config.look}\n\nThe following snippets from the user-provided style reference show medium-specific techniques. They are not a template for content. Adapt them to the requested subject and engine, rather than copying example props, labels, layout or subject. If code relies on H or other helpers, implement only the necessary pieces in the generated code. Do not produce a storyboard, external assets, sound, a player, or a different aspect ratio.\n\n${useRich ? `${text.slice(text.indexOf('STYLE CARD'), text.indexOf('H HELPER LIBRARY'))}\n${text.slice(text.indexOf('H HELPER LIBRARY'), text.indexOf('SOUND KIT'))}\n` : ''}REFERENCE STYLE TECHNIQUES:\n${excerpts.join('\n\n')}`;
 }
 
 const MODEL = process.env.MOTION_MODEL || 'xiaomi/mimo-v2.6-flash';
@@ -107,7 +109,7 @@ function validMedia(media) {
     && (m.kind === 'image' || (Number.isFinite(m.duration) && m.duration > 0)) && typeof m.description === 'string' && m.description.length <= 300);
 }
 
-function prompt({ prompt: idea, engine, previous, error, originalPrompt, history, style, creativePlan, visualFeedback, media }) {
+function prompt({ prompt: idea, engine, previous, error, originalPrompt, history, style, creativePlan, visualFeedback, media, rich }) {
   const latest = String(idea || '').slice(0, 2000);
   const original = typeof originalPrompt === 'string' && originalPrompt.trim()
     ? originalPrompt.slice(0, 2000) : latest;
@@ -133,8 +135,9 @@ function prompt({ prompt: idea, engine, previous, error, originalPrompt, history
     ? `\n\n${error ? `The current implementation failed with this error: ${JSON.stringify(String(error).slice(0, 800))}\nCorrect the failure while preserving the user's brief and changes.\n` : 'Revise the current implementation according to the latest request.\n'}Current implementation (may contain mistakes or invented text):\n${String(previous)}\nReturn the whole corrected implementation.`
     : '';
   // Styled briefs only: the no-style path stays as it is (its outputs were the favorites).
+  const composition = style ? '\n\nComposition and motion: fill the frame; the main subject and headline take most of the canvas, with no large empty areas. Headlines must read at phone size (at least 6% of the frame height). Keep something moving at every moment: no stretch longer than a second where the picture stays still. Draw crafted illustrations in the selected medium, not simple icons.' : '';
   const palette = style ? '\n\nPalette: within this style, pick colors that fit the topic or brand (its known colors when it names one) rather than copying the reference palette for every video; keep them consistent across scenes.' : '';
-  return `${RULES[engine]}\n\n${ART_DIRECTION}\n\n${styleReference(style)}${palette}\n\nReturn only the complete code, in one fenced code block. Keep the implementation concise and avoid lengthy comments.\n\n${request}${engine === 'canvas' ? mediaBlock(media) : ''}${creativePlan ? `\n\nPrivate production plan (not on-screen copy; the user brief takes priority). Keep each text block fully inside its planned box for its entire visible lifetime, including entrances and exits. Do not cross text with a line or foreground graphic, and do not crop text. Follow the planned positions and spacing:\n${creativePlan}` : ''}${review}${codeContext}`;
+  return `${RULES[engine]}\n\n${ART_DIRECTION}\n\n${styleReference(style, rich)}${palette}${composition}\n\nReturn only the complete code, in one fenced code block. Keep the implementation concise and avoid lengthy comments.\n\n${request}${engine === 'canvas' ? mediaBlock(media) : ''}${creativePlan ? `\n\nPrivate production plan (not on-screen copy; the user brief takes priority). Keep each text block fully inside its planned box for its entire visible lifetime, including entrances and exits. Do not cross text with a line or foreground graphic, and do not crop text. Follow the planned positions and spacing:\n${creativePlan}` : ''}${review}${codeContext}`;
 }
 
 /** The code inside the answer's first fenced block, or the whole answer when there is none. */
@@ -254,7 +257,7 @@ module.exports = async (req, res) => {
       run.started = Date.now();
       planResult.code = JSON.stringify({duration:plan.duration, beats:plan.beats});
     }
-    const result = await callWithLengthRetry(forFormat(prompt({...body, creativePlan: planResult?.code}), body.format) + length, 24000, 32000, 'writing the animation', cancellation.signal, choice, tally);
+    const result = await callWithLengthRetry(forFormat(prompt({...body, creativePlan: planResult?.code, rich: !choice.id.startsWith('xiaomi/')}), body.format) + length, 24000, 32000, 'writing the animation', cancellation.signal, choice, tally);
     const {code, model, provider} = result;
     const usd = tally.usdKnown && planTally.usdKnown ? tally.usd + planTally.usd : null;
     const ms = Date.now() - started;
@@ -270,3 +273,5 @@ module.exports = async (req, res) => {
 module.exports.extractCode = extractCode;
 module.exports.STYLE_FILES = STYLE_FILES;
 module.exports.forFormat = forFormat;
+module.exports.styleReference = styleReference;
+module.exports.prompt = prompt;

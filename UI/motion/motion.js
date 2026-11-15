@@ -62,7 +62,23 @@ addEventListener('message', async (event) => {
         await sync(time); frame(time); captureCtx.drawImage(c, 0, 0, capture.width, capture.height);
         frames.push({time, image:capture.toDataURL('image/jpeg', .7)});
       }
-      frame(currentTime); say({type:'review-frames', requestId:m.requestId, frames});
+      // Stretches where the picture barely changes (mean pixel change under 1/255 every 0.5 s), so the review can call out a still video.
+      const tiny = document.createElement('canvas'); tiny.width = 27; tiny.height = 48;
+      const tinyCtx = tiny.getContext('2d', { willReadFrequently: true }), still = [];
+      let before = null, runStart = null;
+      for (let time = 0; time <= scene.duration - 1 / scene.fps; time += 0.5) {
+        await sync(time); frame(time); tinyCtx.drawImage(c, 0, 0, 27, 48);
+        const pixels = tinyCtx.getImageData(0, 0, 27, 48).data;
+        if (before) {
+          let change = 0; for (let i = 0; i < pixels.length; i += 4) change += Math.abs(pixels[i] - before[i]) + Math.abs(pixels[i + 1] - before[i + 1]) + Math.abs(pixels[i + 2] - before[i + 2]);
+          if (change / (pixels.length * 0.75) < 1) runStart ??= time - 0.5;
+          else { if (runStart !== null && time - 0.5 - runStart >= 1.5) still.push([runStart, time - 0.5]); runStart = null; }
+        }
+        before = pixels;
+      }
+      const end = Math.floor((scene.duration - 1 / scene.fps) * 2) / 2;
+      if (runStart !== null && end - runStart >= 1.5) still.push([runStart, end]);
+      frame(currentTime); say({type:'review-frames', requestId:m.requestId, frames, still});
     } catch (error) { say({type:'review-capture-error', requestId:m.requestId, message:String(error.message || error)}); }
   } else if (m.type === 'playback-control' && scene) {
     if (m.action === 'pause') { playing = false; videos.forEach((v) => v.pause()); say({type:'playback', time:currentTime, playing:false}); }
@@ -592,7 +608,7 @@ addEventListener('message', async (event) => {
   const m = event.data || {};
   if ((m.type === 'review-frames' || m.type === 'review-capture-error') && frameRequest?.requestId === m.requestId) {
     const request = frameRequest; frameRequest = null;
-    if (m.type === 'review-frames') request.resolve(m.frames); else request.reject(new Error(m.message || 'Frame capture failed.'));
+    if (m.type === 'review-frames') request.resolve(Object.assign(m.frames, { still: Array.isArray(m.still) ? m.still : [] })); else request.reject(new Error(m.message || 'Frame capture failed.'));
     return;
   }
   if (m.type === 'ready') {
@@ -615,7 +631,8 @@ addEventListener('message', async (event) => {
         const [frames, reference] = await Promise.all([captureReviewFrames(), captureStyleReference(pendingBrief?.style || '')]);
         reviewThumb = frames[Math.floor(frames.length / 2)]?.image ?? null;
         if (token !== runToken) return;
-        const issues = await reviewFrames(frames, reference);
+        const stillIssues = (frames.still || []).map(([from, to]) => `From ${from.toFixed(1)}s to ${to.toFixed(1)}s almost nothing moves: keep something animating the whole time.`);
+        const issues = [...stillIssues, ...await reviewFrames(frames, reference)].slice(0, 4);
         if (token !== runToken) return;
         if (issues.length && reviewPass === 1) {
           showThinking('Fixing issues found in the video');
