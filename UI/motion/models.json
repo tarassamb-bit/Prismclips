@@ -1,0 +1,7 @@
+[
+  {"id": "xiaomi/mimo-v2.6-flash", "label": "MiMo-V2.6-Flash", "effort": false},
+  {"id": "google/gemini-4-hydrogen", "label": "Gemini 4 Hydrogen", "effort": true},
+  {"id": "google/gemini-4-carbon:batch", "label": "Gemini 4 Carbon", "effort": true},
+  {"id": "google/gemini-4-argon:batch", "label": "Gemini 4 Argon", "effort": true},
+  {"id": "meta/muse-ember", "label": "Muse Ember", "effort": true}
+]

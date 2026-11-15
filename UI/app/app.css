@@ -447,3 +447,30 @@ details.insp-section:not([open]) { gap: 0; }
   background: var(--surface1); border: 1px solid var(--sky); transform: rotate(45deg); }
 .tour-bubble[data-side="below"]::before { top: -7px; border-right: 0; border-bottom: 0; }
 .tour-bubble[data-side="above"]::before { bottom: -7px; border-left: 0; border-top: 0; }
+.motion-link { text-decoration: none; }
+
+/* Settings › Motion Studio: one model per step. */
+.motion-default { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.motion-default select { min-width: 200px; height: 36px; padding: 0 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface0); color: var(--text); font: inherit; }
+
+/* Start creating (/app/create/choose): two big squares on a full screen. */
+.choose { max-width: 860px; margin: 0 auto; display: grid; gap: 18px; }
+.create-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.choice-card { display: grid; justify-items: start; align-content: center; gap: 8px; min-height: 280px; padding: 32px; border: 1px solid var(--border); border-radius: 20px;
+  background: var(--surface1); color: var(--text); text-align: left; text-decoration: none; font: inherit; cursor: pointer; transition: border-color .15s, transform .15s; }
+.choice-card:hover, .choice-card:focus-visible { border-color: var(--sky); outline: 0; transform: translateY(-2px); }
+.choice-card strong { font: 500 22px var(--display); }
+.choice-card svg { width: 44px; height: 44px; margin-bottom: 10px; fill: none; stroke: var(--sky); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+@media (max-width: 640px) { .create-choice { grid-template-columns: 1fr; } .choice-card { min-height: 0; } }
+@media (prefers-reduced-motion: reduce) { .choice-card { transition: none; } .choice-card:hover { transform: none; } }
+
+/* The sidebar is always collapsed; hovering it opens it over the page. */
+@media (min-width: 801px) {
+  .collapsed .sidebar { position: relative; width: 64px; z-index: 30; overflow-x: hidden; transition: width .15s ease; }
+  .collapsed .sidebar:hover { width: 210px; padding-inline: 14px; box-shadow: 8px 0 24px rgba(0, 0, 0, .25); }
+  .collapsed .sidebar:hover .brand-row { flex-direction: row; gap: 8px; padding: 0 6px; }
+  .collapsed .sidebar:hover .brand-name { display: block; }
+  .collapsed .sidebar:hover .label { display: inline; }
+  .collapsed .sidebar:hover .side-button { justify-content: flex-start; padding-inline: 12px; }
+}
+@media (prefers-reduced-motion: reduce) { .collapsed .sidebar { transition: none; } }

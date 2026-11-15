@@ -14,6 +14,7 @@ import { configureSync, requestSync, sync, syncStatus, onSyncStatus } from './sy
 import { uploadVideo, downloadVideo, removeVideos, removeAllVideos, cloudUsage, CloudVideoError } from './cloudvideo.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
+// Motion Studio is a local-only dev tool: its API answers only on localhost.
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const uuid = () => crypto.randomUUID();
 const clock = (seconds) => {
@@ -85,7 +86,8 @@ async function route() {
   try {
     const [first, second, third] = location.pathname.replace(/^\/app\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
     const idOf = (part) => part?.split('-').at(-1) ?? '';
-    if (first === 'create') {
+    if (first === 'create' && second === 'choose') chooseCreate();
+    else if (first === 'create') {
       const step = Math.max(1, CREATE_STEPS.indexOf(second) + 1);
       // With a video already chosen the steps can be walked with Back and Forward; otherwise start at the first.
       if (state.create?.project) { state.create.step = step; setScreen('create'); renderCreate(); }
@@ -128,7 +130,6 @@ async function boot() {
     afterSync: () => { removePendingVideos(); uploadPending(); expireUntouched(); },
   });
   applyTheme(savedTheme());
-  applyCollapsed(savedSidebar() === '1');
   if (!db()) {
     await route();
     return renderGate('Sign-in is unavailable right now. Check your connection and reload.');
@@ -163,18 +164,6 @@ function setScreen(screen) {
   for (const button of document.querySelectorAll('.side-button')) {
     button.classList.toggle('selected', button.dataset.screen === screen);
   }
-}
-
-function savedSidebar() {
-  try { return localStorage.getItem('prism-sidebar'); } catch { return null; }
-}
-function applyCollapsed(collapsed) {
-  $('.shell').classList.toggle('collapsed', collapsed);
-  const button = $('.collapse-button');
-  button.setAttribute('aria-expanded', String(!collapsed));
-  button.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
-  button.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
-  try { localStorage.setItem('prism-sidebar', collapsed ? '1' : '0'); } catch { /* the choice just isn't remembered */ }
 }
 
 function savedTheme() {
@@ -380,14 +369,16 @@ async function showHome(view = null) {
   const inFolder = (id) => live.filter((p) => p.folderId === id);
 
   const card = (p) => {
-    const poster = p.media.find((m) => m.thumbnail)?.thumbnail;
+    // A Motion video is a project too: its picture and length come from the saved scene, and it opens in Motion Studio.
+    const motion = p.kind === 'motion';
+    const poster = motion ? p.motion?.thumbnail : p.media.find((m) => m.thumbnail)?.thumbnail;
     const making = remoteTask(p.id);
     const info = making ? `<span class="making small"><span class="spinner" aria-hidden="true"></span><span>${remoteText(making)}</span></span>`
-      : `<span class="muted small">${plural(p.segments.length, 'Short')} · ${dateText(p.updated ?? p.created)}</span>`;
+      : `<span class="muted small">${motion ? 'Motion video' : plural(p.segments.length, 'Short')} · ${dateText(p.updated ?? p.created)}</span>`;
     const left = daysLeft(p);
     const expiry = left <= 2 ? `<span class="missing small">${left <= 1 ? 'Deleted tomorrow' : `Deleted in ${left} days`} unless you edit or export it</span>` : '';
     const away = noVideo.has(p.id) && !noVideo.get(p.id) ? '<span class="missing small">Video not on this device</span>' : '';
-    const body = `<div class="poster">${poster ? `<img alt="" src="${poster}">` : ''}<span class="badge">${clock(p.media[0]?.duration ?? 0)}</span></div>
+    const body = `<div class="poster">${poster ? `<img alt="" src="${poster}">` : ''}<span class="badge">${clock(motion ? p.motion?.duration ?? 0 : p.media[0]?.duration ?? 0)}</span></div>
           <strong class="p-title">${esc(p.title)}</strong>${info}${expiry}${away}`;
     return `<div class="project-card" draggable="true" data-project="${esc(p.id)}">
           <button class="open" data-action="open" data-id="${esc(p.id)}">${body}</button>
@@ -643,6 +634,24 @@ const LANGUAGES = ['auto', 'English', 'Ukrainian', 'Polish', 'German', 'French',
   'Lithuanian', 'Latvian', 'Estonian', 'Romanian', 'Turkish', 'Russian', 'Arabic', 'Hindi', 'Japanese', 'Korean', 'Chinese'];
 const LENGTHS = [[0, 'Auto'], [15, '15 seconds'], [30, '30 seconds'], [45, '45 seconds'], [60, '60 seconds'], [90, '90 seconds']];
 
+/** Start creating: Shorts from a video, or a Motion video from a description. Motion Studio runs on localhost only for
+ *  now, so everywhere else this goes straight to Shorts. */
+function chooseCreate() {
+  if (!MOTION_LOCAL) return startCreate();
+  state.project = null;
+  state.create = null;
+  setScreen('create');
+  setUrl('/app/create/choose');
+  $('#app').innerHTML = `<section class="create choose"><button class="link back" data-action="home">← Back to Home</button>
+    <h2 class="big">What do you want to make?</h2>
+    <div class="create-choice">
+      <button class="choice-card" data-action="create-clips"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/></svg>
+        <strong>Shorts from a video</strong><span class="muted">Choose a long video and Relio finds the moments worth sharing.</span></button>
+      <a class="choice-card" href="/motion/"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9 5 3-5 3Z"/></svg>
+        <strong>Motion Studio</strong><span class="muted">Describe an animated video and Relio makes it.</span></a>
+    </div></section>`;
+}
+
 function startCreate({ project = null, media = null, file = null } = {}) {
   setScreen('create');
   state.create = {
@@ -762,7 +771,26 @@ async function createAction(action) {
 
 // MARK: Settings (Account, Overview, Usage): the website's dashboard, now inside the app. No plans or prices for now.
 
-const SETTINGS_TABS = ['account', 'overview', 'usage'];
+// Motion Studio runs on localhost only, so its tab does too.
+const MOTION_LOCAL = ['localhost', '127.0.0.1'].includes(location.hostname);
+const SETTINGS_TABS = ['account', 'overview', 'usage', ...(MOTION_LOCAL ? ['motion'] : [])];
+// The same steps, storage key and starting models as motion/motion.js, which reads what is saved here.
+const MOTION_STEPS = [['code', 'Writing the code'], ['plan', 'Planning'], ['check', 'Checking frames']];
+const MOTION_DEFAULTS = { code: 'xiaomi/mimo-v2.6-flash', plan: 'meta/muse-ember', check: 'meta/muse-ember' };
+async function fillMotionDefaults() {
+  const host = $('#motion-defaults');
+  const models = await fetch('/motion/models.json').then((r) => r.json()).catch(() => null);
+  if (!host?.isConnected) return;
+  if (!models) { host.innerHTML = '<p class="error small">The model list could not be loaded.</p>'; return; }
+  const chosen = { ...MOTION_DEFAULTS };
+  try { for (const [step, id] of Object.entries(JSON.parse(localStorage.getItem('motion-defaults') || '{}'))) if (step in chosen && models.some((m) => m.id === id)) chosen[step] = id; } catch { /* nothing saved */ }
+  host.innerHTML = MOTION_STEPS.map(([step, label]) => `<label class="motion-default"><span>${label}</span>
+    <select data-step="${step}">${models.map((m) => `<option value="${esc(m.id)}" ${chosen[step] === m.id ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}</select></label>`).join('');
+  host.addEventListener('change', (event) => {
+    chosen[event.target.dataset.step] = event.target.value;
+    try { localStorage.setItem('motion-defaults', JSON.stringify(chosen)); $('#motion-saved').textContent = 'Saved.'; } catch { $('#motion-saved').textContent = 'This browser blocks saving, so the choice was not kept.'; }
+  });
+}
 const count = new Intl.NumberFormat();
 const lengthText = (seconds) => { const s = Math.round(seconds); return s >= 60 ? `${count.format(Math.floor(s / 60))}m ${s % 60}s` : `${s}s`; };
 
@@ -803,12 +831,15 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
     ['account', 'Account', email ?? 'Sign in to track your stats', '<path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0"/>', 'Your Relio account.'],
     ['overview', 'Overview', 'Stats and exports', '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>', 'What you have made with Relio, and your exports.'],
     ['usage', 'Usage', used, '<path d="M5 18a8 8 0 1 1 14 0M12 18l4-6"/>', 'Minutes of video you can make Shorts from, and your space for videos in the cloud.'],
+    ...(MOTION_LOCAL ? [['motion', 'Motion Studio', 'Default models', '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9 5 3-5 3Z"/>', 'The model each step uses when “Default” is picked in Motion Studio.']] : []),
   ];
   const nav = NAV.map(([id, title, detail, icon]) => `<button class="settings-item" data-action="settings-tab" data-tab="${id}" ${tab === id ? 'aria-current="page"' : ''}>
       <svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg><span><strong>${title}</strong><span class="muted small">${esc(detail)}</span></span></button>`).join('');
   const [, title, , , blurb] = NAV.find(([id]) => id === tab);
   let body;
-  if (tab === 'usage') {
+  if (tab === 'motion') {
+    body = `<div class="card stack"><div id="motion-defaults" class="stack"><p class="muted small">Loading…</p></div><p id="motion-saved" class="muted small" role="status"></p></div>`;
+  } else if (tab === 'usage') {
     const percent = u ? Math.min(100, u.used / u.allowance * 100) : 0;
     body = `<div class="box">
         <div class="big-number"><b>${u ? Math.ceil(u.used) : '—'}</b><span>${u ? `of ${Math.floor(u.allowance)} minutes used` : state.session ? 'Usage is unavailable. Check your connection and try again.' : 'Sign in to see usage.'}</span></div>
@@ -861,6 +892,7 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
   if (state.session && tab === 'overview') fillAccountData(tab);
   if (state.session && tab === 'account') fillProfile();
   if (tab === 'usage' && email) fillCloudVideo();
+  if (tab === 'motion') fillMotionDefaults();
 }
 
 /** Name and username (profiles table): filled in, then saved on Save. Usernames are unique; the database has the last word. */
@@ -943,6 +975,7 @@ async function openProject(id, shortPart = null) {
   try {
     const project = await store.loadProject(id);
     if (!project) return showHome();
+    if (project.kind === 'motion') { location.href = `/motion/?project=${encodeURIComponent(id)}`; return; }
     const missing = [];
     for (const media of project.media) if (!(await store.hasFile(media.id))) missing.push(media);
     if (missing.length) return attachVideo(project, missing[0], shortPart);
@@ -2056,11 +2089,12 @@ document.addEventListener('click', async (event) => {
   else if (action === 'new-folder') newFolder();
   else if (action === 'select') selectShort(target.dataset.id);
   else if (action === 'make') startCreate({ project: state.project, media: state.project.media.find((m) => m.id === target.dataset.id) });
-  else if (action === 'create') startCreate();
+  else if (action === 'create') chooseCreate();
+  else if (action === 'create-clips') startCreate();
   else if (action === 'nav') {
     const screen = target.dataset.screen;
     if (screen === 'home') showHome();
-    else if (screen === 'create') startCreate();
+    else if (screen === 'create') chooseCreate();
     else if (screen === 'settings') showSettings();
   }
   else if (action === 'settings-tab') showSettings(target.dataset.tab);
@@ -2071,7 +2105,6 @@ document.addEventListener('click', async (event) => {
   else if (action === 'export-one') openExportDialog(state.selectedId);
   else if (action === 'sync-now') sync();
   else if (action === 'retry-upload') { videoBlock = null; uploadPending(); showSettings('usage'); }
-  else if (action === 'collapse') applyCollapsed(!$('.shell').classList.contains('collapsed'));
   else if (action === 'usage') { closeDialog(); showSettings('usage'); }
   else if (action === 'retrack') edit(async (s) => { s.cropKeyframes = null; await retrack(s, await sourceFor(state.project.media.find((m) => m.id === s.mediaId))); });
   else if (action === 'remove') removeShort(target.dataset.id ?? state.selectedId);
