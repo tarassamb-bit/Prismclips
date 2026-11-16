@@ -9,8 +9,8 @@ import { EXPORT_QUALITIES } from './models.js';
 const FPS = 30;
 
 // The watermark on every exported Short: logo and name, gliding between corners so it can't simply be cropped away.
-// Spots are the top left of a 330×90 box in 1080×1920 units, clear of the captions in the middle.
-const MARK_SPOTS = [[48, 150], [702, 150], [702, 1500], [48, 1500]];
+// Spots are the top left of a 420×104 pill in 1080×1920 units, clear of the captions in the middle.
+const MARK_SPOTS = [[48, 150], [612, 150], [612, 1480], [48, 1480]];
 const MARK_HOLD = 4, MARK_GLIDE = 1;
 let markLogo = null;
 
@@ -31,14 +31,15 @@ export async function loadWatermark() {
 export function drawWatermark(ctx, time) {
   const { x, y } = watermarkAt(time);
   ctx.save();
-  ctx.globalAlpha = 0.6;
-  ctx.shadowColor = 'rgba(0,0,0,.45)';
-  ctx.shadowBlur = 8;
-  if (markLogo) ctx.drawImage(markLogo, x, y + 9, 72, 72);
-  ctx.font = '600 44px system-ui, -apple-system, sans-serif';
+  ctx.fillStyle = '#16161a';
+  ctx.beginPath();
+  ctx.roundRect(x, y, 420, 104, 52);
+  ctx.fill();
+  if (markLogo) ctx.drawImage(markLogo, x + 18, y + 16, 72, 72);
+  ctx.font = '600 46px system-ui, -apple-system, sans-serif';
   ctx.fillStyle = '#fff';
   ctx.textBaseline = 'middle';
-  ctx.fillText('Relio Clips', x + 86, y + 46);
+  ctx.fillText('Relio Clips', x + 106, y + 54);
   ctx.restore();
 }
 
