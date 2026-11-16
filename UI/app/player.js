@@ -1,6 +1,6 @@
 // Plays a Short live: the browser's video element supplies picture and sound from the source file, and a canvas shows the Short's
 // layout and captions on top, drawn by the same code as export. No rendering wait, and edits show on the next frame.
-import { drawFrame } from './engine/render.js';
+import { drawFrame, drawWatermark, loadWatermark } from './engine/render.js';
 import { elements, drawCaptions } from './engine/captions.js';
 import { letterbox } from './engine/media.js';
 
@@ -28,12 +28,14 @@ export function mountPlayer(host, segment, source, onFailure) {
   const frame = { draw: (c, x, y, w, h) => c.drawImage(video, x, y, w, h) };
   let raf = 0, alive = true, bars;
   letterbox(source, segment.start, segment.duration).then((found) => { bars = found; if (alive) paint(); });
+  loadWatermark().then(() => { if (alive) paint(); }).catch(() => {});
 
   const paint = () => {
     const t = Math.min(segment.duration, Math.max(0, video.currentTime - segment.start));
     ctx.setTransform(canvas.width / 1080, 0, 0, canvas.height / 1920, 0, 0);
     drawFrame(ctx, frame, segment, source.width, source.height, t, bars);
     drawCaptions(ctx, layers, t);
+    drawWatermark(ctx, t);
     slider.value = t;
     time.textContent = `${clock(t)} / ${clock(segment.duration)}`;
   };

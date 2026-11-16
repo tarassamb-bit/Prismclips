@@ -80,9 +80,11 @@ function supabase(path, init = {}) {
 
 // The caller's Supabase session decides whose data a request may touch.
 async function getUser(req) {
-  const { response, body } = await call('Supabase', `${SUPABASE_URL}/auth/v1/user`, {
+  const ask = () => call('Supabase', `${SUPABASE_URL}/auth/v1/user`, {
     headers: { apikey: SUPABASE_PUBLISHABLE_KEY, Authorization: req.headers.authorization || '' },
   });
+  // One retry: a single dropped connection shouldn't fail the whole request.
+  const { response, body } = await ask().catch(ask);
   if (!response.ok || !UUID.test(body?.id || '')) throw new HttpError(401, 'Your session expired. Sign in again.');
   return body;
 }

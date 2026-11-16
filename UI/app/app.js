@@ -1099,7 +1099,7 @@ async function fetchFromCloud(project, media, shortPart) {
     downloadAbort = null;
     // Usually a dropped connection: offer another try first, and the file on this device as the fallback.
     openDialog(`<div class="stack"><h2>The video didn’t download</h2>
-      <p>${esc(error.message || 'The connection stopped.')} Check your connection and try again.</p>
+      <p>${esc(error.message || 'The connection stopped.')}${/try again\.?$/i.test(error.message || '') ? '' : ' Check your connection and try again.'}</p>
       <div class="row end"><button class="button ghost" data-action="choose-instead">Choose the file instead</button>
         <button class="button primary" data-action="retry-download">Try again</button></div></div>`);
   }

@@ -8,6 +8,74 @@ import { EXPORT_QUALITIES } from './models.js';
 
 const FPS = 30;
 
+// The watermark on every exported Short: the logo badge is always there; each round the name types out of it, stays, folds
+// back, and the badge glides to the next corner, so it can't simply be cropped away. Units are 1080×1920.
+// Each spot is the badge's top left and the side the name opens to (1 right, -1 left), clear of the captions in the middle.
+// Inside the safe zone of YouTube Shorts, TikTok and Reels: below their top tabs (~250), left of their side buttons (~160 from
+// the right), above their name and description (~480 from the bottom), and between the caption and title positions.
+const MARK_SPOTS = [[72, 480, 1], [788, 480, -1], [788, 1090, -1], [72, 1090, 1]];
+const MARK_SIZE = 112, MARK_TEXT = 'Relio Clips';
+const MARK_OPEN = 1.5, MARK_HOLD = 2.5, MARK_CLOSE = 0.8, MARK_GLIDE = 0.9;
+let markLogo = null, markFont = null;
+
+/** At `time` seconds: the badge's top left, which side it opens to, and how far the name is typed out (0 to 1). */
+export function watermarkAt(time) {
+  const cycle = MARK_OPEN + MARK_HOLD + MARK_CLOSE + MARK_GLIDE;
+  const index = Math.floor(time / cycle) % MARK_SPOTS.length;
+  const [ax, ay, side] = MARK_SPOTS[index], [bx, by] = MARK_SPOTS[(index + 1) % MARK_SPOTS.length];
+  const t = time % cycle;
+  const open = t < MARK_OPEN ? t / MARK_OPEN : t < MARK_OPEN + MARK_HOLD ? 1 : Math.max(0, 1 - (t - MARK_OPEN - MARK_HOLD) / MARK_CLOSE);
+  const g = Math.max(0, t - MARK_OPEN - MARK_HOLD - MARK_CLOSE) / MARK_GLIDE;
+  const k = g * g * (3 - 2 * g);
+  return { x: ax + (bx - ax) * k, y: ay + (by - ay) * k, side, open };
+}
+
+export async function loadWatermark() {
+  markLogo ??= await fetch(new URL('../../icon-192.png', import.meta.url)).then((r) => r.blob()).then(createImageBitmap);
+  markFont ??= new FontFace('Relio Mark', `url(${new URL('../../fonts/SpaceGrotesk-Medium.woff2', import.meta.url)})`, { weight: '500' }).load()
+    .then((face) => (globalThis.document?.fonts ?? globalThis.fonts)?.add(face));
+  await markFont;
+}
+
+/** The brand badge: dark, with a sky-to-sun-to-coral border and the logo; the name types out beside it. */
+export function drawWatermark(ctx, time) {
+  const { x, y, side, open } = watermarkAt(time);
+  ctx.save();
+  ctx.font = '500 58px "Relio Mark", sans-serif';
+  ctx.letterSpacing = '-2.3px';
+  ctx.textBaseline = 'middle';
+  // Typed and deleted one letter at a time; the pill is exactly as wide as what's typed so far.
+  const shown = MARK_TEXT.slice(0, Math.floor(MARK_TEXT.length * open + 0.001));
+  const typing = open > 0;
+  const width = MARK_SIZE + (typing ? ctx.measureText(shown).width + 44 : 0);
+  const left = side > 0 ? x : x + MARK_SIZE - width;
+  const border = ctx.createLinearGradient(left, 0, left + width, 0);
+  border.addColorStop(0, '#3fa9f5'); border.addColorStop(0.5, '#ffd36b'); border.addColorStop(1, '#ff8a79');
+  ctx.fillStyle = 'rgba(14,16,22,.85)';
+  ctx.beginPath();
+  ctx.roundRect(left, y, width, MARK_SIZE, MARK_SIZE / 2);
+  ctx.fill();
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = border;
+  ctx.stroke();
+  const logoX = side > 0 ? left : left + width - MARK_SIZE;
+  if (markLogo) ctx.drawImage(markLogo, logoX + 16, y + 16, 80, 80);
+  if (typing) {
+    let pen = side > 0 ? left + MARK_SIZE - 6 : left + 26;
+    for (const char of shown) {
+      ctx.fillStyle = '#fff';
+      ctx.fillText(char, pen, y + 58);
+      pen += ctx.measureText(char).width;
+    }
+    // Blinking cursor while the name is out.
+    if (Math.floor(time * 2.5) % 2 === 0 || open < 1) {
+      ctx.fillStyle = '#3fa9f5';
+      ctx.fillRect(pen + 4, y + 30, 5, 54);
+    }
+  }
+  ctx.restore();
+}
+
 /** Keep only PCM frames inside the edit, then express their timestamp relative to its start. */
 export function trimAudioSample(sample, start, duration) {
   const first = Math.max(0, Math.ceil((start - sample.timestamp) * sample.sampleRate - 1e-7));
@@ -159,6 +227,7 @@ export async function render(source, segment, options) {
     throw new ShortMakerError('cannotExport', codec === 'hevc' ? "This browser can't encode HEVC; choose 1080p · H.264." : 'This browser cannot encode H.264 video.');
   }
   const bars = await letterbox(source, segment.start, segment.duration);
+  await loadWatermark();
   signal?.throwIfAborted();
   // Layout and captions are drawn in 1080×1920 units and scaled onto the output canvas.
   const canvas = new OffscreenCanvas(width, height);
@@ -181,6 +250,7 @@ export async function render(source, segment, options) {
     ctx.setTransform(width / 1080, 0, 0, height / 1920, 0, 0);
     drawFrame(ctx, sample, segment, source.width, source.height, time, bars);
     drawCaptions(ctx, layers, time);
+    drawWatermark(ctx, time);
     await videoSource.add(time, 1 / FPS);
     cancelled();
     progress(Math.min(1, (index + 1) / count));
