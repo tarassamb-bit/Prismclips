@@ -26,10 +26,16 @@ function fail(res, error) {
   send(res, 500, { error: 'Something went wrong. Please try again.' });
 }
 
+// The details go to the server log only: a visitor shouldn't learn which secrets or services the server uses.
+function misconfigured(detail, status = 500) {
+  console.error(`Server misconfiguration: ${detail}`);
+  return new HttpError(status, 'The server is not set up correctly. Please try again later.');
+}
+
 function requireEnv(...names) {
   const missing = names.filter((name) => !process.env[name]);
-  if (missing.length) throw new HttpError(500, `Missing environment variables: ${missing.join(', ')}.`);
-  if (!PADDLE_API[process.env.PADDLE_ENV]) throw new HttpError(500, 'PADDLE_ENV must be "sandbox" or "production".');
+  if (missing.length) throw misconfigured(`missing environment variables: ${missing.join(', ')}.`);
+  if (!PADDLE_API[process.env.PADDLE_ENV]) throw misconfigured('PADDLE_ENV must be "sandbox" or "production".');
 }
 
 // Every outside call gets a timeout, so a slow service fails with a clear error instead of hanging the function.
@@ -114,4 +120,4 @@ async function syncSubscription(id) {
   return 'synced';
 }
 
-module.exports = { ACTIVE, HttpError, send, fail, requireEnv, paddle, supabase, getUser, syncSubscription };
+module.exports = { ACTIVE, HttpError, send, fail, misconfigured, requireEnv, paddle, supabase, getUser, syncSubscription };
