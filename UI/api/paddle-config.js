@@ -1,18 +1,18 @@
 // Vercel function: hands the pricing page its public Paddle settings and the visitor's country.
 // Only the client-side token is read here; the API key never is.
-const { HttpError, send, fail } = require('./_lib');
+const { misconfigured, send, fail } = require('./_lib');
 
 module.exports = (req, res) => {
   try {
     const environment = process.env.PADDLE_ENV;
     const token = process.env.PADDLE_CLIENT_TOKEN;
     if (environment !== 'sandbox' && environment !== 'production') {
-      throw new HttpError(500, 'PADDLE_ENV must be set to "sandbox" or "production".');
+      throw misconfigured('PADDLE_ENV must be set to "sandbox" or "production".');
     }
-    if (!token) throw new HttpError(500, 'PADDLE_CLIENT_TOKEN is not set.');
+    if (!token) throw misconfigured('PADDLE_CLIENT_TOKEN is not set.');
     // Sandbox tokens start with test_, live ones with live_; a mismatch means the wrong account.
     if (token.startsWith('test_') !== (environment === 'sandbox')) {
-      throw new HttpError(500, `PADDLE_CLIENT_TOKEN does not match PADDLE_ENV=${environment}.`);
+      throw misconfigured(`PADDLE_CLIENT_TOKEN does not match PADDLE_ENV=${environment}.`);
     }
 
     // No header (or a non-country value) means null, and Paddle detects the country from the IP.

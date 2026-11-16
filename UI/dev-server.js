@@ -22,6 +22,8 @@ try {
   console.warn('No .env.local found: copy .env.example to .env.local to run the api/ functions.');
 }
 
+const securityHeaders = JSON.parse(fs.readFileSync(path.join(root, 'vercel.json'), 'utf8')).headers.find((rule) => rule.source === '/(.*)').headers;
+
 function notFound(res) {
   res.statusCode = 404;
   res.end('Not found');
@@ -36,6 +38,9 @@ const server = http.createServer(async (req, res) => {
   }
   // Never serve dotfiles (.env.local holds secret keys) or step outside this folder.
   if (pathname.split('/').some((part) => part.startsWith('.'))) return notFound(res);
+  // Like Vercel: the site-wide security headers from vercel.json on every response, and vercel.json itself isn't served.
+  for (const { key, value } of securityHeaders) res.setHeader(key, value);
+  if (pathname === '/vercel.json') return notFound(res);
 
   // Local stand-in for the AI call: the browser can't reach Relio's AI function directly until it allows browser requests (CORS),
   // so on localhost the app posts here and this server forwards the request, headers and all.
