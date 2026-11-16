@@ -178,7 +178,6 @@ details.insp-section:not([open]) { gap: 0; }
 .choice .style-preview.no-captions { display: grid; place-items: center; box-sizing: border-box; color: rgba(255,255,255,.35); font-weight: 700; text-decoration: line-through; }
 .drop-card { display: grid; gap: 6px; justify-items: center; padding: 48px 20px; border: 2px dashed var(--border); border-radius: 16px; cursor: pointer; background: var(--surface1); }
 .drop-card:hover { border-color: var(--sky); } .drop-card.busy { opacity: .7; cursor: default; }
-.yt-link { margin-top: 12px; flex-wrap: nowrap; } .yt-link input { flex: 1; padding: 10px 12px; }
 /* Settings */
 @media (max-width: 800px) {
   body { overflow: auto; }
