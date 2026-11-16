@@ -8,6 +8,40 @@ import { EXPORT_QUALITIES } from './models.js';
 
 const FPS = 30;
 
+// The watermark on every exported Short: logo and name, gliding between corners so it can't simply be cropped away.
+// Spots are the top left of a 330×90 box in 1080×1920 units, clear of the captions in the middle.
+const MARK_SPOTS = [[48, 150], [702, 150], [702, 1500], [48, 1500]];
+const MARK_HOLD = 4, MARK_GLIDE = 1;
+let markLogo = null;
+
+/** Where the watermark's box is at `time` seconds: it holds on a spot, then glides to the next. */
+export function watermarkAt(time) {
+  const cycle = MARK_HOLD + MARK_GLIDE;
+  const index = Math.floor(time / cycle) % MARK_SPOTS.length;
+  const [ax, ay] = MARK_SPOTS[index], [bx, by] = MARK_SPOTS[(index + 1) % MARK_SPOTS.length];
+  const t = Math.max(0, (time % cycle) - MARK_HOLD) / MARK_GLIDE;
+  const k = t * t * (3 - 2 * t);
+  return { x: ax + (bx - ax) * k, y: ay + (by - ay) * k };
+}
+
+export async function loadWatermark() {
+  markLogo ??= await fetch(new URL('../../icon-192.png', import.meta.url)).then((r) => r.blob()).then(createImageBitmap);
+}
+
+export function drawWatermark(ctx, time) {
+  const { x, y } = watermarkAt(time);
+  ctx.save();
+  ctx.globalAlpha = 0.6;
+  ctx.shadowColor = 'rgba(0,0,0,.45)';
+  ctx.shadowBlur = 8;
+  if (markLogo) ctx.drawImage(markLogo, x, y + 9, 72, 72);
+  ctx.font = '600 44px system-ui, -apple-system, sans-serif';
+  ctx.fillStyle = '#fff';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Relio Clips', x + 86, y + 46);
+  ctx.restore();
+}
+
 /** Keep only PCM frames inside the edit, then express their timestamp relative to its start. */
 export function trimAudioSample(sample, start, duration) {
   const first = Math.max(0, Math.ceil((start - sample.timestamp) * sample.sampleRate - 1e-7));
@@ -159,6 +193,7 @@ export async function render(source, segment, options) {
     throw new ShortMakerError('cannotExport', codec === 'hevc' ? "This browser can't encode HEVC; choose 1080p · H.264." : 'This browser cannot encode H.264 video.');
   }
   const bars = await letterbox(source, segment.start, segment.duration);
+  await loadWatermark();
   signal?.throwIfAborted();
   // Layout and captions are drawn in 1080×1920 units and scaled onto the output canvas.
   const canvas = new OffscreenCanvas(width, height);
@@ -181,6 +216,7 @@ export async function render(source, segment, options) {
     ctx.setTransform(width / 1080, 0, 0, height / 1920, 0, 0);
     drawFrame(ctx, sample, segment, source.width, source.height, time, bars);
     drawCaptions(ctx, layers, time);
+    drawWatermark(ctx, time);
     await videoSource.add(time, 1 / FPS);
     cancelled();
     progress(Math.min(1, (index + 1) / count));
