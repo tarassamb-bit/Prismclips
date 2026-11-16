@@ -9,10 +9,10 @@ import { EXPORT_QUALITIES } from './models.js';
 const FPS = 30;
 
 // The watermark on every exported Short: logo and name, gliding between corners so it can't simply be cropped away.
-// Spots are the top left of a 420×104 pill in 1080×1920 units, clear of the captions in the middle.
-const MARK_SPOTS = [[48, 150], [612, 150], [612, 1480], [48, 1480]];
+// Spots are the top left of a 468×112 pill in 1080×1920 units, clear of the captions in the middle.
+const MARK_SPOTS = [[48, 150], [564, 150], [564, 1480], [48, 1480]];
 const MARK_HOLD = 4, MARK_GLIDE = 1;
-let markLogo = null;
+let markLogo = null, markFont = null;
 
 /** Where the watermark's box is at `time` seconds: it holds on a spot, then glides to the next. */
 export function watermarkAt(time) {
@@ -26,20 +26,35 @@ export function watermarkAt(time) {
 
 export async function loadWatermark() {
   markLogo ??= await fetch(new URL('../../icon-192.png', import.meta.url)).then((r) => r.blob()).then(createImageBitmap);
+  markFont ??= new FontFace('Relio Mark', `url(${new URL('../../fonts/SpaceGrotesk-Medium.woff2', import.meta.url)})`, { weight: '500' }).load()
+    .then((face) => (globalThis.document?.fonts ?? globalThis.fonts)?.add(face));
+  await markFont;
 }
 
+/** The brand pill: dark, with a sky-to-sun-to-coral border, the logo and "Relio. Clips" with the dot in sky blue. */
 export function drawWatermark(ctx, time) {
   const { x, y } = watermarkAt(time);
   ctx.save();
-  ctx.fillStyle = '#16161a';
+  const border = ctx.createLinearGradient(x, 0, x + 468, 0);
+  border.addColorStop(0, '#3fa9f5'); border.addColorStop(0.5, '#ffd36b'); border.addColorStop(1, '#ff8a79');
+  ctx.fillStyle = 'rgba(14,16,22,.82)';
   ctx.beginPath();
-  ctx.roundRect(x, y, 420, 104, 52);
+  ctx.roundRect(x, y, 468, 112, 56);
   ctx.fill();
-  if (markLogo) ctx.drawImage(markLogo, x + 18, y + 16, 72, 72);
-  ctx.font = '600 46px system-ui, -apple-system, sans-serif';
-  ctx.fillStyle = '#fff';
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = border;
+  ctx.stroke();
+  if (markLogo) ctx.drawImage(markLogo, x + 18, y + 16, 80, 80);
+  ctx.font = '500 58px "Relio Mark", sans-serif';
+  ctx.letterSpacing = '-2.3px';
   ctx.textBaseline = 'middle';
-  ctx.fillText('Relio Clips', x + 106, y + 54);
+  let left = x + 114;
+  for (const [text, color, gap] of [['Relio', '#fff', 0], ['.', '#3fa9f5', 0], ['Clips', '#fff', 13]]) {
+    left += gap;
+    ctx.fillStyle = color;
+    ctx.fillText(text, left, y + 58);
+    left += ctx.measureText(text).width;
+  }
   ctx.restore();
 }
 
