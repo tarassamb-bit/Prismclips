@@ -1,4 +1,4 @@
-// "Report a bug": any link or button with data-bug-report opens a small form. Reports go straight into the
+// "Report a bug" / "Send feedback": any link or button with data-bug-report (="feedback" for feedback) opens a small form. Reports go straight into the
 // bug_reports table (insert-only for the public; see supabase/migrations/202611160001_bug_reports.sql).
 // Plain fetch, so it works on site pages that don't load the Supabase library as well as in the app.
 (() => {
@@ -45,11 +45,11 @@
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       const message = form.message.value.trim(), email = form.email.value.trim();
-      if (!message) { status.textContent = 'Please describe what went wrong.'; form.message.focus(); return; }
+      if (!message) { status.textContent = 'Please write a few words first.'; form.message.focus(); return; }
       send.disabled = true;
       status.textContent = 'Sending…';
       try {
-        const body = JSON.stringify({ message, email: email || null, page: location.href.slice(0, 500), agent: navigator.userAgent.slice(0, 500) });
+        const body = JSON.stringify({ kind: dialog.dataset.kind, message, email: email || null, page: location.href.slice(0, 500), agent: navigator.userAgent.slice(0, 500) });
         const post = (auth) => fetch(URL_, {
           method: 'POST', body,
           headers: { apikey: KEY, Authorization: `Bearer ${auth}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
@@ -62,7 +62,7 @@
           throw new Error(detail.startsWith('Too many') ? detail : `The server answered ${response.status}.`);
         }
         form.reset();
-        status.textContent = 'Thanks! Your report was sent.';
+        status.textContent = 'Thanks! It was sent.';
         setTimeout(() => dialog.open && dialog.close(), 1600);
       } catch (error) {
         status.textContent = `Couldn't send it: ${error.message || 'check your connection'} Please try again.`;
@@ -77,6 +77,12 @@
     if (!trigger) return;
     event.preventDefault();
     if (!dialog) build();
+    const feedback = trigger.dataset.bugReport === 'feedback';
+    dialog.dataset.kind = feedback ? 'feedback' : 'bug';
+    dialog.querySelector('h2').textContent = feedback ? 'Send feedback' : 'Report a bug';
+    dialog.querySelector('form > p').textContent = feedback ? 'Ideas, wishes, what you love or don’t. We read every message.' : 'Tell us what went wrong and what you were doing. We read every report.';
+    dialog.querySelector('label').firstChild.textContent = feedback ? 'Your feedback ' : 'What happened? ';
+    dialog.querySelector('[type=submit]').textContent = feedback ? 'Send feedback' : 'Send report';
     dialog.querySelector('.bug-status').textContent = '';
     dialog.showModal();
     dialog.querySelector('textarea').focus();

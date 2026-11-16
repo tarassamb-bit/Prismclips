@@ -1,8 +1,9 @@
--- Bug reports from the "Report a bug" form on the site and in the app. Anyone may send one (no account needed);
+-- Bug reports and feedback from the "Report a bug" and "Send feedback" forms on the site and in the app. Anyone may send one (no account needed);
 -- nobody can read them through the API: only the dashboard and service role see this table.
 create table if not exists public.bug_reports (
   id uuid primary key default gen_random_uuid(),
   created timestamptz not null default now(),
+  kind text not null default 'bug' check (kind in ('bug', 'feedback')),
   user_id uuid default auth.uid() references auth.users (id) on delete set null,
   message text not null check (char_length(btrim(message)) between 1 and 4000),
   email text check (email is null or char_length(email) <= 200),
