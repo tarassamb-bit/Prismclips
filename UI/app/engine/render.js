@@ -14,7 +14,7 @@ const FPS = 30;
 // Inside the safe zone of YouTube Shorts, TikTok and Reels: below their top tabs (~250), left of their side buttons (~160 from
 // the right), above their name and description (~480 from the bottom), and between the caption and title positions.
 const MARK_SPOTS = [[72, 480, 1], [788, 480, -1], [788, 1090, -1], [72, 1090, 1]];
-const MARK_SIZE = 112, MARK_TEXT = 'Relio. Clips';
+const MARK_SIZE = 112, MARK_TEXT = 'Relio Clips';
 const MARK_OPEN = 1.5, MARK_HOLD = 2.5, MARK_CLOSE = 0.8, MARK_GLIDE = 0.9;
 let markLogo = null, markFont = null;
 
@@ -63,7 +63,7 @@ export function drawWatermark(ctx, time) {
   if (typing) {
     let pen = side > 0 ? left + MARK_SIZE - 6 : left + 26;
     for (const char of shown) {
-      ctx.fillStyle = char === '.' ? '#3fa9f5' : '#fff';
+      ctx.fillStyle = '#fff';
       ctx.fillText(char, pen, y + 58);
       pen += ctx.measureText(char).width;
     }
