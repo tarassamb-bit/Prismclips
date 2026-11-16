@@ -13,7 +13,7 @@ const FPS = 30;
 // Each spot is the badge's top left and the side the name opens to (1 right, -1 left), clear of the captions in the middle.
 const MARK_SPOTS = [[48, 150, 1], [920, 150, -1], [920, 1480, -1], [48, 1480, 1]];
 const MARK_SIZE = 112, MARK_TEXT = 'Relio. Clips';
-const MARK_OPEN = 0.7, MARK_HOLD = 2.6, MARK_CLOSE = 0.5, MARK_GLIDE = 0.9;
+const MARK_OPEN = 1.5, MARK_HOLD = 2.5, MARK_CLOSE = 0.8, MARK_GLIDE = 0.9;
 let markLogo = null, markFont = null;
 
 /** At `time` seconds: the badge's top left, which side it opens to, and how far the name is typed out (0 to 1). */
@@ -42,9 +42,10 @@ export function drawWatermark(ctx, time) {
   ctx.font = '500 58px "Relio Mark", sans-serif';
   ctx.letterSpacing = '-2.3px';
   ctx.textBaseline = 'middle';
-  const full = ctx.measureText(MARK_TEXT).width + 34;
-  const eased = 1 - (1 - open) ** 3;
-  const width = MARK_SIZE + full * eased;
+  // Typed and deleted one letter at a time; the pill is exactly as wide as what's typed so far.
+  const shown = MARK_TEXT.slice(0, Math.floor(MARK_TEXT.length * open + 0.001));
+  const typing = open > 0;
+  const width = MARK_SIZE + (typing ? ctx.measureText(shown).width + 44 : 0);
   const left = side > 0 ? x : x + MARK_SIZE - width;
   const border = ctx.createLinearGradient(left, 0, left + width, 0);
   border.addColorStop(0, '#3fa9f5'); border.addColorStop(0.5, '#ffd36b'); border.addColorStop(1, '#ff8a79');
@@ -57,17 +58,17 @@ export function drawWatermark(ctx, time) {
   ctx.stroke();
   const logoX = side > 0 ? left : left + width - MARK_SIZE;
   if (markLogo) ctx.drawImage(markLogo, logoX + 16, y + 16, 80, 80);
-  // Typed one letter at a time, inside the pill only.
-  const shown = MARK_TEXT.slice(0, Math.round(MARK_TEXT.length * open));
-  if (shown) {
-    ctx.beginPath();
-    ctx.roundRect(left, y, width, MARK_SIZE, MARK_SIZE / 2);
-    ctx.clip();
-    let pen = side > 0 ? left + MARK_SIZE : left + 22;
+  if (typing) {
+    let pen = side > 0 ? left + MARK_SIZE - 6 : left + 26;
     for (const char of shown) {
       ctx.fillStyle = char === '.' ? '#3fa9f5' : '#fff';
       ctx.fillText(char, pen, y + 58);
       pen += ctx.measureText(char).width;
+    }
+    // Blinking cursor while the name is out.
+    if (Math.floor(time * 2.5) % 2 === 0 || open < 1) {
+      ctx.fillStyle = '#3fa9f5';
+      ctx.fillRect(pen + 4, y + 30, 5, 54);
     }
   }
   ctx.restore();
