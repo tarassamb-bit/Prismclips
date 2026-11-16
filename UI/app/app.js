@@ -12,6 +12,7 @@ import * as store from './store.js';
 import { hintFor, TOUR_STEPS } from './tour.js';
 import { configureSync, requestSync, sync, syncStatus, onSyncStatus } from './sync.js';
 import { uploadVideo, downloadVideo, removeVideos, removeAllVideos, cloudUsage, CloudVideoError } from './cloudvideo.js';
+import { videoFromLink } from './youtube.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -720,6 +721,28 @@ async function chooseVideo(file) {
   if (isCurrent()) renderCreate();
 }
 
+/** A YouTube link instead of a file: fetched into a file through the account's cloud storage, then used like any chosen video. */
+async function chooseLink(url) {
+  const c = state.create;
+  if (!c || c.busy || !url.trim()) return;
+  const token = await accessToken();
+  if (!token) { c.error = 'Sign in to use a YouTube link.'; return renderCreate(); }
+  const account = userId();
+  const isCurrent = () => state.create === c && userId() === account;
+  Object.assign(c, { error: '', busy: true, status: '' });
+  renderCreate();
+  let file;
+  try {
+    file = await videoFromLink({ token, url, onStatus: (text) => { c.status = text; if (isCurrent()) renderCreate(); } });
+  } catch (error) {
+    c.error = error.message || 'That link could not be used.';
+  }
+  Object.assign(c, { busy: false, status: '' });
+  if (!isCurrent()) return;
+  if (file) chooseVideo(file);
+  else renderCreate();
+}
+
 /** Why the custom range can't be used, or null when it can. */
 function rangeProblem(c) {
   if (c.region !== 'custom') return null;
@@ -738,8 +761,10 @@ function renderCreate() {
       <p class="muted">Relio keeps the video in this browser and saves it to your account, so the project opens on any device you sign in on. Relio AI reads its audio and some frames.</p>
       <label class="drop-card ${c.busy ? 'busy' : ''}"><input id="pick" type="file" accept="video/*" hidden ${c.busy ? 'disabled' : ''}>
         <span class="drop-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 16V4m-5 5 5-5 5 5M5 20h14"/></svg></span>
-        <strong>${c.busy ? 'Reading the video…' : 'Drop a video here'}</strong>
+        <strong>${c.busy ? esc(c.status || 'Reading the video…') : 'Drop a video here'}</strong>
         ${c.busy ? '' : '<span class="muted small">or</span><span class="button primary">Choose a video</span>'}</label>
+      <form class="yt-link row" id="yt-form"><input id="yt-url" type="url" inputmode="url" autocomplete="off" placeholder="Or paste a YouTube link" aria-label="YouTube link" ${c.busy ? 'disabled' : ''}>
+        <button class="button" type="submit" ${c.busy ? 'disabled' : ''}>Use link</button></form>
       ${c.error ? `<p class="error" role="alert">${esc(c.error)}</p>` : ''}${back}`;
   } else if (c.step === 2) {
     const m = c.media;
@@ -777,6 +802,7 @@ function renderCreate() {
   $('#app').innerHTML = `<section class="create">${html}</section>`;
   for (const canvas of document.querySelectorAll('[data-preview]')) stylePreview(canvas, canvas.dataset.preview);
   $('#pick')?.addEventListener('change', (event) => event.target.files[0] && chooseVideo(event.target.files[0]));
+  $('#yt-form')?.addEventListener('submit', (event) => { event.preventDefault(); chooseLink($('#yt-url').value); });
   $('#length')?.addEventListener('change', (event) => { c.duration = Number(event.target.value); renderCreate(); });
   $('#region')?.addEventListener('change', (event) => { c.region = event.target.value; renderCreate(); });
   $('#language')?.addEventListener('change', (event) => { c.language = event.target.value; });

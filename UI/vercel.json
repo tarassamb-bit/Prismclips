@@ -3,6 +3,9 @@
   "functions": {
     "api/gemini.js": {
       "maxDuration": 300
+    },
+    "api/youtube.js": {
+      "maxDuration": 300
     }
   },
   "redirects": [
