@@ -450,7 +450,8 @@ details.insp-section:not([open]) { gap: 0; }
   .collapsed .sidebar:hover { width: 210px; padding-inline: 14px; box-shadow: 8px 0 24px rgba(0, 0, 0, .25); }
   .collapsed .sidebar:hover .brand-row { flex-direction: row; gap: 8px; padding: 0 6px; }
   .collapsed .sidebar:hover .brand-name { display: block; }
-  .collapsed .sidebar:hover .label { display: inline; }
+  .collapsed .sidebar:hover .label { display: inline; white-space: nowrap; }
+  .collapsed .sidebar:hover .brand-name { white-space: nowrap; }
   .collapsed .sidebar:hover .side-button { justify-content: flex-start; padding-inline: 12px; }
 }
 @media (prefers-reduced-motion: reduce) { .collapsed .sidebar { transition: none; } }
