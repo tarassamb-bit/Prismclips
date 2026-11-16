@@ -11,7 +11,9 @@ const FPS = 30;
 // The watermark on every exported Short: the logo badge is always there; each round the name types out of it, stays, folds
 // back, and the badge glides to the next corner, so it can't simply be cropped away. Units are 1080×1920.
 // Each spot is the badge's top left and the side the name opens to (1 right, -1 left), clear of the captions in the middle.
-const MARK_SPOTS = [[48, 150, 1], [920, 150, -1], [920, 1480, -1], [48, 1480, 1]];
+// Inside the safe zone of YouTube Shorts, TikTok and Reels: below their top tabs (~250), left of their side buttons (~160 from
+// the right), above their name and description (~480 from the bottom), and between the caption and title positions.
+const MARK_SPOTS = [[72, 480, 1], [788, 480, -1], [788, 1090, -1], [72, 1090, 1]];
 const MARK_SIZE = 112, MARK_TEXT = 'Relio. Clips';
 const MARK_OPEN = 1.5, MARK_HOLD = 2.5, MARK_CLOSE = 0.8, MARK_GLIDE = 0.9;
 let markLogo = null, markFont = null;
