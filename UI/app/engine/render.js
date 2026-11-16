@@ -8,20 +8,24 @@ import { EXPORT_QUALITIES } from './models.js';
 
 const FPS = 30;
 
-// The watermark on every exported Short: logo and name, gliding between corners so it can't simply be cropped away.
-// Spots are the top left of a 468×112 pill in 1080×1920 units, clear of the captions in the middle.
-const MARK_SPOTS = [[48, 150], [564, 150], [564, 1480], [48, 1480]];
-const MARK_HOLD = 4, MARK_GLIDE = 1;
+// The watermark on every exported Short: the logo badge is always there; each round the name types out of it, stays, folds
+// back, and the badge glides to the next corner, so it can't simply be cropped away. Units are 1080×1920.
+// Each spot is the badge's top left and the side the name opens to (1 right, -1 left), clear of the captions in the middle.
+const MARK_SPOTS = [[48, 150, 1], [920, 150, -1], [920, 1480, -1], [48, 1480, 1]];
+const MARK_SIZE = 112, MARK_TEXT = 'Relio. Clips';
+const MARK_OPEN = 0.7, MARK_HOLD = 2.6, MARK_CLOSE = 0.5, MARK_GLIDE = 0.9;
 let markLogo = null, markFont = null;
 
-/** Where the watermark's box is at `time` seconds: it holds on a spot, then glides to the next. */
+/** At `time` seconds: the badge's top left, which side it opens to, and how far the name is typed out (0 to 1). */
 export function watermarkAt(time) {
-  const cycle = MARK_HOLD + MARK_GLIDE;
+  const cycle = MARK_OPEN + MARK_HOLD + MARK_CLOSE + MARK_GLIDE;
   const index = Math.floor(time / cycle) % MARK_SPOTS.length;
-  const [ax, ay] = MARK_SPOTS[index], [bx, by] = MARK_SPOTS[(index + 1) % MARK_SPOTS.length];
-  const t = Math.max(0, (time % cycle) - MARK_HOLD) / MARK_GLIDE;
-  const k = t * t * (3 - 2 * t);
-  return { x: ax + (bx - ax) * k, y: ay + (by - ay) * k };
+  const [ax, ay, side] = MARK_SPOTS[index], [bx, by] = MARK_SPOTS[(index + 1) % MARK_SPOTS.length];
+  const t = time % cycle;
+  const open = t < MARK_OPEN ? t / MARK_OPEN : t < MARK_OPEN + MARK_HOLD ? 1 : Math.max(0, 1 - (t - MARK_OPEN - MARK_HOLD) / MARK_CLOSE);
+  const g = Math.max(0, t - MARK_OPEN - MARK_HOLD - MARK_CLOSE) / MARK_GLIDE;
+  const k = g * g * (3 - 2 * g);
+  return { x: ax + (bx - ax) * k, y: ay + (by - ay) * k, side, open };
 }
 
 export async function loadWatermark() {
@@ -31,29 +35,40 @@ export async function loadWatermark() {
   await markFont;
 }
 
-/** The brand pill: dark, with a sky-to-sun-to-coral border, the logo and "Relio. Clips" with the dot in sky blue. */
+/** The brand badge: dark, with a sky-to-sun-to-coral border and the logo; the name types out beside it. */
 export function drawWatermark(ctx, time) {
-  const { x, y } = watermarkAt(time);
+  const { x, y, side, open } = watermarkAt(time);
   ctx.save();
-  const border = ctx.createLinearGradient(x, 0, x + 468, 0);
+  ctx.font = '500 58px "Relio Mark", sans-serif';
+  ctx.letterSpacing = '-2.3px';
+  ctx.textBaseline = 'middle';
+  const full = ctx.measureText(MARK_TEXT).width + 34;
+  const eased = 1 - (1 - open) ** 3;
+  const width = MARK_SIZE + full * eased;
+  const left = side > 0 ? x : x + MARK_SIZE - width;
+  const border = ctx.createLinearGradient(left, 0, left + width, 0);
   border.addColorStop(0, '#3fa9f5'); border.addColorStop(0.5, '#ffd36b'); border.addColorStop(1, '#ff8a79');
-  ctx.fillStyle = 'rgba(14,16,22,.82)';
+  ctx.fillStyle = 'rgba(14,16,22,.85)';
   ctx.beginPath();
-  ctx.roundRect(x, y, 468, 112, 56);
+  ctx.roundRect(left, y, width, MARK_SIZE, MARK_SIZE / 2);
   ctx.fill();
   ctx.lineWidth = 4;
   ctx.strokeStyle = border;
   ctx.stroke();
-  if (markLogo) ctx.drawImage(markLogo, x + 18, y + 16, 80, 80);
-  ctx.font = '500 58px "Relio Mark", sans-serif';
-  ctx.letterSpacing = '-2.3px';
-  ctx.textBaseline = 'middle';
-  let left = x + 114;
-  for (const [text, color, gap] of [['Relio', '#fff', 0], ['.', '#3fa9f5', 0], ['Clips', '#fff', 13]]) {
-    left += gap;
-    ctx.fillStyle = color;
-    ctx.fillText(text, left, y + 58);
-    left += ctx.measureText(text).width;
+  const logoX = side > 0 ? left : left + width - MARK_SIZE;
+  if (markLogo) ctx.drawImage(markLogo, logoX + 16, y + 16, 80, 80);
+  // Typed one letter at a time, inside the pill only.
+  const shown = MARK_TEXT.slice(0, Math.round(MARK_TEXT.length * open));
+  if (shown) {
+    ctx.beginPath();
+    ctx.roundRect(left, y, width, MARK_SIZE, MARK_SIZE / 2);
+    ctx.clip();
+    let pen = side > 0 ? left + MARK_SIZE : left + 22;
+    for (const char of shown) {
+      ctx.fillStyle = char === '.' ? '#3fa9f5' : '#fff';
+      ctx.fillText(char, pen, y + 58);
+      pen += ctx.measureText(char).width;
+    }
   }
   ctx.restore();
 }
