@@ -29,7 +29,7 @@ async function db(pathAndQuery, init = {}) {
   if (!response.ok) throw new Error(`Supabase ${response.status}: ${(await response.text()).slice(0, 200)}`);
   return response.status === 204 ? null : response.json().catch(() => null);
 }
-const update = (id, fields) => db(`live_sessions?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ ...fields, updated: new Date().toISOString() }) });
+const update = (id, fields) => db(`live_sessions?id=eq.${id}&state=in.(starting,recording,offline)`, { method: 'PATCH', body: JSON.stringify({ ...fields, updated: new Date().toISOString() }) });
 
 async function playlistUrl(login) {
   const response = await fetch('https://gql.twitch.tv/gql', {
@@ -109,7 +109,7 @@ class Recorder {
         this.lastSequence = piece.sequence;
         await this.record(piece, playlist.init).catch((error) => log(this.login, 'piece failed', error.message));
       }
-      await update(this.id, { state: 'recording', buffered: this.buffered(), chat: this.chatOn }).catch(() => {});
+      await update(this.id, { state: 'recording', buffered: this.buffered(), chat: this.chatOn, graph: this.graph() }).catch(() => {});
       if (playlist.ended) return;
       await wait(2000);
     }
@@ -199,6 +199,25 @@ class Recorder {
     };
     socket.onclose = () => { this.chatOn = false; if (!this.stopped) setTimeout(() => this.listenToChat(), 10_000); };
     socket.onerror = () => {};
+  }
+
+  /** The last five minutes for the Live screen's graph: per second, loudness 0–1, chat messages, and hype 0–1. */
+  graph() {
+    if (this.startedAt === null) return null;
+    const now = this.second(Date.now()) - 1, from = Math.max(0, now - 300);
+    const level = this.detector.level, chat = this.detector.chat;
+    const mean = (list, a, b, gaps) => { let sum = 0, n = 0; for (let t = Math.max(0, a); t < b; t++) { if (list[t] !== undefined) { sum += list[t]; n++; } else if (gaps) n++; } return n ? sum / n : 0; };
+    const loud = [], messages = [], hype = [];
+    for (let t = from; t <= now; t++) {
+      const amp = mean(level, t - 1, t + 1, false);
+      loud.push(amp > 0 ? Math.round(Math.min(1, Math.max(0, (20 * Math.log10(amp) + 60) / 60)) * 100) / 100 : 0);
+      messages.push(chat[t] ?? 0);
+      const loudJump = mean(level, t - 6, t, false) / (mean(level, t - 180, t - 10, false) || Infinity) - 1;
+      const chatJump = mean(chat, t - 8, t, true) / Math.max(0.5, mean(chat, t - 180, t - 10, true)) - 1;
+      // 0.6 (60% up) is where a moment triggers; it sits at 0.5 on the graph.
+      hype.push(Math.round(Math.min(1, Math.max(0, Math.max(loudJump, chatJump)) / 1.2) * 100) / 100);
+    }
+    return { start: this.startedAt + from * 1000, loud, chat: messages, hype };
   }
 
   stop() { this.stopped = true; this.socket?.close(); rm(this.dir, { recursive: true, force: true }).catch(() => {}); }

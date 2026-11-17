@@ -456,7 +456,24 @@ details.insp-section:not([open]) { gap: 0; }
 }
 @media (prefers-reduced-motion: reduce) { .collapsed .sidebar { transition: none; } }
 
-/* Live clipping */
+/* Live clipping: tabs per channel, chat beside the player, the graph under them. */
+.live { display: grid; gap: 14px; }
 .live-form { flex-wrap: nowrap; } .live-form input { flex: 1; padding: 10px 12px; }
-.live-moments { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.live-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.live-tab { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--border); background: transparent; cursor: pointer; font: inherit; color: inherit; }
+.live-tab.on { background: var(--surface2); border-color: var(--sky); }
+.live-tab .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text2, #888); }
+.live-tab .dot.live { background: #ff453a; box-shadow: 0 0 8px #ff453a; }
+.live-head { margin-bottom: 10px; }
+.live-stage { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 12px; }
+.live-stage iframe { width: 100%; border: 0; border-radius: 12px; background: #0e0e10; }
+.live-player { aspect-ratio: 16 / 9; }
+.live-chat { height: 100%; min-height: 320px; }
+.live-graph-panel { margin-top: 12px; display: grid; gap: 8px; }
+.live-graph-panel canvas { width: 100%; height: 160px; display: block; }
+.live-legend { display: inline-flex; gap: 6px 14px; align-items: center; flex-wrap: wrap; }
+.live-legend i { display: inline-block; width: 12px; height: 4px; border-radius: 2px; margin-right: -8px; }
+.live-clips-title { margin: 6px 0 0; }
+.live-moments { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .live-moments li { padding: 8px 0; border-top: 1px solid var(--border); flex-wrap: nowrap; gap: 12px; }
+@media (max-width: 900px) { .live-stage { grid-template-columns: 1fr; } .live-chat { order: 2; height: 360px; } }
