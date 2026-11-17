@@ -146,7 +146,7 @@ async function make(clip, login) {
   errors.delete(clip.id);
   render();
   try {
-    const blob = await downloadVideo({ token: await token(), mediaId: clip.media_id, type: 'video/mp4', size: clip.bytes });
+    const blob = await downloadVideo({ token, mediaId: clip.media_id, type: 'video/mp4', size: clip.bytes });
     onFile(new File([blob], `${login} ${clock(Date.parse(clip.at)).replace(/:/g, '.')}.mp4`, { type: 'video/mp4' }));
   } catch (error) { errors.set(clip.id, error.message); }
   busy.delete(clip.id);
