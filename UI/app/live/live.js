@@ -10,6 +10,8 @@ const STATE_TEXT = { starting: 'Starting…', recording: 'Recording', offline: '
 let host = null, onFile = null, token = null, db = null, polling = null;
 let rows = [], clips = [], selected = null, shownChannel = null;
 const busy = new Set(), errors = new Map();
+// Where the pointer is over the graph (CSS pixels from its left), and what the last drawing mapped, for the hover readout.
+let hoverX = null, plotted = null;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
@@ -107,9 +109,15 @@ function render() {
       <div class="panel live-graph-panel">
         <div class="live-legend small"><span><i style="background:${COLORS.loud}"></i>Voice</span><span><i style="background:${COLORS.chat}"></i>Chat messages / s</span><span><i style="background:${COLORS.hype}"></i>Hype</span><span><b class="clip-dot"></b>Clip</span>
           <span class="muted live-span">${active ? 'last 5 minutes' : 'last 5 minutes before it stopped'}</span></div>
-        <canvas id="live-graph" height="160" aria-label="Voice, chat and hype over the last five minutes"></canvas>
+        <div class="live-graph-wrap"><canvas id="live-graph" height="160" aria-label="Voice, chat and hype over the last five minutes"></canvas>
+          <div id="live-tip" class="live-tip" role="status" hidden></div></div>
       </div>
       <div class="live-clips-head"><h3>Clips</h3><span id="live-count" class="muted small"></span></div><div id="live-clips"></div>`;
+    hoverX = null;
+    const canvas = view.querySelector('#live-graph');
+    canvas.addEventListener('pointermove', (event) => { hoverX = event.clientX - canvas.getBoundingClientRect().left; drawGraph(); });
+    canvas.addEventListener('pointerdown', (event) => { hoverX = event.clientX - canvas.getBoundingClientRect().left; drawGraph(); });
+    canvas.addEventListener('pointerleave', () => { hoverX = null; drawGraph(); });
     view.querySelector('#live-stop').addEventListener('click', async (event) => {
       event.currentTarget.disabled = true;
       await db().from('live_sessions').update({ state: 'stopped' }).eq('id', current.id);
@@ -157,6 +165,9 @@ function drawGraph() {
   ctx.scale(ratio, ratio);
   ctx.clearRect(0, 0, width, height);
   const graph = current?.graph;
+  const tip = host.querySelector('#live-tip');
+  if (tip) tip.hidden = true;
+  plotted = null;
   ctx.strokeStyle = 'rgba(128,128,128,.25)';
   ctx.lineWidth = 1;
   for (let i = 1; i < 5; i++) { const x = Math.round(width * i / 5) + 0.5; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke(); }
@@ -189,4 +200,36 @@ function drawGraph() {
   ctx.fillText('−5 min', 4, height - 4);
   ctx.fillText('now', width - 26, height - 4);
   ctx.fillText(`chat max ${chatMax}/s`, width - 110, 14);
+  plotted = { graph, xOf, yOf, chatMax };
+  if (hoverX !== null) readout(ctx, width, height, current);
+}
+
+/** The second under the pointer: a guide line, a dot on each line, and its numbers in a small box. */
+function readout(ctx, width, height, current) {
+  const { graph, xOf, yOf, chatMax } = plotted;
+  const step = xOf(graph.start + 1000) - xOf(graph.start);
+  const index = Math.max(0, Math.min(graph.loud.length - 1, Math.round((hoverX - xOf(graph.start)) / step)));
+  const at = graph.start + index * 1000, x = xOf(at);
+  if (x < 0 || x > width) return;
+  ctx.strokeStyle = 'rgba(128,128,128,.7)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, height); ctx.stroke();
+  ctx.setLineDash([]);
+  const values = { loud: graph.loud[index], chat: graph.chat[index] / chatMax, hype: graph.hype[index] };
+  for (const key of ['loud', 'chat', 'hype']) {
+    ctx.fillStyle = COLORS[key];
+    ctx.beginPath(); ctx.arc(x, yOf(values[key]), 4.5, 0, Math.PI * 2); ctx.fill();
+  }
+  const clip = clips.find((c) => c.session_id === current.id && Math.abs(Date.parse(c.at) - at) <= 2000);
+  const tip = host.querySelector('#live-tip');
+  tip.innerHTML = `<strong class="mono">${clock(at)}</strong>
+    <span><i style="background:${COLORS.loud}"></i>Voice ${Math.round(graph.loud[index] * 100)}%</span>
+    <span><i style="background:${COLORS.chat}"></i>Chat ${graph.chat[index]} msg/s</span>
+    <span><i style="background:${COLORS.hype}"></i>Hype ${Math.round(graph.hype[index] * 100)}%${graph.hype[index] >= 0.5 ? ' · spike' : ''}</span>
+    ${clip ? `<span class="tip-clip">● Clip: ${esc(clip.why)}</span>` : ''}`;
+  tip.hidden = false;
+  // Beside the guide line, flipped to the left near the right edge.
+  const left = x + 14 + tip.offsetWidth > width ? x - 14 - tip.offsetWidth : x + 14;
+  tip.style.left = `${Math.max(0, left)}px`;
 }

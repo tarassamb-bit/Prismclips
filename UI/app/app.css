@@ -476,6 +476,13 @@ details.insp-section:not([open]) { gap: 0; }
 .live-chat { order: 1; height: 100%; min-height: 360px; }
 .live-graph-panel { margin-top: 14px; display: grid; gap: 10px; }
 .live-graph-panel canvas { width: 100%; height: 160px; display: block; }
+.live-graph-wrap { position: relative; width: 100%; }
+.live-graph-panel canvas { cursor: crosshair; touch-action: pan-y; }
+.live-tip { position: absolute; top: 8px; display: grid; gap: 3px; padding: 8px 10px; border-radius: 10px; font-size: 12px; white-space: nowrap; pointer-events: none;
+  background: var(--surface2); border: 1px solid var(--border); box-shadow: 0 6px 18px rgba(0,0,0,.18); }
+.live-tip span { display: inline-flex; align-items: center; gap: 6px; }
+.live-tip i { width: 10px; height: 3px; border-radius: 2px; display: inline-block; }
+.live-tip .tip-clip { color: #ff453a; font-weight: 600; }
 .live-legend { display: flex; gap: 6px 18px; align-items: center; flex-wrap: wrap; }
 .live-legend span { display: inline-flex; align-items: center; gap: 7px; }
 .live-legend i { display: inline-block; width: 14px; height: 4px; border-radius: 2px; }
