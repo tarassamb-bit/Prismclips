@@ -842,7 +842,7 @@ function showLive() {
   if (!state.session) return renderGate();
   setScreen('live');
   setUrl('/app/live');
-  mountLive($('#app'), (file) => startCreate({ file }), accountToken());
+  mountLive($('#app'), (file) => startCreate({ file }), accountToken(), db);
 }
 
 async function showSettings(tab = state.settingsTab ?? 'account') {

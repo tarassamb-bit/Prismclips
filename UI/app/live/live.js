@@ -1,12 +1,18 @@
-// The Live screen: record Twitch channels while this tab is open, see likely moments as they happen, and turn one into a
-// video for the usual Create Shorts steps. Recordings keep going while you use other screens; closing the tab ends them.
+// The Live screen: record Twitch channels, see likely moments as they happen, and turn one into a video for the usual
+// Create Shorts steps. Two ways to record: on the Relio server (keeps going when the tab closes; see watcher/), or in this
+// browser (keeps going while you use other screens; closing the tab ends it).
 import { parseLogin, variantsOf, pickVariant } from './twitch.js';
 import * as store from './pieces.js';
 import { mediabunny } from '../engine/media.js';
+import { downloadVideo } from '../cloudvideo.js';
 
 const BEFORE = 60, AFTER = 30;   // seconds of stream around a moment that become the clip
 const sessions = [];
-let host = null, onFile = null, token = null;
+let host = null, onFile = null, token = null, db = null;
+// The server's recordings and their clips, refreshed every few seconds while the screen is open.
+let serverRows = [], serverClips = [], polling = null;
+const busyClips = new Set(), clipErrors = new Map();
+const SERVER_STATE = { starting: 'connecting', recording: 'live', offline: 'offline', stopped: 'stopped', ended: 'stopped', error: 'stopped' };
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 const STATES = { connecting: 'Connecting…', live: 'Recording', offline: 'Offline · waiting for the stream to start', stopped: 'Stopped' };
@@ -15,24 +21,68 @@ const STATES = { connecting: 'Connecting…', live: 'Recording', offline: 'Offli
 store.clear().catch(() => {});
 addEventListener('beforeunload', (event) => { if (sessions.some((s) => s.state !== 'stopped')) event.preventDefault(); });
 
-/** Shows the Live screen in `element`. `fileHandler(file)` opens a finished clip in Create Shorts; `tokenGetter()` gives the session token. */
-export function mountLive(element, fileHandler, tokenGetter) {
+/** Shows the Live screen in `element`. `fileHandler(file)` opens a finished clip in Create Shorts; `tokenGetter()` gives the
+ * session token; `dbGetter()` gives the Supabase client. */
+export function mountLive(element, fileHandler, tokenGetter, dbGetter) {
   host = element;
   onFile = fileHandler;
   token = tokenGetter;
+  db = dbGetter;
   host.innerHTML = `<section class="live stack">
-    <p class="muted">Paste a Twitch channel. While it streams, Relio keeps the last 30 minutes in this browser and marks a moment
-      whenever the stream gets much louder or chat explodes. Turn any moment into Shorts. <strong>Keep this tab open</strong>; you can use other screens meanwhile.</p>
-    <form id="live-form" class="row live-form"><input id="live-url" type="text" inputmode="url" autocomplete="off" placeholder="twitch.tv/channel" aria-label="Twitch channel">
-      <button class="button primary" type="submit">Start recording</button></form>
+    <p class="muted">Paste a Twitch channel. While it streams, Relio marks a moment whenever the stream gets much louder or chat
+      explodes. Turn any moment into Shorts.</p>
+    <form id="live-form" class="stack"><div class="row live-form"><input id="live-url" type="text" inputmode="url" autocomplete="off" placeholder="twitch.tv/channel" aria-label="Twitch channel">
+      <button class="button primary" type="submit">Start recording</button></div>
+      <label class="row small"><input id="live-server" type="checkbox" checked> Keep recording when I close this tab (on the Relio server, last 15 minutes, up to 2 channels)</label></form>
     <p id="live-notice" class="error" role="alert" hidden></p>
     <div id="live-sessions" class="stack"></div>
   </section>`;
   host.querySelector('#live-form').addEventListener('submit', (event) => {
     event.preventDefault();
     const input = host.querySelector('#live-url');
-    if (start(input.value)) input.value = '';
+    const run = host.querySelector('#live-server').checked ? startOnServer : start;
+    Promise.resolve(run(input.value)).then((ok) => { if (ok) input.value = ''; });
   });
+  render();
+  clearInterval(polling);
+  refresh();
+  polling = setInterval(() => (host?.isConnected ? refresh() : clearInterval(polling)), 5000);
+}
+
+/** The server's recordings of the last day, and their clips. */
+async function refresh() {
+  const client = db?.();
+  if (!client) return;
+  const since = new Date(Date.now() - 86400_000).toISOString();
+  const [rows, clips] = await Promise.all([
+    client.from('live_sessions').select('id,login,state,detail,buffered,chat,created').gte('created', since).order('created', { ascending: false }),
+    client.from('live_clips').select('id,session_id,at,why,media_id,bytes').gte('created', since).order('at', { ascending: false }),
+  ]);
+  if (rows.error || clips.error) return;
+  serverRows = rows.data;
+  serverClips = clips.data;
+  render();
+}
+
+async function startOnServer(text) {
+  const login = parseLogin(text);
+  if (!login) return notice('Paste a Twitch channel link, like twitch.tv/name.');
+  notice('');
+  const { error } = await db().from('live_sessions').insert({ login });
+  if (error) return notice(/two channels|already recording/.test(error.message) ? error.message : 'The recording could not be started. Please try again.');
+  await refresh();
+  return true;
+}
+
+async function makeFromServer(clip, login) {
+  busyClips.add(clip.id);
+  clipErrors.delete(clip.id);
+  render();
+  try {
+    const blob = await downloadVideo({ token: await token(), mediaId: clip.media_id, type: 'video/mp4', size: clip.bytes });
+    onFile(new File([blob], `${login} ${clock(Date.parse(clip.at)).replace(/:/g, '.')}.mp4`, { type: 'video/mp4' }));
+  } catch (error) { clipErrors.set(clip.id, error.message); }
+  busyClips.delete(clip.id);
   render();
 }
 
@@ -113,19 +163,33 @@ async function makeShort(session, moment) {
 function render() {
   const list = host?.isConnected && host.querySelector('#live-sessions');
   if (!list) return;
-  list.innerHTML = sessions.map((s) => `<div class="panel live-session">
+  const server = serverRows.map((r) => ({
+    id: r.id, login: r.login, server: true, state: SERVER_STATE[r.state] ?? 'stopped', buffered: r.buffered, chat: r.chat,
+    error: r.state === 'error' || r.state === 'ended' ? r.detail ?? '' : '',
+    moments: serverClips.filter((c) => c.session_id === r.id).map((c) => ({ at: Date.parse(c.at), why: c.why, clip: c, busy: busyClips.has(c.id), error: clipErrors.get(c.id) })),
+  }));
+  const all = [...server, ...sessions];
+  list.innerHTML = all.map((s) => `<div class="panel live-session">
       <div class="row between"><strong>${esc(s.login)}</strong>
-        <span class="muted small">${STATES[s.state]}${s.state === 'live' ? ` · ${Math.floor(s.buffered / 60)} min kept${s.chat ? ' · chat on' : ''}` : ''}</span>
+        <span class="muted small">${s.server ? 'Relio server · ' : 'This browser · '}${STATES[s.state]}${s.state === 'live' ? ` · ${Math.floor(s.buffered / 60)} min kept${s.chat ? ' · chat on' : ''}` : ''}</span>
         ${s.state !== 'stopped' ? `<button class="button ghost" data-live-stop="${s.id}">Stop</button>` : ''}</div>
       ${s.error ? `<p class="error">${esc(s.error)}</p>` : ''}
       ${s.moments.length === 0 ? `<p class="muted small">${s.state === 'stopped' ? 'No moments.' : 'No moments yet. They appear here as they happen.'}</p>` : `<ul class="live-moments">${s.moments.map((m, i) => `<li class="row between">
         <span><strong class="mono">${clock(m.at)}</strong> <span class="muted small">${esc(m.why)}</span>${m.error ? `<span class="error small"> · ${esc(m.error)}</span>` : ''}</span>
         <button class="button" data-live-make="${s.id}:${i}" ${m.busy ? 'disabled' : ''}>${m.busy ? 'Preparing…' : 'Make Shorts'}</button></li>`).join('')}</ul>`}
     </div>`).join('');
-  for (const button of list.querySelectorAll('[data-live-stop]')) button.addEventListener('click', () => stop(sessions.find((s) => s.id === button.dataset.liveStop)));
+  const find = (id) => all.find((s) => s.id === id);
+  for (const button of list.querySelectorAll('[data-live-stop]')) button.addEventListener('click', async () => {
+    const session = find(button.dataset.liveStop);
+    if (!session.server) return stop(sessions.find((s) => s.id === session.id));
+    button.disabled = true;
+    await db().from('live_sessions').update({ state: 'stopped' }).eq('id', session.id);
+    refresh();
+  });
   for (const button of list.querySelectorAll('[data-live-make]')) button.addEventListener('click', () => {
     const [id, index] = button.dataset.liveMake.split(':');
-    const session = sessions.find((s) => s.id === id);
-    makeShort(session, session.moments[Number(index)]);
+    const session = find(id), moment = session.moments[Number(index)];
+    if (session.server) makeFromServer(moment.clip, session.login);
+    else makeShort(sessions.find((s) => s.id === id), moment);
   });
 }
