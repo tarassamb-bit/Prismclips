@@ -21,7 +21,7 @@ export function mountLive(element, fileHandler, tokenGetter, dbGetter) {
   token = tokenGetter;
   db = dbGetter;
   shownChannel = null;
-  host.innerHTML = `<section class="live">
+  host.innerHTML = `<section class="live-screen">
     <form id="live-form" class="row live-form"><input id="live-url" type="text" inputmode="url" autocomplete="off" placeholder="Paste a Twitch channel, like twitch.tv/name" aria-label="Twitch channel">
       <button class="button primary" type="submit">Start recording</button></form>
     <p id="live-notice" class="error" role="alert" hidden></p>
@@ -70,7 +70,7 @@ async function refresh() {
   clips = clipRows.data;
   if (!rows.some((r) => r.id === selected)) selected = (rows.find((r) => ACTIVE.includes(r.state)) ?? rows[0])?.id ?? null;
   const current = rows.find((r) => r.id === selected);
-  if (current && ACTIVE.includes(current.state)) {
+  if (current) {
     const graph = await client.from('live_sessions').select('graph').eq('id', current.id).single();
     current.graph = graph.data?.graph ?? null;
   }
@@ -80,7 +80,7 @@ async function refresh() {
 function render() {
   if (!host?.isConnected) return;
   host.querySelector('#live-tabs').innerHTML = rows.map((r) => `<button role="tab" aria-selected="${r.id === selected}" class="live-tab ${r.id === selected ? 'on' : ''}" data-live-tab="${r.id}">
-    <span class="dot ${ACTIVE.includes(r.state) ? 'live' : ''}" aria-hidden="true"></span>${esc(r.login)}</button>`).join('');
+    <span class="dot ${ACTIVE.includes(r.state) ? 'on-air' : ''}" aria-hidden="true"></span>${esc(r.login)}</button>`).join('');
   for (const tab of host.querySelectorAll('[data-live-tab]')) tab.addEventListener('click', () => { selected = tab.dataset.liveTab; render(); refresh(); });
   const view = host.querySelector('#live-view');
   const current = rows.find((r) => r.id === selected);
@@ -92,35 +92,43 @@ function render() {
   }
   const active = ACTIVE.includes(current.state);
   // The player and chat load once per channel, so a refresh never restarts them.
-  if (shownChannel !== current.id) {
-    shownChannel = current.id;
+  const viewKey = `${current.id}:${active}`;
+  if (shownChannel !== viewKey) {
+    shownChannel = viewKey;
     const parent = encodeURIComponent(location.hostname);
-    view.innerHTML = `<div class="live-head row between"><span><strong>${esc(current.login)}</strong> <span id="live-state" class="muted small"></span></span>
+    const dark = (document.documentElement.dataset.theme ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')) === 'dark';
+    view.innerHTML = `<div class="live-head"><span class="live-title"><strong>${esc(current.login)}</strong><span id="live-state" class="live-pill"></span></span>
+        <span id="live-meta" class="muted small"></span>
         <button class="button ghost" id="live-stop">Stop recording</button></div>
-      <div class="live-stage">
-        <iframe class="live-chat" title="Twitch chat" src="https://www.twitch.tv/embed/${encodeURIComponent(current.login)}/chat?parent=${parent}&darkpopout"></iframe>
+      ${active ? `<div class="live-stage">
+        <iframe class="live-chat" title="Twitch chat" src="https://www.twitch.tv/embed/${encodeURIComponent(current.login)}/chat?parent=${parent}${dark ? '&darkpopout' : ''}"></iframe>
         <iframe class="live-player" title="Twitch stream" allowfullscreen src="https://player.twitch.tv/?channel=${encodeURIComponent(current.login)}&parent=${parent}&muted=true"></iframe>
-      </div>
+      </div>` : ''}
       <div class="panel live-graph-panel">
-        <div class="row between small"><span class="live-legend"><i style="background:${COLORS.loud}"></i>Voice <i style="background:${COLORS.chat}"></i>Chat messages per second <i style="background:${COLORS.hype}"></i>Hype · clip</span>
-          <span class="muted">last 5 minutes</span></div>
+        <div class="live-legend small"><span><i style="background:${COLORS.loud}"></i>Voice</span><span><i style="background:${COLORS.chat}"></i>Chat messages / s</span><span><i style="background:${COLORS.hype}"></i>Hype</span><span><b class="clip-dot"></b>Clip</span>
+          <span class="muted live-span">${active ? 'last 5 minutes' : 'last 5 minutes before it stopped'}</span></div>
         <canvas id="live-graph" height="160" aria-label="Voice, chat and hype over the last five minutes"></canvas>
       </div>
-      <h3 class="live-clips-title">Clips</h3><div id="live-clips"></div>`;
+      <div class="live-clips-head"><h3>Clips</h3><span id="live-count" class="muted small"></span></div><div id="live-clips"></div>`;
     view.querySelector('#live-stop').addEventListener('click', async (event) => {
       event.currentTarget.disabled = true;
       await db().from('live_sessions').update({ state: 'stopped' }).eq('id', current.id);
       refresh();
     });
   }
-  view.querySelector('#live-state').textContent = `· ${STATE_TEXT[current.state]}${current.state === 'recording' ? ` · ${Math.floor(current.buffered / 60)} of 15 min kept${current.chat ? '' : ' · chat not connected'}` : ''}`;
+  const pill = view.querySelector('#live-state');
+  pill.textContent = current.state === 'recording' ? 'LIVE' : STATE_TEXT[current.state];
+  pill.className = `live-pill ${current.state === 'recording' ? 'on' : ''}`;
+  view.querySelector('#live-meta').textContent = current.state === 'recording' ? `${Math.floor(current.buffered / 60)} of 15 min kept${current.chat ? ' · chat connected' : ' · chat not connected'}` : '';
   view.querySelector('#live-stop').hidden = !active;
   const own = clips.filter((c) => c.session_id === current.id);
+  view.querySelector('#live-count').textContent = own.length ? `${own.length} saved · kept for 2 days` : '';
   const problem = (current.state === 'error' || current.state === 'ended') && current.detail ? `<p class="error">${esc(current.detail)}</p>` : '';
   view.querySelector('#live-clips').innerHTML = problem + (own.length === 0
     ? `<p class="muted small">${active ? 'No clips yet. They appear here about 40 seconds after a spike.' : 'No clips.'}</p>`
-    : `<ul class="live-moments">${own.map((c) => `<li class="row between"><span><strong class="mono">${clock(Date.parse(c.at))}</strong> <span class="muted small">${esc(c.why)} · ${Math.round(c.bytes / 1e6)} MB</span>${errors.get(c.id) ? `<span class="error small"> · ${esc(errors.get(c.id))}</span>` : ''}</span>
-        <button class="button" data-live-make="${c.id}" ${busy.has(c.id) ? 'disabled' : ''}>${busy.has(c.id) ? 'Downloading…' : 'Make Shorts'}</button></li>`).join('')}</ul>`);
+    : `<div class="live-clip-grid">${own.map((c) => `<div class="live-clip"><strong class="mono">${clock(Date.parse(c.at))}</strong>
+        <span class="small">${esc(c.why)}</span><span class="muted small">90 s · ${Math.round(c.bytes / 1e6)} MB</span>${errors.get(c.id) ? `<span class="error small">${esc(errors.get(c.id))}</span>` : ''}
+        <button class="button primary" data-live-make="${c.id}" ${busy.has(c.id) ? 'disabled' : ''}>${busy.has(c.id) ? 'Downloading…' : 'Make Shorts'}</button></div>`).join('')}</div>`);
   for (const button of view.querySelectorAll('[data-live-make]')) button.addEventListener('click', () => make(own.find((c) => c.id === button.dataset.liveMake), current.login));
   drawGraph();
 }
@@ -155,7 +163,7 @@ function drawGraph() {
   if (!graph?.loud?.length) {
     ctx.fillStyle = 'rgba(128,128,128,.8)';
     ctx.font = '13px system-ui, sans-serif';
-    ctx.fillText(ACTIVE.includes(current?.state) ? 'Waiting for the first minute of the stream…' : 'The graph shows while a channel records.', 12, height / 2);
+    ctx.fillText(ACTIVE.includes(current?.state) ? 'Waiting for the first minute of the stream…' : 'No graph for this recording.', 12, height / 2);
     return;
   }
   const span = 300, end = graph.start + (graph.loud.length - 1) * 1000, from = end - span * 1000;

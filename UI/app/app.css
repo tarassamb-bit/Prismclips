@@ -457,23 +457,34 @@ details.insp-section:not([open]) { gap: 0; }
 @media (prefers-reduced-motion: reduce) { .collapsed .sidebar { transition: none; } }
 
 /* Live clipping: tabs per channel, chat beside the player, the graph under them. */
-.live { display: grid; gap: 14px; }
-.live-form { flex-wrap: nowrap; } .live-form input { flex: 1; padding: 10px 12px; }
-.live-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
-.live-tab { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--border); background: transparent; cursor: pointer; font: inherit; color: inherit; }
+.live-screen { display: grid; gap: 16px; max-width: 1500px; margin: 0 auto; padding-top: 6px; }
+.live-form { flex-wrap: nowrap; } .live-form input { flex: 1; padding: 11px 14px; border-radius: 12px; }
+.live-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+.live-tabs:empty { display: none; }
+.live-tab { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface1); cursor: pointer; font: inherit; font-weight: 500; color: inherit; }
 .live-tab.on { background: var(--surface2); border-color: var(--sky); }
-.live-tab .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text2, #888); }
-.live-tab .dot.live { background: #ff453a; box-shadow: 0 0 8px #ff453a; }
-.live-head { margin-bottom: 10px; }
+.live-tab .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text2, #999); }
+.live-tab .dot.on-air { background: #ff453a; box-shadow: 0 0 0 3px rgba(255, 69, 58, .2); }
+.live-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.live-title { display: inline-flex; align-items: center; gap: 10px; font-size: 22px; }
+.live-head #live-stop { margin-left: auto; }
+.live-pill { font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 6px; background: var(--surface2); color: var(--text2, inherit); letter-spacing: .02em; }
+.live-pill.on { background: #e91916; color: #fff; }
 .live-stage { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 12px; }
-.live-stage iframe { width: 100%; border: 0; border-radius: 12px; background: #0e0e10; }
-.live-player { aspect-ratio: 16 / 9; }
-.live-chat { height: 100%; min-height: 320px; }
-.live-graph-panel { margin-top: 12px; display: grid; gap: 8px; }
+.live-stage iframe { width: 100%; border: 0; border-radius: 14px; background: #0e0e10; display: block; }
+.live-player { aspect-ratio: 16 / 9; order: 2; }
+.live-chat { order: 1; height: 100%; min-height: 360px; }
+.live-graph-panel { margin-top: 14px; display: grid; gap: 10px; }
 .live-graph-panel canvas { width: 100%; height: 160px; display: block; }
-.live-legend { display: inline-flex; gap: 6px 14px; align-items: center; flex-wrap: wrap; }
-.live-legend i { display: inline-block; width: 12px; height: 4px; border-radius: 2px; margin-right: -8px; }
-.live-clips-title { margin: 6px 0 0; }
-.live-moments { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.live-moments li { padding: 8px 0; border-top: 1px solid var(--border); flex-wrap: nowrap; gap: 12px; }
-@media (max-width: 900px) { .live-stage { grid-template-columns: 1fr; } .live-chat { order: 2; height: 360px; } }
+.live-legend { display: flex; gap: 6px 18px; align-items: center; flex-wrap: wrap; }
+.live-legend span { display: inline-flex; align-items: center; gap: 7px; }
+.live-legend i { display: inline-block; width: 14px; height: 4px; border-radius: 2px; }
+.live-legend .clip-dot { width: 9px; height: 9px; border-radius: 50%; background: #ff453a; }
+.live-legend .live-span { margin-left: auto; }
+.live-clips-head { display: flex; align-items: baseline; gap: 10px; margin-top: 18px; }
+.live-clips-head h3 { margin: 0; }
+.live-clip-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-top: 10px; }
+.live-clip { display: grid; gap: 4px; padding: 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface1); }
+.live-clip .button { margin-top: 8px; justify-self: start; }
+.live-empty { text-align: center; padding: 40px 24px; }
+@media (max-width: 1000px) { .live-stage { grid-template-columns: 1fr; } .live-chat { height: 380px; } }
