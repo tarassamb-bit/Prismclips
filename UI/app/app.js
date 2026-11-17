@@ -12,6 +12,7 @@ import * as store from './store.js';
 import { hintFor, TOUR_STEPS } from './tour.js';
 import { configureSync, requestSync, sync, syncStatus, onSyncStatus } from './sync.js';
 import { uploadVideo, downloadVideo, removeVideos, removeAllVideos, cloudUsage, CloudVideoError } from './cloudvideo.js';
+import { mountLive } from './live/live.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -102,6 +103,7 @@ async function route() {
       if (state.create?.project) { state.create.step = step; setScreen('create'); renderCreate(); }
       else startCreate();
     } else if (first === 'settings') await showSettings(second);
+    else if (first === 'live') showLive();
     else if (first === 'games') { if (state.task?.project) await showGames(); else await showHome(); }
     else if (first === 'folder' && second) {
       const folder = (await store.listFolders()).filter(isMine).find((f) => f.id.startsWith(idOf(second)));
@@ -122,7 +124,7 @@ window.addEventListener('popstate', async () => {
 
 // MARK: Boot and the app shell (sidebar, title bar and sign-in card, as in the macOS app)
 
-const SCREEN_TITLES = { home: 'Home', create: 'Create Shorts', settings: 'Settings', games: 'Play while you wait' };
+const SCREEN_TITLES = { home: 'Home', create: 'Create Shorts', live: 'Live clipping', settings: 'Settings', games: 'Play while you wait' };
 
 /** Account changes can arrive from another tab while an editor or AI request is open. */
 function setSession(session) {
@@ -834,6 +836,14 @@ const syncText = (s) => ({
   ok: `Up to date${s.last ? ` · ${s.last.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}`,
 }[s.state]);
 onSyncStatus((s) => { const el = $('#sync-text'); if (el) el.textContent = syncText(s); });
+
+/** Live clipping: recordings keep running in the background; a moment opens in Create Shorts like a chosen file. */
+function showLive() {
+  if (!state.session) return renderGate();
+  setScreen('live');
+  setUrl('/app/live');
+  mountLive($('#app'), (file) => startCreate({ file }), accountToken());
+}
 
 async function showSettings(tab = state.settingsTab ?? 'account') {
   const account = userId();
@@ -2206,6 +2216,7 @@ document.addEventListener('click', async (event) => {
     if (screen === 'home') showHome();
     else if (screen === 'create') startCreate();
     else if (screen === 'settings') showSettings();
+    else if (screen === 'live') showLive();
   }
   else if (action === 'settings-tab') showSettings(target.dataset.tab);
   else if (action === 'signout') { const { error } = await db().auth.signOut(); if (error) showError('Couldn’t sign out', error.message); }

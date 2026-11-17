@@ -455,3 +455,8 @@ details.insp-section:not([open]) { gap: 0; }
   .collapsed .sidebar:hover .side-button { justify-content: flex-start; padding-inline: 12px; }
 }
 @media (prefers-reduced-motion: reduce) { .collapsed .sidebar { transition: none; } }
+
+/* Live clipping */
+.live-form { flex-wrap: nowrap; } .live-form input { flex: 1; padding: 10px 12px; }
+.live-moments { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.live-moments li { padding: 8px 0; border-top: 1px solid var(--border); flex-wrap: nowrap; gap: 12px; }
