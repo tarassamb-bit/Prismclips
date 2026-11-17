@@ -1,6 +1,7 @@
 // Spots likely clip moments in a live stream without any AI: the stream suddenly gets much louder, or chat suddenly much busier,
 // than over the last three minutes. The idea follows PeakCut's live clipper (MIT, github.com/haziqahmedqasmi/PeakCut).
-const BASE = 180, RECENT_LOUD = 6, RECENT_CHAT = 8, SKIP = 10, JUMP = 0.6, COOLDOWN = 45, WARMUP = 60;
+// A moment needs more than double the usual loudness or chat (120% up), and at most one every two minutes: fewer, bigger clips.
+const BASE = 180, RECENT_LOUD = 6, RECENT_CHAT = 8, SKIP = 10, JUMP = 1.2, COOLDOWN = 120, WARMUP = 60;
 
 export class Detector {
   constructor() { this.level = []; this.chat = []; this.lastMoment = -Infinity; }
@@ -11,7 +12,7 @@ export class Detector {
   /** One chat message during `second`. */
   message(second) { this.chat[second] = (this.chat[second] ?? 0) + 1; }
 
-  /** At stream second `now`: { at, why } for a new moment, or null. A moment is at most one per 45 s. */
+  /** At stream second `now`: { at, why } for a new moment, or null. A moment is at most one per two minutes. */
   check(now) {
     if (now < WARMUP || now - this.lastMoment < COOLDOWN) return null;
     const mean = (list, from, to) => {

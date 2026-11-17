@@ -10,7 +10,8 @@ import path from 'node:path';
 import { parseMaster, pickVariant, parseMedia } from './lib/twitch.js';
 import { Detector } from './lib/detector.js';
 
-const { link, deleteObject } = createRequire(import.meta.url)('./lib/_r2.cjs');
+const { link, deleteObject, listObjects } = createRequire(import.meta.url)('./lib/_r2.cjs');
+const CAP = Math.max(1, Number(process.env.R2_CAP_MB) || 1000) * 1_000_000;
 const SUPABASE = 'https://isdplhahgggundbohmlr.supabase.co/rest/v1';
 const KEY = process.env.SUPABASE_SECRET_KEY;
 const CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
@@ -174,6 +175,12 @@ class Recorder {
     try {
       await ffmpeg(['-y', '-i', joined, '-c', 'copy', '-movflags', '+faststart', out]);
       const bytes = await readFile(out);
+      // Clips share the person's cloud space with their videos: never past the cap.
+      const used = (await listObjects(`${this.user}/`)).reduce((sum, o) => sum + o.bytes, 0);
+      if (used + bytes.length > CAP) {
+        await update(this.id, { detail: 'Your cloud space is full, so new clips aren’t saved. Delete videos or old clips to make room.' }).catch(() => {});
+        return;
+      }
       const mediaId = `live-${id}`;
       const put = await fetch(link('PUT', `${this.user}/${mediaId}`), { method: 'PUT', body: bytes, signal: AbortSignal.timeout(120000) });
       if (!put.ok) throw new Error(`Cloud storage answered ${put.status}.`);
@@ -214,8 +221,8 @@ class Recorder {
       messages.push(chat[t] ?? 0);
       const loudJump = mean(level, t - 6, t, false) / (mean(level, t - 180, t - 10, false) || Infinity) - 1;
       const chatJump = mean(chat, t - 8, t, true) / Math.max(0.5, mean(chat, t - 180, t - 10, true)) - 1;
-      // 0.6 (60% up) is where a moment triggers; it sits at 0.5 on the graph.
-      hype.push(Math.round(Math.min(1, Math.max(0, Math.max(loudJump, chatJump)) / 1.2) * 100) / 100);
+      // 1.2 (120% up) is where a moment triggers; it sits at 0.5 on the graph.
+      hype.push(Math.round(Math.min(1, Math.max(0, Math.max(loudJump, chatJump)) / 2.4) * 100) / 100);
     }
     return { start: this.startedAt + from * 1000, loud, chat: messages, hype };
   }

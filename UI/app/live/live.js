@@ -131,12 +131,12 @@ function render() {
   view.querySelector('#live-stop').hidden = !active;
   const own = clips.filter((c) => c.session_id === current.id);
   view.querySelector('#live-count').textContent = own.length ? `${own.length} saved · kept for 2 days` : '';
-  const problem = (current.state === 'error' || current.state === 'ended') && current.detail ? `<p class="error">${esc(current.detail)}</p>` : '';
+  const problem = current.detail ? `<p class="error">${esc(current.detail)}</p>` : '';
   view.querySelector('#live-clips').innerHTML = problem + (own.length === 0
     ? `<p class="muted small">${active ? 'No clips yet. They appear here about 40 seconds after a spike.' : 'No clips.'}</p>`
     : `<div class="live-clip-grid">${own.map((c) => `<div class="live-clip"><strong class="mono">${clock(Date.parse(c.at))}</strong>
         <span class="small">${esc(c.why)}</span><span class="muted small">90 s · ${Math.round(c.bytes / 1e6)} MB</span>${errors.get(c.id) ? `<span class="error small">${esc(errors.get(c.id))}</span>` : ''}
-        <button class="button primary" data-live-make="${c.id}" ${busy.has(c.id) ? 'disabled' : ''}>${busy.has(c.id) ? 'Downloading…' : 'Make Shorts'}</button></div>`).join('')}</div>`);
+        <button class="button primary" data-live-make="${c.id}" ${busy.has(c.id) ? 'disabled' : ''}>${busy.has(c.id) ? 'Opening…' : 'Make a Short'}</button></div>`).join('')}</div>`);
   for (const button of view.querySelectorAll('[data-live-make]')) button.addEventListener('click', () => make(own.find((c) => c.id === button.dataset.liveMake), current.login));
   drawGraph();
 }
