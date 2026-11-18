@@ -1,6 +1,6 @@
 // Offline check of the Short's span, layout and captions: node watcher/shorts.test.mjs
 import assert from 'node:assert/strict';
-import { bounds, captionsFile, cropAround, webcamBox, layout } from './shorts.mjs';
+import { bounds, captionsFile, cropAround, webcamBox, layout, wordsFrom, groupWords } from './shorts.mjs';
 
 assert.deepEqual(bounds({ start: 20, end: 70 }, 90, 60), { start: 20, end: 70 });
 assert.deepEqual(bounds({ start: 10, end: 89 }, 90, 60), { start: 10, end: 70 }, 'at most 60 s');
@@ -25,4 +25,15 @@ assert.match(ass, /Dialogue: 1,0:00:01.00,0:00:01.\d\d,Caption,,0,0,0,,\{[^}]*\}
 assert.match(ass, /Caption,,0,0,0,,NO \{[^}]*\}WAY/, 'then the second');
 assert.match(ass, /Dialogue: 2,0:00:00.00,0:00:03.00,Title,.*He did it/);
 assert.ok(!ass.includes('BAD') && !ass.includes('GONE'), 'captions outside the Short are dropped');
+// whisper.cpp's JSON, one segment per word, offset by where the Short starts in the clip.
+const heard = wordsFrom({ transcription: [
+  { offsets: { from: 0, to: 300 }, text: ' No' }, { offsets: { from: 300, to: 700 }, text: ' way!' },
+  { offsets: { from: 1500, to: 1900 }, text: ' He' }, { offsets: { from: 1900, to: 2200 }, text: ' did' }, { offsets: { from: 2200, to: 2600 }, text: ' it' },
+  { offsets: { from: 2600, to: 2900 }, text: ' again' }, { offsets: { from: 3000, to: 3500 }, text: ' [BLANK_AUDIO]' }] }, 20);
+assert.deepEqual(heard.map((w) => w.text), ['No', 'way!', 'He', 'did', 'it', 'again'], 'blank markers dropped');
+assert.equal(heard[0].start, 20);
+const groups = groupWords(heard);
+assert.deepEqual(groups.map((g) => g.text), ['No way!', 'He did it', 'again'], 'broken at the sentence end and every 3 words');
+const timedAss = captionsFile(groups, 20, 30, '', { captionY: 760, titleY: 90 });
+assert.match(timedAss, /Dialogue: 1,0:00:01.50,0:00:01.90,Caption,,0,0,0,,\{[^}]*\}HE\{/, 'each word lights up exactly while it is spoken');
 console.log('shorts: ok');
