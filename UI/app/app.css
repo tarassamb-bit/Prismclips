@@ -517,9 +517,5 @@ details.insp-section:not([open]) { gap: 0; }
 .live-watch video { width: 100%; max-height: 70vh; aspect-ratio: 9 / 16; background: #000; border-radius: 12px; }
 .live-watch-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .live-watch-head .link { font-size: 18px; }
-.live-guide { width: min(480px, calc(100vw - 32px)); padding: 22px; gap: 14px; }
-.live-guide h2 { margin: 0; }
-.live-guide p { margin: 0; line-height: 1.55; }
-.live-guide .eyebrow { margin: 0; }
 .live-empty { text-align: center; padding: 40px 24px; }
 @media (max-width: 1000px) { .live-stage { grid-template-columns: 1fr; } .live-chat { height: 380px; } }

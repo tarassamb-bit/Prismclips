@@ -43,11 +43,10 @@ export function mountLive(element, dbGetter) {
     const input = host.querySelector('#live-url');
     if (await start(input.value)) input.value = '';
   });
-  host.querySelector('#live-guide').addEventListener('click', guide);
-  // The guide opens by itself the first time someone opens Live on this device.
-  let seen = true;
-  try { seen = localStorage.getItem('relio-live-guide') === 'seen'; localStorage.setItem('relio-live-guide', 'seen'); } catch { /* storage blocked: no automatic guide */ }
-  if (!seen) guide();
+  // The tour starts by itself the first time someone opens Live on this device; "How it works" starts it again.
+  tourDone = new Set();
+  if (tourStep() === null) setTourStep(0);
+  host.querySelector('#live-guide').addEventListener('click', () => { tourDone = new Set(); setTourStep(0); });
   clearInterval(polling);
   refresh();
   polling = setInterval(() => (host?.isConnected ? refresh() : clearInterval(polling)), 2500);
@@ -55,7 +54,8 @@ export function mountLive(element, dbGetter) {
   cancelAnimationFrame(frame);
   let last = 0;
   const tick = (time) => {
-    if (!host?.isConnected) return;
+    if (!host?.isConnected) { tourHint(); return; }
+    tourHint();
     if (time - last > 33 && ACTIVE.includes(channels.find((c) => c.login === selected)?.row.state)) { last = time; drawGraph(); }
     frame = requestAnimationFrame(tick);
   };
@@ -117,6 +117,8 @@ async function refresh() {
   clips = clipRows.data;
   channels = nextChannels;
   selected = nextSelected;
+  if (channels.some((c) => ACTIVE.includes(c.row.state))) tourDid(0);
+  if (clips.some((c) => c.short && c.short.state !== 'failed')) tourDid(2);
   render();
 }
 
@@ -161,7 +163,7 @@ function render() {
       <div class="live-clips-head"><h3>Shorts</h3><span id="live-count" class="muted small"></span></div><div id="live-clips"></div>`;
     hoverX = null;
     const canvas = view.querySelector('#live-graph');
-    canvas.addEventListener('pointermove', (event) => { hoverX = event.clientX - canvas.getBoundingClientRect().left; drawGraph(); });
+    canvas.addEventListener('pointermove', (event) => { hoverX = event.clientX - canvas.getBoundingClientRect().left; drawGraph(); tourDid(1); });
     canvas.addEventListener('pointerdown', (event) => { hoverX = event.clientX - canvas.getBoundingClientRect().left; drawGraph(); });
     canvas.addEventListener('pointerleave', () => { hoverX = null; drawGraph(); });
     view.querySelector('#live-stop').addEventListener('click', async (event) => {
@@ -215,42 +217,63 @@ async function remove(login) {
   await refresh();
 }
 
-const GUIDE = [
-  ['Paste a Twitch channel', 'Copy a link like <strong>twitch.tv/name</strong>, paste it in the box at the top and press <strong>Start recording</strong>. Relio records the stream on its own server, so you can close this tab or your laptop. Up to two channels at once.'],
-  ['Watch the moments come in', 'The graph shows the last five minutes: <span style="color:#34c759">green</span> is the voice, <span style="color:#ff9f0a">orange</span> is chat, <span style="color:#ff453a">red</span> is hype. When the stream suddenly gets much louder or chat explodes, that is a big moment. Point at the graph to see any second.'],
-  ['Shorts make themselves', 'About a minute after a big moment, a finished Short appears under the graph: the best 15–60 seconds, captions that follow every word, a layout for the stream (camera above the game, or the streamer full screen) and the Relio watermark. Weak moments and repeats are skipped.'],
-  ['Watch, download, tidy up', 'Click a Short to play it, then <strong>Download</strong> to post it anywhere. Shorts are kept for two days. Right-click a channel tab to delete it with its Shorts, or press <strong>Stop recording</strong> to stop. A channel that stays offline for 30 minutes stops by itself.'],
+// The Live tour: a ring around the real thing to use and a bubble next to it. Each step moves on only once it's done.
+const TOUR = [
+  { target: '#live-form', text: 'Paste a Twitch channel here, like <strong>twitch.tv/name</strong>, and press <strong>Start recording</strong>. Relio records it on its server, even after you close this tab.' },
+  { target: '#live-graph', text: 'This graph shows the last five minutes: <span style="color:#34c759">green</span> voice, <span style="color:#ff9f0a">orange</span> chat, <span style="color:#ff453a">red</span> hype. Point at it to see any second.' },
+  { target: '#live-clips', text: 'When the stream gets much louder or chat explodes, a finished Short with captions appears here about a minute later. Waiting for a big moment…' },
+  { target: '.live-short:not(:disabled)', text: 'Your first Short is ready. Click it to watch it, and download it from there.',
+    // Until it's ready, the bubble waits on the card being made.
+    waiting: '.live-short', waitingText: 'Your first Short is being made: the best part, captions and layout. It takes about a minute…' },
 ];
+const TOUR_KEY = 'relio-live-tour';
+const tourStep = () => { try { return localStorage.getItem(TOUR_KEY); } catch { return 'done'; } };
+const setTourStep = (value) => { try { localStorage.setItem(TOUR_KEY, String(value)); } catch { /* storage blocked: the tour ends with this page */ } };
+let tourDone = new Set();
 
-/** The Live guide: four steps in a window over the page. Opens by itself the first time, and from "How it works". */
-function guide() {
-  const dialog = document.createElement('dialog');
-  dialog.className = 'live-watch live-guide';
-  let step = 0;
-  const show = () => {
-    const [title, text] = GUIDE[step];
-    dialog.innerHTML = `<div class="live-watch-head"><span class="eyebrow">Live clipping · ${step + 1} of ${GUIDE.length}</span><button class="link" data-close aria-label="Close">✕</button></div>
-      <div class="tour-bar" aria-hidden="true"><div style="width:${Math.round(((step + 1) / GUIDE.length) * 100)}%"></div></div>
-      <h2>${title}</h2><p>${text}</p>
-      <div class="row between">${step ? '<button class="button ghost" data-back>Back</button>' : '<span></span>'}
-        <button class="button primary" data-next>${step === GUIDE.length - 1 ? 'Start' : 'Next'}</button></div>`;
-    dialog.querySelector('[data-next]').focus();
-  };
-  dialog.addEventListener('click', (event) => {
-    if (event.target === dialog || event.target.closest('[data-close]')) return dialog.close();
-    if (event.target.closest('[data-back]')) { step--; show(); }
-    if (event.target.closest('[data-next]')) {
-      if (step === GUIDE.length - 1) { dialog.close(); host?.querySelector('#live-url')?.focus(); } else { step++; show(); }
-    }
-  });
-  dialog.addEventListener('close', () => dialog.remove());
-  document.body.append(dialog);
-  show();
-  dialog.showModal();
+/** Marks what the person just did; the tour moves on when it was the current step's task. */
+function tourDid(step) {
+  tourDone.add(step);
+  const now = Number(tourStep());
+  if (Number.isInteger(now) && tourDone.has(now)) setTourStep(now + 1 >= TOUR.length ? 'done' : now + 1);
+}
+
+/** Draws (or removes) the ring and bubble for the current step. Runs on every animation frame while Live is open. */
+function tourHint() {
+  let ring = document.getElementById('live-ring'), bubble = document.getElementById('live-bubble');
+  const step = Number(tourStep());
+  const hint = Number.isInteger(step) && host?.isConnected ? TOUR[step] : null;
+  // Steps already done earlier (a channel was already recording) count right away.
+  if (hint && tourDone.has(step)) { tourDid(step); return; }
+  const ready = hint && host.querySelector(hint.target);
+  const target = ready ?? (hint?.waiting ? host.querySelector(hint.waiting) : null);
+  if (!hint || !target || !target.getBoundingClientRect().width || document.querySelector('dialog[open]')) { ring?.remove(); bubble?.remove(); return; }
+  if (!bubble) {
+    document.body.insertAdjacentHTML('beforeend', '<div id="live-ring" class="tour-ring" aria-hidden="true"></div><div id="live-bubble" class="tour-bubble" role="status"></div>');
+    ring = document.getElementById('live-ring'); bubble = document.getElementById('live-bubble');
+  }
+  const html = `<p class="eyebrow">Live clipping · step ${step + 1} of ${TOUR.length}</p><div class="tour-bar" aria-hidden="true"><div style="width:${Math.round(((step + 1) / TOUR.length) * 100)}%"></div></div>
+    <p>${ready ? hint.text : hint.waitingText}</p><div class="row between"><button class="link" data-tour-skip>Skip tour</button></div>`;
+  if (bubble.dataset.html !== html) {
+    bubble.dataset.html = html;
+    bubble.innerHTML = html;
+    bubble.querySelector('[data-tour-skip]').addEventListener('click', () => { setTourStep('done'); tourHint(); });
+    target.scrollIntoView({ block: 'nearest' });
+  }
+  const rect = target.getBoundingClientRect();
+  Object.assign(ring.style, { left: `${rect.left - 6}px`, top: `${rect.top - 6}px`, width: `${rect.width + 12}px`, height: `${rect.height + 12}px` });
+  // Below the target when there is room, otherwise above it; always inside the window. The arrow points at the target's middle.
+  const width = bubble.offsetWidth, height = bubble.offsetHeight, gap = 16;
+  const below = rect.bottom + gap + height < innerHeight;
+  const left = Math.min(Math.max(8, rect.left + rect.width / 2 - width / 2), innerWidth - width - 8);
+  bubble.dataset.side = below ? 'below' : 'above';
+  bubble.style.setProperty('--arrow-x', `${Math.min(Math.max(18, rect.left + rect.width / 2 - left), width - 18)}px`);
+  Object.assign(bubble.style, { left: `${left}px`, top: `${below ? rect.bottom + gap : Math.max(8, rect.top - gap - height)}px` });
 }
 
 /** A window over the page that plays the Short, with a download button. Closes with ×, Escape or a click outside. */
 function play(clip) {
+  tourDid(3);
   const dialog = document.createElement('dialog');
   dialog.className = 'live-watch';
   dialog.innerHTML = `<div class="live-watch-head"><strong>${esc(clip.short.title)}</strong><button class="link" data-close aria-label="Close">✕</button></div>
