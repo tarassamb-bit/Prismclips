@@ -65,6 +65,8 @@ class Recorder {
 
   async run() {
     await mkdir(this.dir, { recursive: true });
+    // A note from an earlier run (a full day's Shorts, an older version's message) no longer applies.
+    await update(this.id, { detail: null }).catch(() => {});
     this.listenToChat();
     while (!this.stopped) {
       if (Date.now() - this.began > MAX_HOURS * 3600_000) return this.finish('ended', `Stopped after ${MAX_HOURS} hours.`);
