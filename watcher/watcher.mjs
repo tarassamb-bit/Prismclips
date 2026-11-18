@@ -15,6 +15,8 @@ const { deleteObject } = createRequire(import.meta.url)('./lib/_r2.cjs');
 // Shorts per person per day (each costs an AI call), and the disk kept for Shorts on this 6 GB machine.
 const DAILY_SHORTS = 30, DISK_FOR_SHORTS = 3.5e9;
 const PUBLIC_URL = (process.env.PUBLIC_URL ?? '').replace(/\/$/, '');
+// Accounts with no daily Shorts limit (the owner's), comma-separated user ids.
+const UNLIMITED = new Set((process.env.UNLIMITED_USERS ?? '').split(',').map((id) => id.trim()).filter(Boolean));
 const SUPABASE = 'https://isdplhahgggundbohmlr.supabase.co/rest/v1';
 const KEY = process.env.SUPABASE_SECRET_KEY;
 const CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
@@ -167,8 +169,8 @@ class Recorder {
     const at = new Date(momentAt).toISOString();
     try {
       const today = new Date(new Date().toISOString().slice(0, 10)).toISOString();
-      const made = await db(`live_clips?user_id=eq.${this.user}&created=gte.${today}&select=id`, { headers: { Prefer: '' } });
-      if (made.length >= DAILY_SHORTS) {
+      const made = UNLIMITED.has(this.user) ? [] : await db(`live_clips?user_id=eq.${this.user}&created=gte.${today}&select=id`, { headers: { Prefer: '' } });
+      if (made.length >= DAILY_SHORTS && !UNLIMITED.has(this.user)) {
         await update(this.id, { detail: `You reached today's ${DAILY_SHORTS} live Shorts. Recording goes on; new Shorts start again tomorrow.` }).catch(() => {});
         return;
       }
