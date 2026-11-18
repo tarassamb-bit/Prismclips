@@ -688,18 +688,17 @@ const LANGUAGES = ['auto', 'English', 'Ukrainian', 'Polish', 'German', 'French',
   'Lithuanian', 'Latvian', 'Estonian', 'Romanian', 'Turkish', 'Russian', 'Arabic', 'Hindi', 'Japanese', 'Korean', 'Chinese'];
 const LENGTHS = [[0, 'Auto'], [15, '15 seconds'], [30, '30 seconds'], [45, '45 seconds'], [60, '60 seconds'], [90, '90 seconds']];
 
-function startCreate({ project = null, media = null, file = null, auto = false } = {}) {
+function startCreate({ project = null, media = null, file = null } = {}) {
   setScreen('create');
   state.create = {
     step: media ? 2 : 1, project, media, count: 0, duration: 0, region: 'entireVideo', customStart: 0, language: 'auto',
     customEnd: media ? Math.round(media.duration / 6) / 10 : 0, style: 'auto', videoType: 'auto', busy: false, error: '',
   };
-  if (file) chooseVideo(file, auto);
+  if (file) chooseVideo(file);
   else renderCreate();
 }
 
-/** `auto` (a clip from Live): short videos are fine, and the one best Short is made right away with automatic settings. */
-async function chooseVideo(file, auto = false) {
+async function chooseVideo(file) {
   track('video_selected');
   const c = state.create;
   if (!c) return;
@@ -712,11 +711,10 @@ async function chooseVideo(file, auto = false) {
     // A video chosen before and never used for Shorts leaves nothing behind.
     if (c.project && c.project.segments.length === 0) await store.deleteProject(c.project);
     const project = { id: uuid(), owner: userId(), title: file.name.replace(/\.[^.]+$/, ''), created: new Date().toISOString(), media: [], segments: [], transcripts: {} };
-    const media = await importMedia(project, file, isCurrent, auto ? 15 : MIN_VIDEO_SECONDS);
+    const media = await importMedia(project, file, isCurrent);
     if (!isCurrent()) return;
     await store.saveProject(project);
     Object.assign(c, { project, media, customEnd: Math.round(media.duration / 6) / 10, step: 2 });
-    if (auto) { c.busy = false; c.count = 1; return createAction('make'); }
   } catch (error) {
     c.error = error.message || 'That file is not a video this browser can read.';
   }
@@ -844,7 +842,7 @@ function showLive() {
   if (!state.session) return renderGate();
   setScreen('live');
   setUrl('/app/live');
-  mountLive($('#app'), (file) => startCreate({ file, auto: true }), accountToken(), db);
+  mountLive($('#app'), db);
 }
 
 async function showSettings(tab = state.settingsTab ?? 'account') {
@@ -987,11 +985,11 @@ async function fillAccountData(tab) {
 // Shorter videos rarely hold a whole story worth a Short, and an empty result reads as a broken app.
 const MIN_VIDEO_SECONDS = 3 * 60;
 
-async function importMedia(project, file, isCurrent = () => true, minSeconds = MIN_VIDEO_SECONDS) {
+async function importMedia(project, file, isCurrent = () => true) {
   const source = await openSource(file);
-  if (source.duration < minSeconds) {
+  if (source.duration < MIN_VIDEO_SECONDS) {
     source.input.dispose();
-    throw new Error(`This video is ${clock(source.duration)} long. Relio needs at least ${minSeconds / 60} minutes of video to find Shorts in it.`);
+    throw new Error(`This video is ${clock(source.duration)} long. Relio needs at least ${MIN_VIDEO_SECONDS / 60} minutes of video to find Shorts in it.`);
   }
   const media = {
     id: uuid(), name: file.name, mime: file.type, size: file.size, lastModified: file.lastModified, duration: source.duration,

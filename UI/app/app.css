@@ -490,8 +490,22 @@ details.insp-section:not([open]) { gap: 0; }
 .live-legend .live-span { margin-left: auto; }
 .live-clips-head { display: flex; align-items: baseline; gap: 10px; margin-top: 18px; }
 .live-clips-head h3 { margin: 0; }
-.live-clip-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-top: 10px; }
-.live-clip { display: grid; gap: 4px; padding: 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface1); }
-.live-clip .button { margin-top: 8px; justify-self: start; }
+.live-short-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; margin-top: 10px; }
+.live-short { display: grid; gap: 4px; align-content: start; text-align: left; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.live-short:disabled { cursor: default; }
+.live-short-poster { position: relative; display: grid; place-items: center; aspect-ratio: 9 / 16; border-radius: 14px; overflow: hidden; background: var(--surface2); margin-bottom: 6px; }
+.live-short-poster img { width: 100%; height: 100%; object-fit: cover; transition: transform .2s ease; }
+.live-short:not(:disabled):hover .live-short-poster img { transform: scale(1.03); }
+.live-short .play { position: absolute; width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; background: rgba(0,0,0,.55); color: #fff; font-size: 20px; padding-left: 4px; }
+.live-short-wait { display: grid; gap: 10px; justify-items: center; padding: 12px; text-align: center; font-size: 13px; color: var(--text2, #888); }
+.live-short-wait .spinner { width: 26px; height: 26px; border-radius: 50%; border: 3px solid var(--border); border-top-color: var(--sky); animation: live-spin 0.9s linear infinite; }
+@keyframes live-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .live-short-wait .spinner { animation: none; } }
+.live-watch { border: 0; padding: 16px; border-radius: 18px; background: var(--surface1); color: var(--text); width: min(420px, calc(100vw - 32px)); display: grid; gap: 12px; }
+.live-watch:not([open]) { display: none; }
+.live-watch::backdrop { background: rgba(0,0,0,.7); }
+.live-watch video { width: 100%; max-height: 70vh; aspect-ratio: 9 / 16; background: #000; border-radius: 12px; }
+.live-watch-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.live-watch-head .link { font-size: 18px; }
 .live-empty { text-align: center; padding: 40px 24px; }
 @media (max-width: 1000px) { .live-stage { grid-template-columns: 1fr; } .live-chat { height: 380px; } }

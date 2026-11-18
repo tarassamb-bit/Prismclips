@@ -1,26 +1,21 @@
 // The Live screen: the Relio server records Twitch channels (watcher/), and this screen shows one at a time like Twitch does:
 // chat on the left, the stream on the right, a graph of the last five minutes underneath (green voice, orange chat, red hype,
-// with a marker for every clip), and the clips the server made, each one a click away from Create Shorts.
+// with a marker for every clip), and the finished Shorts the server made from each spike, which play in a window over the page.
 import { parseLogin } from './twitch.js';
-import { downloadVideo } from '../cloudvideo.js';
 
 const COLORS = { loud: '#34c759', chat: '#ff9f0a', hype: '#ff453a' };
 const ACTIVE = ['starting', 'recording', 'offline'];
 const STATE_TEXT = { starting: 'Starting…', recording: 'Recording', offline: 'Offline · waiting for the stream', stopped: 'Stopped', ended: 'Ended', error: 'Stopped' };
-let host = null, onFile = null, token = null, db = null, polling = null;
+let host = null, db = null, polling = null;
 let rows = [], clips = [], selected = null, shownChannel = null;
-const busy = new Set(), errors = new Map();
 // Where the pointer is over the graph (CSS pixels from its left), and what the last drawing mapped, for the hover readout.
 let hoverX = null, plotted = null;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-/** Shows the Live screen in `element`. `fileHandler(file)` opens a clip in Create Shorts; `tokenGetter()` gives the session
- * token; `dbGetter()` gives the Supabase client. */
-export function mountLive(element, fileHandler, tokenGetter, dbGetter) {
+/** Shows the Live screen in `element`; `dbGetter()` gives the Supabase client. */
+export function mountLive(element, dbGetter) {
   host = element;
-  onFile = fileHandler;
-  token = tokenGetter;
   db = dbGetter;
   shownChannel = null;
   host.innerHTML = `<section class="live-screen">
@@ -65,7 +60,7 @@ async function refresh() {
   const since = new Date(Date.now() - 86400_000).toISOString();
   const [sessionRows, clipRows] = await Promise.all([
     client.from('live_sessions').select('id,login,state,detail,buffered,chat,created').gte('created', since).order('created', { ascending: false }),
-    client.from('live_clips').select('id,session_id,at,why,media_id,bytes').gte('created', since).order('at', { ascending: false }),
+    client.from('live_clips').select('id,session_id,at,why,duration,short').gte('created', since).order('at', { ascending: false }),
   ]);
   if (sessionRows.error || clipRows.error) return;
   rows = sessionRows.data;
@@ -112,7 +107,7 @@ function render() {
         <div class="live-graph-wrap"><canvas id="live-graph" height="160" aria-label="Voice, chat and hype over the last five minutes"></canvas>
           <div id="live-tip" class="live-tip" role="status" hidden></div></div>
       </div>
-      <div class="live-clips-head"><h3>Clips</h3><span id="live-count" class="muted small"></span></div><div id="live-clips"></div>`;
+      <div class="live-clips-head"><h3>Shorts</h3><span id="live-count" class="muted small"></span></div><div id="live-clips"></div>`;
     hoverX = null;
     const canvas = view.querySelector('#live-graph');
     canvas.addEventListener('pointermove', (event) => { hoverX = event.clientX - canvas.getBoundingClientRect().left; drawGraph(); });
@@ -129,28 +124,36 @@ function render() {
   pill.className = `live-pill ${current.state === 'recording' ? 'on' : ''}`;
   view.querySelector('#live-meta').textContent = current.state === 'recording' ? `${Math.floor(current.buffered / 60)} of 15 min kept${current.chat ? ' · chat connected' : ' · chat not connected'}` : '';
   view.querySelector('#live-stop').hidden = !active;
-  const own = clips.filter((c) => c.session_id === current.id);
-  view.querySelector('#live-count').textContent = own.length ? `${own.length} saved · kept for 2 days` : '';
+  const own = clips.filter((c) => c.session_id === current.id && c.short);
+  const ready = own.filter((c) => c.short.state === 'ready');
+  view.querySelector('#live-count').textContent = ready.length ? `${ready.length} ready · kept for 2 days` : '';
   const problem = current.detail ? `<p class="error">${esc(current.detail)}</p>` : '';
   view.querySelector('#live-clips').innerHTML = problem + (own.length === 0
-    ? `<p class="muted small">${active ? 'No clips yet. They appear here about 40 seconds after a spike.' : 'No clips.'}</p>`
-    : `<div class="live-clip-grid">${own.map((c) => `<div class="live-clip"><strong class="mono">${clock(Date.parse(c.at))}</strong>
-        <span class="small">${esc(c.why)}</span><span class="muted small">90 s · ${Math.round(c.bytes / 1e6)} MB</span>${errors.get(c.id) ? `<span class="error small">${esc(errors.get(c.id))}</span>` : ''}
-        <button class="button primary" data-live-make="${c.id}" ${busy.has(c.id) ? 'disabled' : ''}>${busy.has(c.id) ? 'Opening…' : 'Make a Short'}</button></div>`).join('')}</div>`);
-  for (const button of view.querySelectorAll('[data-live-make]')) button.addEventListener('click', () => make(own.find((c) => c.id === button.dataset.liveMake), current.login));
+    ? `<p class="muted small">${active ? 'No Shorts yet. Each spike becomes a finished Short with captions about a minute later.' : 'No Shorts.'}</p>`
+    : `<div class="live-short-grid">${own.map((c) => {
+      const s = c.short;
+      const poster = s.state === 'ready' ? `<img src="${esc(s.poster)}" alt="" loading="lazy"><span class="play" aria-hidden="true">▶</span>`
+        : `<span class="live-short-wait">${s.state === 'making' ? '<span class="spinner" aria-hidden="true"></span>Making the Short…' : 'This Short couldn’t be made.'}</span>`;
+      return `<button class="live-short" data-live-play="${c.id}" ${s.state === 'ready' ? '' : 'disabled'} aria-label="Play ${esc(s.title ?? c.why)}">
+        <span class="live-short-poster">${poster}</span>
+        <strong>${esc(s.title ?? c.why)}</strong><span class="muted small">${clock(Date.parse(c.at))} · ${esc(c.why)}${s.state === 'ready' ? ` · ${Math.round(c.duration)} s` : ''}</span></button>`;
+    }).join('')}</div>`);
+  for (const button of view.querySelectorAll('[data-live-play]')) button.addEventListener('click', () => play(own.find((c) => c.id === button.dataset.livePlay)));
   drawGraph();
 }
 
-async function make(clip, login) {
-  busy.add(clip.id);
-  errors.delete(clip.id);
-  render();
-  try {
-    const blob = await downloadVideo({ token, mediaId: clip.media_id, type: 'video/mp4', size: clip.bytes });
-    onFile(new File([blob], `${login} ${clock(Date.parse(clip.at)).replace(/:/g, '.')}.mp4`, { type: 'video/mp4' }));
-  } catch (error) { errors.set(clip.id, error.message); }
-  busy.delete(clip.id);
-  render();
+/** A window over the page that plays the Short, with a download button. Closes with ×, Escape or a click outside. */
+function play(clip) {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'live-watch';
+  dialog.innerHTML = `<div class="live-watch-head"><strong>${esc(clip.short.title)}</strong><button class="link" data-close aria-label="Close">✕</button></div>
+    <video src="${esc(clip.short.video)}" poster="${esc(clip.short.poster)}" controls autoplay playsinline></video>
+    <div class="row between"><span class="muted small">${clock(Date.parse(clip.at))} · ${esc(clip.why)} · ${Math.round(clip.duration)} s</span>
+      <a class="button primary" href="${esc(clip.short.video)}" download target="_blank" rel="noopener">Download</a></div>`;
+  document.body.append(dialog);
+  dialog.addEventListener('close', () => dialog.remove());
+  dialog.addEventListener('click', (event) => { if (event.target === dialog || event.target.closest('[data-close]')) dialog.close(); });
+  dialog.showModal();
 }
 
 /** Three lines over the last five minutes, each scaled to its own range, plus a red marker at every clip. */

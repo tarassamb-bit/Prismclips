@@ -1,17 +1,20 @@
 // Relio's live watcher: records the Twitch channels people asked for (live_sessions), keeps the last 15 minutes of each,
-// spots likely moments by loudness and chat (no AI), and saves each moment as an MP4 in the person's cloud storage with a
-// live_clips row. Runs on one always-on machine; needs ffmpeg, Node 22+, and the keys in its environment:
-//   SUPABASE_SECRET_KEY, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET
-import { spawn } from 'node:child_process';
+// spots likely moments by loudness and chat (no AI), and turns each one into a finished Short (shorts.mjs) kept on this
+// machine's disk, with a live_clips row the Live screen shows. Runs on one always-on machine; needs ffmpeg, Node 22+, and
+//   SUPABASE_SECRET_KEY, OPENROUTER_API_KEY, PUBLIC_URL (this machine's public address for port 8080), and the R2_* keys
+//   (only to delete clips older versions stored in cloud space).
 import { mkdir, rm, writeFile, readFile, stat } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parseMaster, pickVariant, parseMedia } from './lib/twitch.js';
 import { Detector } from './lib/detector.js';
+import { ffmpeg, makeShort, removeShort, onDisk, serve } from './shorts.mjs';
 
-const { link, deleteObject, listObjects } = createRequire(import.meta.url)('./lib/_r2.cjs');
-const CAP = Math.max(1, Number(process.env.R2_CAP_MB) || 1000) * 1_000_000;
+const { deleteObject } = createRequire(import.meta.url)('./lib/_r2.cjs');
+// Shorts per person per day (each costs an AI call), and the disk kept for Shorts on this 6 GB machine.
+const DAILY_SHORTS = 30, DISK_FOR_SHORTS = 3.5e9;
+const PUBLIC_URL = (process.env.PUBLIC_URL ?? '').replace(/\/$/, '');
 const SUPABASE = 'https://isdplhahgggundbohmlr.supabase.co/rest/v1';
 const KEY = process.env.SUPABASE_SECRET_KEY;
 const CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
@@ -45,20 +48,6 @@ async function playlistUrl(login) {
   if (master.status === 404) return null;
   if (!master.ok) throw new Error(`Twitch answered ${master.status}.`);
   return pickVariant(parseMaster(await master.text()))?.url ?? null;
-}
-
-/** Runs ffmpeg with `input` on stdin; resolves with stdout. */
-function ffmpeg(args, input = null) {
-  return new Promise((resolve, reject) => {
-    const child = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', ...args], { stdio: ['pipe', 'pipe', 'pipe'] });
-    const out = [], err = [];
-    child.stdout.on('data', (d) => out.push(d));
-    child.stderr.on('data', (d) => err.push(d));
-    child.on('error', reject);
-    child.on('close', (code) => (code === 0 ? resolve(Buffer.concat(out)) : reject(new Error(`ffmpeg ${code}: ${Buffer.concat(err).toString().slice(0, 300)}`))));
-    child.stdin.on('error', () => {});
-    child.stdin.end(input ?? undefined);
-  });
 }
 
 class Recorder {
@@ -172,21 +161,27 @@ class Recorder {
     const id = crypto.randomUUID();
     const joined = path.join(this.dir, `${id}.src`), out = path.join(this.dir, `${id}.mp4`);
     await writeFile(joined, Buffer.concat([...(header ? [await readFile(header)] : []), ...(await Promise.all(run.map((p) => readFile(p.file))))]));
+    const rowId = crypto.randomUUID();
+    const at = new Date(momentAt).toISOString();
     try {
-      await ffmpeg(['-y', '-i', joined, '-c', 'copy', '-movflags', '+faststart', out]);
-      const bytes = await readFile(out);
-      // Clips share the person's cloud space with their videos: never past the cap.
-      const used = (await listObjects(`${this.user}/`)).reduce((sum, o) => sum + o.bytes, 0);
-      if (used + bytes.length > CAP) {
-        await update(this.id, { detail: 'Your cloud space is full, so new clips aren’t saved. Delete videos or old clips to make room.' }).catch(() => {});
+      const today = new Date(new Date().toISOString().slice(0, 10)).toISOString();
+      const made = await db(`live_clips?user_id=eq.${this.user}&created=gte.${today}&select=id`, { headers: { Prefer: '' } });
+      if (made.length >= DAILY_SHORTS) {
+        await update(this.id, { detail: `You reached today's ${DAILY_SHORTS} live Shorts. Recording goes on; new Shorts start again tomorrow.` }).catch(() => {});
         return;
       }
-      const mediaId = `live-${id}`;
-      const put = await fetch(link('PUT', `${this.user}/${mediaId}`), { method: 'PUT', body: bytes, signal: AbortSignal.timeout(120000) });
-      if (!put.ok) throw new Error(`Cloud storage answered ${put.status}.`);
-      const duration = run.reduce((sum, p) => sum + p.duration, 0);
-      await db('live_clips', { method: 'POST', body: JSON.stringify({ id, session_id: this.id, user_id: this.user, at: new Date(momentAt).toISOString(), why, media_id: mediaId, bytes: bytes.length, duration }) });
-      log(this.login, 'clip saved', Math.round(bytes.length / 1e6), 'MB', Math.round(duration), 's');
+      await ffmpeg(['-y', '-i', joined, '-c', 'copy', '-movflags', '+faststart', out]);
+      const clipSeconds = run.reduce((sum, p) => sum + p.duration, 0);
+      // The card shows "Making…" while the AI and ffmpeg work.
+      await db('live_clips', { method: 'POST', body: JSON.stringify({ id: rowId, session_id: this.id, user_id: this.user, at, why, media_id: 'short', bytes: 0, duration: clipSeconds, short: { state: 'making' } }) });
+      const momentInClip = (momentAt - run[0].at) / 1000;
+      const short = await makeShort(out, clipSeconds, momentInClip, `${this.login} · ${why}`);
+      await db(`live_clips?id=eq.${rowId}`, { method: 'PATCH', body: JSON.stringify({ bytes: short.bytes, duration: short.duration,
+        short: { state: 'ready', id: short.id, title: short.title, video: `${PUBLIC_URL}/${short.id}.mp4`, poster: `${PUBLIC_URL}/${short.id}.jpg` } }) });
+      log(this.login, 'short ready', short.title, Math.round(short.bytes / 1e6), 'MB', short.duration, 's');
+    } catch (error) {
+      log(this.login, 'short failed', error.message);
+      await db(`live_clips?id=eq.${rowId}`, { method: 'PATCH', body: JSON.stringify({ short: { state: 'failed' } }) }).catch(() => {});
     } finally {
       rm(joined, { force: true }).catch(() => {});
       rm(out, { force: true }).catch(() => {});
@@ -249,22 +244,34 @@ async function tick() {
 
 /** Live clips are a starting point, not storage: after two days they and their videos go. */
 async function cleanup() {
-  const old = await db(`live_clips?created=lt.${new Date(Date.now() - CLIP_DAYS * 86400_000).toISOString()}&select=id,user_id,media_id&limit=200`, { headers: { Prefer: '' } });
+  const old = await db(`live_clips?created=lt.${new Date(Date.now() - CLIP_DAYS * 86400_000).toISOString()}&select=id,user_id,media_id,short&limit=200`, { headers: { Prefer: '' } });
   for (const clip of old) {
-    await deleteObject(`${clip.user_id}/${clip.media_id}`).catch(() => {});
+    if (clip.short?.id) await removeShort(clip.short.id);
+    // Rows from before Shorts were made here point at a raw clip in the person's cloud space.
+    else if (clip.media_id?.startsWith('live-')) await deleteObject(`${clip.user_id}/${clip.media_id}`).catch(() => {});
     await db(`live_clips?id=eq.${clip.id}`, { method: 'DELETE' });
+  }
+  // The disk is small: past the limit, the oldest Shorts go first, even before two days.
+  const files = await onDisk();
+  let total = files.reduce((sum, f) => sum + f.bytes, 0);
+  for (const file of files) {
+    if (total <= DISK_FOR_SHORTS) break;
+    await removeShort(file.id);
+    await db(`live_clips?short->>id=eq.${file.id}`, { method: 'DELETE' }).catch(() => {});
+    total -= file.bytes;
   }
   if (old.length) log('cleanup', old.length, 'old clips');
 }
 
-for (const name of ['SUPABASE_SECRET_KEY', 'R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET']) {
+for (const name of ['SUPABASE_SECRET_KEY', 'OPENROUTER_API_KEY', 'PUBLIC_URL', 'R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET']) {
   if (!process.env[name]) { console.error(`Missing ${name}.`); process.exit(1); }
 }
 await rm(DATA, { recursive: true, force: true });
+serve(8080);
 log('watcher up, max', MAX_STREAMS, 'streams');
 let lastCleanup = 0;
 for (;;) {
   await tick().catch((error) => log('tick failed', error.message));
-  if (Date.now() - lastCleanup > 3600_000) { lastCleanup = Date.now(); await cleanup().catch((error) => log('cleanup failed', error.message)); }
+  if (Date.now() - lastCleanup > 600_000) { lastCleanup = Date.now(); await cleanup().catch((error) => log('cleanup failed', error.message)); }
   await wait(5000);
 }
