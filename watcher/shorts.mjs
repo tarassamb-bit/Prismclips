@@ -10,7 +10,9 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 
 export const DIR = path.join(homedir(), 'shorts');
-const MODELS = ['google/gemini-3.8-flash', 'xiaomi/mimo-v2.6-flash'];
+// The same cheap model the rest of Relio uses; sound on MiMo goes to the one provider that serves it (see supabase/functions/gemini).
+const MODEL = 'xiaomi/mimo-v2.6-flash';
+const PROVIDER = { zdr: true, data_collection: 'deny', order: ['makora'], allow_fallbacks: false };
 const FONTS = '/usr/share/fonts/truetype/montserrat';
 const FONT = `${FONTS}/Montserrat-ExtraBold.ttf`;
 const LOGO = new URL('./logo.png', import.meta.url).pathname;
@@ -57,13 +59,13 @@ then give that box as webcam {x, y, w, h}, fractions of the frame from its top-l
 a clutch play or a story with a payoff. 4–6: mildly interesting. 0–3: nothing happens, noise, music, an alarm, a sleeping or
 silent streamer, a menu or loading screen, ads. Be strict.
 6. repeat: true when it is the same kind of moment as one of these recent Shorts from this stream: ${recent.length ? recent.map((t) => `"${t}"`).join(', ') : '(none yet)'}.`;
-  for (const model of MODELS) {
+  for (const model of [MODEL, MODEL]) {
     try {
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST', signal: AbortSignal.timeout(90_000),
         headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model, temperature: 0.2, max_tokens: 6000, reasoning: { effort: 'low', exclude: true },
+          model, provider: PROVIDER, temperature: 0.2, max_tokens: 6000, reasoning: { effort: 'low', exclude: true },
           messages: [
             { role: 'system', content: `Reply with only one JSON object, no other text and no code fences, that matches this JSON Schema: ${JSON.stringify(schema)}` },
             { role: 'user', content: [{ type: 'text', text: prompt },
