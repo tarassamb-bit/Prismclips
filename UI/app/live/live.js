@@ -91,7 +91,7 @@ function render() {
   if (!current) {
     shownChannel = null;
     view.innerHTML = `<div class="panel live-empty"><strong>Nothing recording yet</strong><p class="muted">Paste a Twitch channel above. Relio records it on its server,
-      even after you close this tab, and turns every big moment into a finished Short with captions. Up to two channels at once.</p></div>`;
+      even after you close this tab, and saves a clip whenever the stream gets much louder or chat explodes. Up to two channels at once.</p></div>`;
     return;
   }
   const active = ACTIVE.includes(current.state);
@@ -104,24 +104,17 @@ function render() {
     view.innerHTML = `<div class="live-head"><span class="live-title"><strong>${esc(current.login)}</strong><span id="live-state" class="live-pill"></span></span>
         <span id="live-meta" class="muted small"></span>
         <button class="button ghost" id="live-stop">Stop recording</button></div>
-      <div class="live-body">
-        <div class="live-main">
-          ${active ? `<div class="live-stage">
-            <iframe class="live-chat" title="Twitch chat" src="https://www.twitch.tv/embed/${encodeURIComponent(current.login)}/chat?parent=${parent}${dark ? '&darkpopout' : ''}"></iframe>
-            <iframe class="live-player" title="Twitch stream" allowfullscreen src="https://player.twitch.tv/?channel=${encodeURIComponent(current.login)}&parent=${parent}&muted=true"></iframe>
-          </div>` : '<div class="panel live-offair muted">Not recording. The graph shows the last five minutes before it stopped.</div>'}
-          <div class="panel live-graph-panel">
-            <div class="live-legend small"><span><i style="background:${COLORS.loud}"></i>Voice</span><span><i style="background:${COLORS.chat}"></i>Chat / s</span><span><i style="background:${COLORS.hype}"></i>Hype</span><span><b class="clip-dot"></b>Short</span>
-              <span class="muted live-span">last 5 min · point at it for details</span></div>
-            <div class="live-graph-wrap"><canvas id="live-graph" height="120" aria-label="Voice, chat and hype over the last five minutes"></canvas>
-              <div id="live-tip" class="live-tip" role="status" hidden></div></div>
-          </div>
-        </div>
-        <aside class="live-feed" aria-label="Shorts">
-          <div class="live-feed-head"><h3>Shorts</h3><span id="live-count" class="muted small"></span></div>
-          <div id="live-clips" class="live-feed-list"></div>
-        </aside>
-      </div>`;
+      ${active ? `<div class="live-stage">
+        <iframe class="live-chat" title="Twitch chat" src="https://www.twitch.tv/embed/${encodeURIComponent(current.login)}/chat?parent=${parent}${dark ? '&darkpopout' : ''}"></iframe>
+        <iframe class="live-player" title="Twitch stream" allowfullscreen src="https://player.twitch.tv/?channel=${encodeURIComponent(current.login)}&parent=${parent}&muted=true"></iframe>
+      </div>` : ''}
+      <div class="panel live-graph-panel">
+        <div class="live-legend small"><span><i style="background:${COLORS.loud}"></i>Voice</span><span><i style="background:${COLORS.chat}"></i>Chat messages / s</span><span><i style="background:${COLORS.hype}"></i>Hype</span><span><b class="clip-dot"></b>Clip</span>
+          <span class="muted live-span">${active ? 'last 5 minutes' : 'last 5 minutes before it stopped'}</span></div>
+        <div class="live-graph-wrap"><canvas id="live-graph" height="160" aria-label="Voice, chat and hype over the last five minutes"></canvas>
+          <div id="live-tip" class="live-tip" role="status" hidden></div></div>
+      </div>
+      <div class="live-clips-head"><h3>Shorts</h3><span id="live-count" class="muted small"></span></div><div id="live-clips"></div>`;
     hoverX = null;
     const canvas = view.querySelector('#live-graph');
     canvas.addEventListener('pointermove', (event) => { hoverX = event.clientX - canvas.getBoundingClientRect().left; drawGraph(); });
@@ -138,26 +131,25 @@ function render() {
   pill.className = `live-pill ${current.state === 'recording' ? 'on' : ''}`;
   view.querySelector('#live-meta').textContent = current.state === 'recording' ? `${Math.floor(current.buffered / 60)} of 15 min kept${current.chat ? ' · chat connected' : ' · chat not connected'}` : '';
   view.querySelector('#live-stop').hidden = !active;
-  const own = clips.filter((c) => channel.ids.has(c.session_id) && c.short && c.short.state !== 'failed');
+  const own = clips.filter((c) => channel.ids.has(c.session_id) && c.short);
   const ready = own.filter((c) => c.short.state === 'ready');
-  view.querySelector('#live-count').textContent = ready.length ? `${ready.length} · kept 2 days` : '';
-  const problem = current.detail ? `<p class="error small">${esc(current.detail)}</p>` : '';
+  view.querySelector('#live-count').textContent = ready.length ? `${ready.length} ready · kept for 2 days` : '';
+  const problem = current.detail ? `<p class="error">${esc(current.detail)}</p>` : '';
   view.querySelector('#live-clips').innerHTML = problem + (own.length === 0
-    ? `<p class="muted small live-feed-empty">${active ? 'Waiting for a big moment. Each one becomes a finished Short with captions about a minute later; weak moments are skipped.' : 'No Shorts.'}</p>`
-    : own.map((c) => {
+    ? `<p class="muted small">${active ? 'No Shorts yet. Each spike becomes a finished Short with captions about a minute later.' : 'No Shorts.'}</p>`
+    : `<div class="live-short-grid">${own.map((c) => {
       const s = c.short;
-      const poster = s.state === 'ready' ? `<img src="${esc(s.poster)}" alt="" loading="lazy"><span class="play" aria-hidden="true">▶</span>` : '<span class="spinner" aria-hidden="true"></span>';
+      const poster = s.state === 'ready' ? `<img src="${esc(s.poster)}" alt="" loading="lazy"><span class="play" aria-hidden="true">▶</span>`
+        : `<span class="live-short-wait">${s.state === 'making' ? '<span class="spinner" aria-hidden="true"></span>Making the Short…' : 'This Short couldn’t be made.'}</span>`;
       return `<button class="live-short" data-live-play="${c.id}" ${s.state === 'ready' ? '' : 'disabled'} aria-label="Play ${esc(s.title ?? c.why)}">
         <span class="live-short-poster">${poster}</span>
-        <span class="live-short-text"><strong>${s.state === 'ready' ? esc(s.title) : 'Making a Short…'}</strong>
-          <span class="muted small">${clock(Date.parse(c.at))}${s.state === 'ready' ? ` · ${Math.round(c.duration)} s` : ''}</span>
-          <span class="muted small">${esc(c.why)}</span></span></button>`;
-    }).join(''));
+        <strong>${esc(s.title ?? c.why)}</strong><span class="muted small">${clock(Date.parse(c.at))} · ${esc(c.why)}${s.state === 'ready' ? ` · ${Math.round(c.duration)} s` : ''}</span></button>`;
+    }).join('')}</div>`);
   for (const button of view.querySelectorAll('[data-live-play]')) button.addEventListener('click', () => play(own.find((c) => c.id === button.dataset.livePlay)));
   drawGraph();
 }
 
-/** Deletes a channel's recordings with their Shorts after asking; stops it first if it is still recording. Right-click or Delete on its tab. */
+/** Deletes a recording with its Shorts after asking; stops it first if it is still recording. Right-click or Delete on its tab. */
 async function remove(login) {
   const channel = channels.find((c) => c.login === login);
   if (!channel) return;
@@ -213,7 +205,7 @@ function drawGraph() {
   const canvas = host?.querySelector('#live-graph');
   if (!canvas) return;
   const current = channels.find((c) => c.login === selected)?.row;
-  const ratio = devicePixelRatio || 1, width = canvas.clientWidth, height = 120;
+  const ratio = devicePixelRatio || 1, width = canvas.clientWidth, height = 160;
   canvas.width = width * ratio;
   canvas.height = height * ratio;
   const ctx = canvas.getContext('2d');
@@ -245,7 +237,7 @@ function drawGraph() {
   }
   ctx.fillStyle = COLORS.hype;
   const ids = channels.find((c) => c.login === selected)?.ids ?? new Set();
-  for (const clip of clips.filter((c) => ids.has(c.session_id) && c.short?.state === 'ready')) {
+  for (const clip of clips.filter((c) => ids.has(c.session_id))) {
     const x = xOf(Date.parse(clip.at));
     if (x < 0 || x > width) continue;
     ctx.globalAlpha = 0.25; ctx.fillRect(x - 1, 0, 2, height); ctx.globalAlpha = 1;
@@ -278,13 +270,13 @@ function readout(ctx, width, height, current) {
     ctx.beginPath(); ctx.arc(x, yOf(values[key]), 4.5, 0, Math.PI * 2); ctx.fill();
   }
   const ids = channels.find((c) => c.login === selected)?.ids ?? new Set();
-  const clip = clips.find((c) => ids.has(c.session_id) && c.short?.state === 'ready' && Math.abs(Date.parse(c.at) - at) <= 2000);
+  const clip = clips.find((c) => ids.has(c.session_id) && Math.abs(Date.parse(c.at) - at) <= 2000);
   const tip = host.querySelector('#live-tip');
   tip.innerHTML = `<strong class="mono">${clock(at)}</strong>
     <span><i style="background:${COLORS.loud}"></i>Voice ${Math.round(graph.loud[index] * 100)}%</span>
     <span><i style="background:${COLORS.chat}"></i>Chat ${graph.chat[index]} msg/s</span>
     <span><i style="background:${COLORS.hype}"></i>Hype ${Math.round(graph.hype[index] * 100)}%${graph.hype[index] >= 0.5 ? ' · spike' : ''}</span>
-    ${clip ? `<span class="tip-clip">● Short: ${esc(clip.short.title)}</span>` : ''}`;
+    ${clip ? `<span class="tip-clip">● Clip: ${esc(clip.why)}</span>` : ''}`;
   tip.hidden = false;
   // Beside the guide line, flipped to the left near the right edge.
   const left = x + 14 + tip.offsetWidth > width ? x - 14 - tip.offsetWidth : x + 14;
