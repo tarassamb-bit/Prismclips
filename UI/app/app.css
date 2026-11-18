@@ -315,12 +315,20 @@ details.insp-section:not([open]) { gap: 0; }
   .collapse-button, .tagline { display: none; }
   .brand-row { padding: 0; }
   /* One row: logo, the screens, then the bug report and Settings at the far end. */
-  .side-nav, .collapsed .side-nav { display: flex; gap: 6px; margin: 0; }
+  .side-nav, .collapsed .side-nav { display: flex; flex-wrap: nowrap; gap: 6px; margin: 0; }
+  /* Never a second row: on a very narrow window the bar scrolls sideways instead. */
+  .sidebar, .collapsed .sidebar { overflow-x: auto; overflow-y: hidden; }
   .side-bottom { display: flex; align-items: center; gap: 6px; margin: 0 0 0 auto; }
   .side-button { width: 42px; height: 42px; padding: 0; justify-content: center; }
   .side-button .label { display: none; }
   .app-main { padding: 0 14px 20px; }
   .topbar { padding: 12px 14px; }
+}
+@media (max-width: 360px) {
+  .sidebar, .collapsed .sidebar { gap: 4px; padding: 8px; }
+  .side-nav, .collapsed .side-nav, .side-bottom { gap: 2px; }
+  .side-button { width: 36px; height: 36px; }
+  .brand-row img { width: 26px; height: 26px; }
 }
 @media (max-width: 560px) {
   .dashboard .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
