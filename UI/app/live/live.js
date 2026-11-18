@@ -89,10 +89,13 @@ async function refresh() {
   const current = channels.find((c) => c.login === selected)?.row;
   if (current) {
     const graph = await client.from('live_sessions').select('graph').eq('id', current.id).single();
-    current.graph = graph.data?.graph ?? null;
+    const raw = graph.data?.graph ?? null;
+    // The newest seconds are still filling in on the server and change on the next update: shown only once they are final.
+    current.graph = raw?.loud?.length > 3 ? { ...raw, loud: raw.loud.slice(0, -3), chat: raw.chat.slice(0, -3), hype: raw.hype.slice(0, -3) } : raw;
     const dataEnd = current.graph?.loud?.length ? current.graph.start + (current.graph.loud.length - 1) * 1000 : null;
-    // How far behind now the newest data is, plus one refresh: eased so the slide speed never jumps.
-    if (dataEnd) { const target = Date.now() - dataEnd + 2600; lag = lag === null || Math.abs(lag - target) > 10_000 ? target : lag * 0.8 + target * 0.2; }
+    // The graph runs this far behind now: the newest data's age plus room for a late update, so it never catches up with
+    // the data (which would stop it, then jump). Eased very gently, so the speed never visibly changes.
+    if (dataEnd) { const target = Date.now() - dataEnd + 6000; lag = lag === null || Math.abs(lag - target) > 15_000 ? target : lag * 0.95 + target * 0.05; }
   }
   render();
 }
