@@ -262,11 +262,14 @@ function drawGraph() {
   const xOf = (ms) => ((ms - from) / (span * 1000)) * width;
   const pad = 8, yOf = (v) => height - pad - v * (height - pad * 2);
   const chatMax = Math.max(3, ...graph.chat);
+  // A second with no measured sound (a late piece, a skipped ad) comes as 0: it keeps the last real level instead of dipping.
+  let level = 0;
+  const loud = graph.loud.map((v) => (v > 0 ? (level = v) : level));
   // Chat comes in bursts: a 3-second average reads as a line, not a comb.
   const chat = graph.chat.map((_, i) => (graph.chat[i - 1] ?? graph.chat[i]) / 3 + graph.chat[i] / 3 + (graph.chat[i + 1] ?? graph.chat[i]) / 3);
   ctx.save();
   ctx.beginPath(); ctx.rect(0, 0, width, height); ctx.clip();
-  for (const [key, values] of [['loud', graph.loud], ['chat', chat.map((n) => n / chatMax)], ['hype', graph.hype]]) {
+  for (const [key, values] of [['loud', loud], ['chat', chat.map((n) => n / chatMax)], ['hype', graph.hype]]) {
     ctx.strokeStyle = COLORS[key];
     ctx.lineWidth = key === 'hype' ? 2.5 : 1.5;
     ctx.beginPath();
@@ -294,13 +297,13 @@ function drawGraph() {
   ctx.fillText('−5 min', 4, height - 4);
   ctx.fillText('now', width - 26, height - 4);
   ctx.fillText(`chat max ${chatMax}/s`, width - 110, 14);
-  plotted = { graph, xOf, yOf, chatMax };
+  plotted = { graph, xOf, yOf, chatMax, loud, chat };
   if (hoverX !== null) readout(ctx, width, height, current);
 }
 
 /** The second under the pointer: a guide line, a dot on each line, and its numbers in a small box. */
 function readout(ctx, width, height, current) {
-  const { graph, xOf, yOf, chatMax } = plotted;
+  const { graph, xOf, yOf, chatMax, loud, chat } = plotted;
   const step = xOf(graph.start + 1000) - xOf(graph.start);
   const index = Math.max(0, Math.min(graph.loud.length - 1, Math.round((hoverX - xOf(graph.start)) / step)));
   const at = graph.start + index * 1000, x = xOf(at);
@@ -310,7 +313,7 @@ function readout(ctx, width, height, current) {
   ctx.setLineDash([4, 4]);
   ctx.beginPath(); ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, height); ctx.stroke();
   ctx.setLineDash([]);
-  const values = { loud: graph.loud[index], chat: graph.chat[index] / chatMax, hype: graph.hype[index] };
+  const values = { loud: loud[index], chat: chat[index] / chatMax, hype: graph.hype[index] };
   for (const key of ['loud', 'chat', 'hype']) {
     ctx.fillStyle = COLORS[key];
     ctx.beginPath(); ctx.arc(x, yOf(values[key]), 4.5, 0, Math.PI * 2); ctx.fill();
@@ -319,7 +322,7 @@ function readout(ctx, width, height, current) {
   const clip = clips.find((c) => ids.has(c.session_id) && Math.abs(Date.parse(c.at) - at) <= 2000);
   const tip = host.querySelector('#live-tip');
   tip.innerHTML = `<strong class="mono">${clock(at)}</strong>
-    <span><i style="background:${COLORS.loud}"></i>Voice ${Math.round(graph.loud[index] * 100)}%</span>
+    <span><i style="background:${COLORS.loud}"></i>Voice ${Math.round(loud[index] * 100)}%</span>
     <span><i style="background:${COLORS.chat}"></i>Chat ${graph.chat[index]} msg/s</span>
     <span><i style="background:${COLORS.hype}"></i>Hype ${Math.round(graph.hype[index] * 100)}%${graph.hype[index] >= 0.5 ? ' · spike' : ''}</span>
     ${clip ? `<span class="tip-clip">● Clip: ${esc(clip.why)}</span>` : ''}`;
