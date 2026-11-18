@@ -1,6 +1,7 @@
 // Finished Shorts from live clips, made on the watcher machine: the AI picks the best 15–60 s and writes captions, ffmpeg
 // builds a 1080×1920 video (blurred background, the whole stream frame in the middle, captions underneath, the Relio Clips
-// mark), and a small web server plays them. Kept on this machine's disk, never in anyone's cloud space.
+// mark, sound evened out to -14 LUFS as Shorts and TikTok expect, since stream audio is often much quieter), and a small web
+// server plays them. Kept on this machine's disk, never in anyone's cloud space.
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createReadStream } from 'node:fs';
@@ -125,7 +126,7 @@ export async function makeShort(clip, clipSeconds, momentAt, fallbackTitle) {
       `[v2][logo]overlay=76:434,drawtext=fontfile=${FONT}:text='Relio Clips':fontcolor=white:fontsize=46:x=170:y=449,fps=30,format=yuv420p[v]`,
     ].join(';');
     await ffmpeg(['-y', '-ss', String(start), '-t', String(end - start), '-i', clip, '-i', LOGO, '-filter_complex', filter,
-      '-map', '[v]', '-map', '0:a?', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', out]);
+      '-map', '[v]', '-map', '0:a?', '-af', 'loudnorm=I=-14:TP=-1.5:LRA=11', '-ar', '48000', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', out]);
     await ffmpeg(['-y', '-ss', String(Math.min(1, (end - start) / 2)), '-i', out, '-frames:v', '1', '-vf', 'scale=360:-2', '-q:v', '4', path.join(DIR, `${id}.jpg`)]);
   } finally {
     rm(subs, { force: true }).catch(() => {});
