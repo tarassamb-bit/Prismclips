@@ -11,7 +11,10 @@ let rows = [], clips = [], channels = [], selected = null, shownChannel = null;
 // Where the pointer is over the graph (CSS pixels from its left), and what the last drawing mapped, for the hover readout.
 let hoverX = null, plotted = null;
 // The graph slides on smoothly between updates: it shows the time `lag` ms behind now, so new data arrives just as it's needed.
-let lag = null, frame = 0;
+let lag = null, frame = 0, chatScale = null;
+// Every second the page has seen for the channel on screen, by whole second: updates only cover the last five minutes,
+// so without this the line's left end would drop off a few seconds at a time.
+let history = { login: null, seconds: new Map() };
 
 /** Sets `element`'s content only when it changed, so a refresh doesn't rebuild (and flicker) what is already on screen. */
 function setHtml(element, html) {
@@ -93,6 +96,11 @@ async function refresh() {
     const raw = graph.data?.graph ?? channels.find((c) => c.row.id === current.id)?.row.graph ?? null;
     // The newest seconds are still filling in on the server and change on the next update: shown only once they are final.
     current.graph = raw?.loud?.length > 3 && !raw.trimmed ? { ...raw, loud: raw.loud.slice(0, -3), chat: raw.chat.slice(0, -3), hype: raw.hype.slice(0, -3), trimmed: true } : raw;
+    if (history.login !== current.login) { history = { login: current.login, seconds: new Map() }; chatScale = null; }
+    current.graph?.loud?.forEach((loud, i) => history.seconds.set(Math.round(current.graph.start / 1000) + i, { loud, chat: current.graph.chat[i], hype: current.graph.hype[i] }));
+    // Only the window on screen and a little margin are kept.
+    const oldest = Math.round(Date.now() / 1000) - 400;
+    for (const second of history.seconds.keys()) if (second < oldest) history.seconds.delete(second);
     const dataEnd = current.graph?.loud?.length ? current.graph.start + (current.graph.loud.length - 1) * 1000 : null;
     // The graph runs this far behind now: the newest data's age plus room for a late update, so it never catches up with
     // the data (which would stop it, then jump). Eased very gently, so the speed never visibly changes.
@@ -243,7 +251,19 @@ function drawGraph() {
   const ctx = canvas.getContext('2d');
   ctx.scale(ratio, ratio);
   ctx.clearRect(0, 0, width, height);
-  const graph = current?.graph;
+  // The drawn graph comes from the page's history of seconds, continuous from oldest to newest.
+  let graph = current?.graph;
+  if (graph?.loud?.length && history.login === current.login && history.seconds.size) {
+    const keys = [...history.seconds.keys()];
+    const first = Math.min(...keys), last = Math.max(...keys);
+    const loud = [], chatList = [], hype = [];
+    for (let second = first, previous = null; second <= last; second++) {
+      const value = history.seconds.get(second) ?? previous ?? { loud: 0, chat: 0, hype: 0 };
+      loud.push(value.loud); chatList.push(value.chat); hype.push(value.hype);
+      previous = value;
+    }
+    graph = { start: first * 1000, loud, chat: chatList, hype };
+  }
   const tip = host.querySelector('#live-tip');
   if (tip) tip.hidden = true;
   plotted = null;
@@ -261,7 +281,10 @@ function drawGraph() {
   const span = 300, end = live ? Math.min(dataEnd, Date.now() - lag) : dataEnd, from = end - span * 1000;
   const xOf = (ms) => ((ms - from) / (span * 1000)) * width;
   const pad = 8, yOf = (v) => height - pad - v * (height - pad * 2);
-  const chatMax = Math.max(3, ...graph.chat);
+  // The chat scale follows the busiest second on screen, eased, so the orange line never jumps when a peak scrolls away.
+  const visible = graph.chat.filter((_, i) => graph.start + i * 1000 >= from);
+  chatScale = chatScale === null ? Math.max(3, ...visible) : chatScale * 0.95 + Math.max(3, ...visible) * 0.05;
+  const chatMax = chatScale;
   // A second with no measured sound (a late piece, a skipped ad) comes as 0: it keeps the last real level instead of dipping.
   let level = 0;
   const loud = graph.loud.map((v) => (v > 0 ? (level = v) : level));
@@ -296,7 +319,7 @@ function drawGraph() {
   ctx.font = '11px system-ui, sans-serif';
   ctx.fillText('−5 min', 4, height - 4);
   ctx.fillText('now', width - 26, height - 4);
-  ctx.fillText(`chat max ${chatMax}/s`, width - 110, 14);
+  ctx.fillText(`chat max ${Math.round(chatMax)}/s`, width - 110, 14);
   plotted = { graph, xOf, yOf, chatMax, loud, chat };
   if (hoverX !== null) readout(ctx, width, height, current);
 }
