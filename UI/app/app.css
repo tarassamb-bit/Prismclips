@@ -479,12 +479,15 @@ details.insp-section:not([open]) { gap: 0; }
 .live-head #live-stop { margin-left: auto; }
 .live-pill { font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 6px; background: var(--surface2); color: var(--text2, inherit); letter-spacing: .02em; }
 .live-pill.on { background: #e91916; color: #fff; }
-.live-stage { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 12px; }
+.live-body { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+.live-main { display: grid; gap: 12px; min-width: 0; }
+.live-stage { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 12px; }
+.live-offair { padding: 18px; }
 .live-stage iframe { width: 100%; border: 0; border-radius: 14px; background: #0e0e10; display: block; }
 .live-player { aspect-ratio: 16 / 9; order: 2; }
 .live-chat { order: 1; height: 100%; min-height: 360px; }
-.live-graph-panel { margin-top: 14px; display: grid; gap: 10px; }
-.live-graph-panel canvas { width: 100%; height: 160px; display: block; }
+.live-graph-panel { display: grid; gap: 8px; padding: 12px 14px; }
+.live-graph-panel canvas { width: 100%; height: 120px; display: block; }
 .live-graph-wrap { position: relative; width: 100%; }
 .live-graph-panel canvas { cursor: crosshair; touch-action: pan-y; }
 .live-tip { position: absolute; top: 8px; display: grid; gap: 3px; padding: 8px 10px; border-radius: 10px; font-size: 12px; white-space: nowrap; pointer-events: none;
@@ -499,17 +502,24 @@ details.insp-section:not([open]) { gap: 0; }
 .live-legend .live-span { margin-left: auto; }
 .live-clips-head { display: flex; align-items: baseline; gap: 10px; margin-top: 18px; }
 .live-clips-head h3 { margin: 0; }
-.live-short-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; margin-top: 10px; }
-.live-short { display: grid; gap: 4px; align-content: start; text-align: left; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
-.live-short:disabled { cursor: default; }
-.live-short-poster { position: relative; display: grid; place-items: center; aspect-ratio: 9 / 16; border-radius: 14px; overflow: hidden; background: var(--surface2); margin-bottom: 6px; }
-.live-short-poster img { width: 100%; height: 100%; object-fit: cover; transition: transform .2s ease; }
-.live-short:not(:disabled):hover .live-short-poster img { transform: scale(1.03); }
-.live-short .play { position: absolute; width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; background: rgba(0,0,0,.55); color: #fff; font-size: 20px; padding-left: 4px; }
-.live-short-wait { display: grid; gap: 10px; justify-items: center; padding: 12px; text-align: center; font-size: 13px; color: var(--text2, #888); }
-.live-short-wait .spinner { width: 26px; height: 26px; border-radius: 50%; border: 3px solid var(--border); border-top-color: var(--sky); animation: live-spin 0.9s linear infinite; }
+/* The Shorts feed beside the stream: newest on top, always in view while the page scrolls. */
+.live-feed { position: sticky; top: 0; display: grid; gap: 10px; align-content: start; max-height: calc(100dvh - 120px); }
+.live-feed-head { display: flex; align-items: baseline; gap: 10px; }
+.live-feed-head h3 { margin: 0; }
+.live-feed-list { display: grid; gap: 10px; overflow-y: auto; padding-right: 4px; }
+.live-feed-empty { padding: 14px; border: 1px dashed var(--border); border-radius: 14px; }
+.live-short { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; align-items: start; text-align: left; padding: 8px; border: 1px solid var(--border);
+  border-radius: 14px; background: var(--surface1); color: inherit; font: inherit; cursor: pointer; transition: border-color .15s ease, transform .15s ease; }
+.live-short:not(:disabled):hover { border-color: var(--sky); transform: translateY(-1px); }
+.live-short:disabled { cursor: default; opacity: .8; }
+.live-short-poster { position: relative; display: grid; place-items: center; aspect-ratio: 9 / 16; border-radius: 10px; overflow: hidden; background: var(--surface2); }
+.live-short-poster img { width: 100%; height: 100%; object-fit: cover; }
+.live-short .play { position: absolute; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: rgba(0,0,0,.55); color: #fff; font-size: 13px; padding-left: 3px; }
+.live-short-text { display: grid; gap: 4px; padding-top: 2px; }
+.live-short-text strong { font-size: 15px; line-height: 1.25; }
+.live-short .spinner { width: 24px; height: 24px; border-radius: 50%; border: 3px solid var(--border); border-top-color: var(--sky); animation: live-spin 0.9s linear infinite; }
 @keyframes live-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .live-short-wait .spinner { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .live-short .spinner { animation: none; } }
 .live-watch { border: 0; padding: 16px; border-radius: 18px; background: var(--surface1); color: var(--text); width: min(420px, calc(100vw - 32px)); display: grid; gap: 12px; }
 .live-watch:not([open]) { display: none; }
 .live-watch::backdrop { background: rgba(0,0,0,.7); }
@@ -517,4 +527,5 @@ details.insp-section:not([open]) { gap: 0; }
 .live-watch-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .live-watch-head .link { font-size: 18px; }
 .live-empty { text-align: center; padding: 40px 24px; }
-@media (max-width: 1000px) { .live-stage { grid-template-columns: 1fr; } .live-chat { height: 380px; } }
+@media (max-width: 1250px) { .live-stage { grid-template-columns: 1fr; } .live-chat { order: 3; height: 320px; } }
+@media (max-width: 900px) { .live-body { grid-template-columns: 1fr; } .live-feed { position: static; max-height: none; } }

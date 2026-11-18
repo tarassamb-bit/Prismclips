@@ -60,6 +60,7 @@ class Recorder {
     this.inits = new Map();     // init url -> file
     this.detector = new Detector();
     this.startedAt = null; this.lastSequence = -1; this.offlineSince = null; this.began = Date.now();
+    this.recentTitles = [];
   }
 
   second(ms) { return Math.floor((ms - this.startedAt) / 1000); }
@@ -179,7 +180,14 @@ class Recorder {
       // The card shows "Making…" while the AI and ffmpeg work.
       await db('live_clips', { method: 'POST', body: JSON.stringify({ id: rowId, session_id: this.id, user_id: this.user, at, why, media_id: 'short', bytes: 0, duration: clipSeconds, short: { state: 'making' } }) });
       const momentInClip = (momentAt - run[0].at) / 1000;
-      const short = await makeShort(out, clipSeconds, momentInClip, `${this.login} · ${why}`);
+      const short = await makeShort(out, clipSeconds, momentInClip, `${this.login} · ${why}`, this.recentTitles.slice(-6));
+      if (short.skipped) {
+        // Not worth a Short (or the same as a recent one): the card goes away again.
+        await db(`live_clips?id=eq.${rowId}`, { method: 'DELETE' });
+        log(this.login, 'skipped', short.repeat ? 'repeat' : `score ${short.score}`, short.title);
+        return;
+      }
+      this.recentTitles.push(short.title);
       await db(`live_clips?id=eq.${rowId}`, { method: 'PATCH', body: JSON.stringify({ bytes: short.bytes, duration: short.duration,
         short: { state: 'ready', id: short.id, title: short.title, video: `${PUBLIC_URL}/${short.id}.mp4`, poster: `${PUBLIC_URL}/${short.id}.jpg` } }) });
       log(this.login, 'short ready', short.title, Math.round(short.bytes / 1e6), 'MB', short.duration, 's');
