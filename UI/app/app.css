@@ -181,7 +181,7 @@ details.insp-section:not([open]) { gap: 0; }
 /* Settings */
 @media (max-width: 800px) {
   body { overflow: auto; }
-  .shell { grid-template-columns: 1fr; grid-template-rows: auto; height: auto; min-height: 100vh; }
+  .shell, .shell.collapsed { grid-template-columns: 1fr; grid-template-rows: auto 1fr; height: auto; min-height: 100vh; }
   .sidebar { flex-direction: row; flex-wrap: wrap; align-items: center; border-right: 0; border-bottom: 1px solid var(--border); }
   .tagline { display: none; }
   .side-nav { display: flex; gap: 6px; flex-wrap: wrap; } .side-button { width: auto; }
@@ -314,8 +314,9 @@ details.insp-section:not([open]) { gap: 0; }
   .sidebar { flex-wrap: nowrap; gap: 8px; padding: 10px 12px; }
   .collapse-button, .tagline { display: none; }
   .brand-row { padding: 0; }
-  .side-nav { display: flex; gap: 6px; margin: 0 0 0 auto; }
-  .side-bottom { margin: 0; }
+  /* One row: logo, the screens, then the bug report and Settings at the far end. */
+  .side-nav, .collapsed .side-nav { display: flex; gap: 6px; margin: 0; }
+  .side-bottom { display: flex; align-items: center; gap: 6px; margin: 0 0 0 auto; }
   .side-button { width: 42px; height: 42px; padding: 0; justify-content: center; }
   .side-button .label { display: none; }
   .app-main { padding: 0 14px 20px; }
