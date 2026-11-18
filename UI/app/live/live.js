@@ -33,7 +33,7 @@ export function mountLive(element, dbGetter) {
   shownChannel = null;
   host.innerHTML = `<section class="live-screen">
     <form id="live-form" class="row live-form"><input id="live-url" type="text" inputmode="url" autocomplete="off" placeholder="Paste a Twitch channel, like twitch.tv/name" aria-label="Twitch channel">
-      <button class="button primary" type="submit">Start recording</button></form>
+      <button class="button primary" type="submit">Start recording</button><button class="button ghost" type="button" id="live-guide">How it works</button></form>
     <p id="live-notice" class="error" role="alert" hidden></p>
     <div id="live-tabs" class="live-tabs" role="tablist"></div>
     <div id="live-view"></div>
@@ -43,6 +43,11 @@ export function mountLive(element, dbGetter) {
     const input = host.querySelector('#live-url');
     if (await start(input.value)) input.value = '';
   });
+  host.querySelector('#live-guide').addEventListener('click', guide);
+  // The guide opens by itself the first time someone opens Live on this device.
+  let seen = true;
+  try { seen = localStorage.getItem('relio-live-guide') === 'seen'; localStorage.setItem('relio-live-guide', 'seen'); } catch { /* storage blocked: no automatic guide */ }
+  if (!seen) guide();
   clearInterval(polling);
   refresh();
   polling = setInterval(() => (host?.isConnected ? refresh() : clearInterval(polling)), 2500);
@@ -130,7 +135,7 @@ function render() {
   if (!current) {
     shownChannel = null;
     view.innerHTML = `<div class="panel live-empty"><strong>Nothing recording yet</strong><p class="muted">Paste a Twitch channel above. Relio records it on its server,
-      even after you close this tab, and saves a clip whenever the stream gets much louder or chat explodes. Up to two channels at once.</p></div>`;
+      even after you close this tab, and turns every big moment into a finished Short with captions. Up to two channels at once.</p></div>`;
     return;
   }
   const active = ACTIVE.includes(current.state);
@@ -208,6 +213,40 @@ async function remove(login) {
   notice('');
   if (selected === login) { selected = null; shownChannel = null; }
   await refresh();
+}
+
+const GUIDE = [
+  ['Paste a Twitch channel', 'Copy a link like <strong>twitch.tv/name</strong>, paste it in the box at the top and press <strong>Start recording</strong>. Relio records the stream on its own server, so you can close this tab or your laptop. Up to two channels at once.'],
+  ['Watch the moments come in', 'The graph shows the last five minutes: <span style="color:#34c759">green</span> is the voice, <span style="color:#ff9f0a">orange</span> is chat, <span style="color:#ff453a">red</span> is hype. When the stream suddenly gets much louder or chat explodes, that is a big moment. Point at the graph to see any second.'],
+  ['Shorts make themselves', 'About a minute after a big moment, a finished Short appears under the graph: the best 15–60 seconds, captions that follow every word, a layout for the stream (camera above the game, or the streamer full screen) and the Relio watermark. Weak moments and repeats are skipped.'],
+  ['Watch, download, tidy up', 'Click a Short to play it, then <strong>Download</strong> to post it anywhere. Shorts are kept for two days. Right-click a channel tab to delete it with its Shorts, or press <strong>Stop recording</strong> to stop. A channel that stays offline for 30 minutes stops by itself.'],
+];
+
+/** The Live guide: four steps in a window over the page. Opens by itself the first time, and from "How it works". */
+function guide() {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'live-watch live-guide';
+  let step = 0;
+  const show = () => {
+    const [title, text] = GUIDE[step];
+    dialog.innerHTML = `<div class="live-watch-head"><span class="eyebrow">Live clipping · ${step + 1} of ${GUIDE.length}</span><button class="link" data-close aria-label="Close">✕</button></div>
+      <div class="tour-bar" aria-hidden="true"><div style="width:${Math.round(((step + 1) / GUIDE.length) * 100)}%"></div></div>
+      <h2>${title}</h2><p>${text}</p>
+      <div class="row between">${step ? '<button class="button ghost" data-back>Back</button>' : '<span></span>'}
+        <button class="button primary" data-next>${step === GUIDE.length - 1 ? 'Start' : 'Next'}</button></div>`;
+    dialog.querySelector('[data-next]').focus();
+  };
+  dialog.addEventListener('click', (event) => {
+    if (event.target === dialog || event.target.closest('[data-close]')) return dialog.close();
+    if (event.target.closest('[data-back]')) { step--; show(); }
+    if (event.target.closest('[data-next]')) {
+      if (step === GUIDE.length - 1) { dialog.close(); host?.querySelector('#live-url')?.focus(); } else { step++; show(); }
+    }
+  });
+  dialog.addEventListener('close', () => dialog.remove());
+  document.body.append(dialog);
+  show();
+  dialog.showModal();
 }
 
 /** A window over the page that plays the Short, with a download button. Closes with ×, Escape or a click outside. */
