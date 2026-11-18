@@ -81,22 +81,29 @@ async function refresh() {
     client.from('live_clips').select('id,session_id,at,why,duration,short,media_id').gte('created', since).order('at', { ascending: false }),
   ]);
   if (sessionRows.error || clipRows.error) return;
-  rows = sessionRows.data;
-  clips = clipRows.data;
+  // Everything new is gathered first and swapped in at once: the graph is never drawn from a list that has no graph yet.
+  const nextRows = sessionRows.data;
   // One tab per channel: rows come newest first, so the first row of a channel is the one shown.
-  channels = [...new Set(rows.map((r) => r.login))].map((login) => ({ login, row: rows.find((r) => r.login === login), ids: new Set(rows.filter((r) => r.login === login).map((r) => r.id)) }));
-  if (!channels.some((c) => c.login === selected)) selected = (channels.find((c) => ACTIVE.includes(c.row.state)) ?? channels[0])?.login ?? null;
-  const current = channels.find((c) => c.login === selected)?.row;
+  const nextChannels = [...new Set(nextRows.map((r) => r.login))].map((login) => ({ login, row: nextRows.find((r) => r.login === login), ids: new Set(nextRows.filter((r) => r.login === login).map((r) => r.id)) }));
+  let nextSelected = selected;
+  if (!nextChannels.some((c) => c.login === nextSelected)) nextSelected = (nextChannels.find((c) => ACTIVE.includes(c.row.state)) ?? nextChannels[0])?.login ?? null;
+  const current = nextChannels.find((c) => c.login === nextSelected)?.row;
   if (current) {
     const graph = await client.from('live_sessions').select('graph').eq('id', current.id).single();
-    const raw = graph.data?.graph ?? null;
+    const raw = graph.data?.graph ?? channels.find((c) => c.row.id === current.id)?.row.graph ?? null;
     // The newest seconds are still filling in on the server and change on the next update: shown only once they are final.
-    current.graph = raw?.loud?.length > 3 ? { ...raw, loud: raw.loud.slice(0, -3), chat: raw.chat.slice(0, -3), hype: raw.hype.slice(0, -3) } : raw;
+    current.graph = raw?.loud?.length > 3 && !raw.trimmed ? { ...raw, loud: raw.loud.slice(0, -3), chat: raw.chat.slice(0, -3), hype: raw.hype.slice(0, -3), trimmed: true } : raw;
     const dataEnd = current.graph?.loud?.length ? current.graph.start + (current.graph.loud.length - 1) * 1000 : null;
     // The graph runs this far behind now: the newest data's age plus room for a late update, so it never catches up with
     // the data (which would stop it, then jump). Eased very gently, so the speed never visibly changes.
     if (dataEnd) { const target = Date.now() - dataEnd + 6000; lag = lag === null || Math.abs(lag - target) > 15_000 ? target : lag * 0.95 + target * 0.05; }
   }
+  // Another channel may have been chosen while this refresh waited.
+  if (nextSelected !== selected && channels.some((c) => c.login === selected) && nextChannels.some((c) => c.login === selected)) return;
+  rows = nextRows;
+  clips = clipRows.data;
+  channels = nextChannels;
+  selected = nextSelected;
   render();
 }
 
