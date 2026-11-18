@@ -254,7 +254,11 @@ async function cleanup() {
     await db(`live_clips?id=eq.${clip.id}`, { method: 'DELETE' });
   }
   // The disk is small: past the limit, the oldest Shorts go first, even before two days.
-  const files = await onDisk();
+  let files = await onDisk();
+  // Shorts of a recording the person deleted have no row anymore. Ten minutes' grace: a Short being made has no row id yet.
+  const kept = new Set((await db('live_clips?short=not.is.null&select=short&limit=5000', { headers: { Prefer: '' } })).map((c) => c.short?.id));
+  for (const file of files.filter((f) => !kept.has(f.id) && Date.now() - f.at > 600_000)) await removeShort(file.id);
+  files = files.filter((f) => kept.has(f.id) || Date.now() - f.at <= 600_000);
   let total = files.reduce((sum, f) => sum + f.bytes, 0);
   for (const file of files) {
     if (total <= DISK_FOR_SHORTS) break;

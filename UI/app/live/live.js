@@ -60,7 +60,7 @@ async function refresh() {
   const since = new Date(Date.now() - 86400_000).toISOString();
   const [sessionRows, clipRows] = await Promise.all([
     client.from('live_sessions').select('id,login,state,detail,buffered,chat,created').gte('created', since).order('created', { ascending: false }),
-    client.from('live_clips').select('id,session_id,at,why,duration,short').gte('created', since).order('at', { ascending: false }),
+    client.from('live_clips').select('id,session_id,at,why,duration,short,media_id').gte('created', since).order('at', { ascending: false }),
   ]);
   if (sessionRows.error || clipRows.error) return;
   rows = sessionRows.data;
@@ -78,7 +78,11 @@ function render() {
   if (!host?.isConnected) return;
   host.querySelector('#live-tabs').innerHTML = rows.map((r) => `<button role="tab" aria-selected="${r.id === selected}" class="live-tab ${r.id === selected ? 'on' : ''}" data-live-tab="${r.id}">
     <span class="dot ${ACTIVE.includes(r.state) ? 'on-air' : ''}" aria-hidden="true"></span>${esc(r.login)}</button>`).join('');
-  for (const tab of host.querySelectorAll('[data-live-tab]')) tab.addEventListener('click', () => { selected = tab.dataset.liveTab; render(); refresh(); });
+  for (const tab of host.querySelectorAll('[data-live-tab]')) {
+    tab.addEventListener('click', () => { selected = tab.dataset.liveTab; render(); refresh(); });
+    tab.addEventListener('contextmenu', (event) => { event.preventDefault(); remove(tab.dataset.liveTab); });
+    tab.addEventListener('keydown', (event) => { if (event.key === 'Delete' || event.key === 'Backspace') remove(tab.dataset.liveTab); });
+  }
   const view = host.querySelector('#live-view');
   const current = rows.find((r) => r.id === selected);
   if (!current) {
@@ -140,6 +144,26 @@ function render() {
     }).join('')}</div>`);
   for (const button of view.querySelectorAll('[data-live-play]')) button.addEventListener('click', () => play(own.find((c) => c.id === button.dataset.livePlay)));
   drawGraph();
+}
+
+/** Deletes a recording with its Shorts after asking; stops it first if it is still recording. Right-click or Delete on its tab. */
+async function remove(id) {
+  const row = rows.find((r) => r.id === id);
+  if (!row) return;
+  const own = clips.filter((c) => c.session_id === id);
+  if (!confirm(`Delete ${row.login}${ACTIVE.includes(row.state) ? ' and stop recording it' : ''}? Its ${own.length} ${own.length === 1 ? 'Short' : 'Shorts'} are deleted too. This can't be undone.`)) return;
+  const client = db();
+  // Clips from before Shorts were made on the server sit in the person's cloud space; those go through Relio's server.
+  const stored = own.map((c) => c.media_id).filter((m) => m?.startsWith('live-'));
+  if (stored.length) {
+    const token = (await client.auth.getSession()).data.session?.access_token;
+    await fetch('/api/video?action=delete', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ mediaIds: stored }) }).catch(() => {});
+  }
+  const { error } = await client.from('live_sessions').delete().eq('id', id);
+  if (error) return notice('That recording could not be deleted. Please try again.');
+  notice('');
+  if (selected === id) { selected = null; shownChannel = null; }
+  await refresh();
 }
 
 /** A window over the page that plays the Short, with a download button. Closes with ×, Escape or a click outside. */
