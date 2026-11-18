@@ -10,6 +10,16 @@ let host = null, db = null, polling = null;
 let rows = [], clips = [], channels = [], selected = null, shownChannel = null;
 // Where the pointer is over the graph (CSS pixels from its left), and what the last drawing mapped, for the hover readout.
 let hoverX = null, plotted = null;
+// The graph slides on smoothly between updates: it shows the time `lag` ms behind now, so new data arrives just as it's needed.
+let lag = null, frame = 0;
+
+/** Sets `element`'s content only when it changed, so a refresh doesn't rebuild (and flicker) what is already on screen. */
+function setHtml(element, html) {
+  if (element.dataset.html === html) return false;
+  element.dataset.html = html;
+  element.innerHTML = html;
+  return true;
+}
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
@@ -34,6 +44,14 @@ export function mountLive(element, dbGetter) {
   refresh();
   polling = setInterval(() => (host?.isConnected ? refresh() : clearInterval(polling)), 2500);
   addEventListener('resize', drawGraph);
+  cancelAnimationFrame(frame);
+  let last = 0;
+  const tick = (time) => {
+    if (!host?.isConnected) return;
+    if (time - last > 33 && ACTIVE.includes(channels.find((c) => c.login === selected)?.row.state)) { last = time; drawGraph(); }
+    frame = requestAnimationFrame(tick);
+  };
+  frame = requestAnimationFrame(tick);
 }
 
 function notice(text) {
@@ -72,15 +90,18 @@ async function refresh() {
   if (current) {
     const graph = await client.from('live_sessions').select('graph').eq('id', current.id).single();
     current.graph = graph.data?.graph ?? null;
+    const dataEnd = current.graph?.loud?.length ? current.graph.start + (current.graph.loud.length - 1) * 1000 : null;
+    // How far behind now the newest data is, plus one refresh: eased so the slide speed never jumps.
+    if (dataEnd) { const target = Date.now() - dataEnd + 2600; lag = lag === null || Math.abs(lag - target) > 10_000 ? target : lag * 0.8 + target * 0.2; }
   }
   render();
 }
 
 function render() {
   if (!host?.isConnected) return;
-  host.querySelector('#live-tabs').innerHTML = channels.map((c) => `<button role="tab" aria-selected="${c.login === selected}" class="live-tab ${c.login === selected ? 'on' : ''}" data-live-tab="${esc(c.login)}" title="${esc(STATE_TEXT[c.row.state])} · right-click to delete">
-    <span class="dot ${c.row.state === 'recording' ? 'on-air' : ACTIVE.includes(c.row.state) ? 'waiting' : ''}" aria-hidden="true"></span>${esc(c.login)}</button>`).join('');
-  for (const tab of host.querySelectorAll('[data-live-tab]')) {
+  const tabs = host.querySelector('#live-tabs');
+  if (setHtml(tabs, channels.map((c) => `<button role="tab" aria-selected="${c.login === selected}" class="live-tab ${c.login === selected ? 'on' : ''}" data-live-tab="${esc(c.login)}" title="${esc(STATE_TEXT[c.row.state])} · right-click to delete">
+    <span class="dot ${c.row.state === 'recording' ? 'on-air' : ACTIVE.includes(c.row.state) ? 'waiting' : ''}" aria-hidden="true"></span>${esc(c.login)}</button>`).join(''))) for (const tab of tabs.querySelectorAll('[data-live-tab]')) {
     tab.addEventListener('click', () => { selected = tab.dataset.liveTab; render(); refresh(); });
     tab.addEventListener('contextmenu', (event) => { event.preventDefault(); remove(tab.dataset.liveTab); });
     tab.addEventListener('keydown', (event) => { if (event.key === 'Delete' || event.key === 'Backspace') remove(tab.dataset.liveTab); });
@@ -135,7 +156,8 @@ function render() {
   const ready = own.filter((c) => c.short.state === 'ready');
   view.querySelector('#live-count').textContent = ready.length ? `${ready.length} ready · kept for 2 days` : '';
   const problem = current.detail ? `<p class="error">${esc(current.detail)}</p>` : '';
-  view.querySelector('#live-clips').innerHTML = problem + (own.length === 0
+  const list = view.querySelector('#live-clips');
+  const changed = setHtml(list, problem + (own.length === 0
     ? `<p class="muted small">${active ? 'No Shorts yet. Each spike becomes a finished Short with captions about a minute later.' : 'No Shorts.'}</p>`
     : `<div class="live-short-grid">${own.map((c) => {
       const s = c.short;
@@ -144,8 +166,8 @@ function render() {
       return `<button class="live-short" data-live-play="${c.id}" ${s.state === 'ready' ? '' : 'disabled'} aria-label="Play ${esc(s.title ?? c.why)}">
         <span class="live-short-poster">${poster}</span>
         <strong>${esc(s.title ?? c.why)}</strong><span class="muted small">${clock(Date.parse(c.at))} · ${esc(c.why)}${s.state === 'ready' ? ` · ${Math.round(c.duration)} s` : ''}</span></button>`;
-    }).join('')}</div>`);
-  for (const button of view.querySelectorAll('[data-live-play]')) button.addEventListener('click', () => play(own.find((c) => c.id === button.dataset.livePlay)));
+    }).join('')}</div>`));
+  if (changed) for (const button of list.querySelectorAll('[data-live-play]')) button.addEventListener('click', () => play(clips.find((c) => c.id === button.dataset.livePlay)));
   drawGraph();
 }
 
@@ -224,17 +246,31 @@ function drawGraph() {
     ctx.fillText(ACTIVE.includes(current?.state) ? 'Waiting for the first minute of the stream…' : 'No graph for this recording.', 12, height / 2);
     return;
   }
-  const span = 300, end = graph.start + (graph.loud.length - 1) * 1000, from = end - span * 1000;
+  const dataEnd = graph.start + (graph.loud.length - 1) * 1000;
+  const live = ACTIVE.includes(current?.state) && lag !== null;
+  const span = 300, end = live ? Math.min(dataEnd, Date.now() - lag) : dataEnd, from = end - span * 1000;
   const xOf = (ms) => ((ms - from) / (span * 1000)) * width;
   const pad = 8, yOf = (v) => height - pad - v * (height - pad * 2);
   const chatMax = Math.max(3, ...graph.chat);
-  for (const [key, values] of [['loud', graph.loud], ['chat', graph.chat.map((n) => n / chatMax)], ['hype', graph.hype]]) {
+  // Chat comes in bursts: a 3-second average reads as a line, not a comb.
+  const chat = graph.chat.map((_, i) => (graph.chat[i - 1] ?? graph.chat[i]) / 3 + graph.chat[i] / 3 + (graph.chat[i + 1] ?? graph.chat[i]) / 3);
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, 0, width, height); ctx.clip();
+  for (const [key, values] of [['loud', graph.loud], ['chat', chat.map((n) => n / chatMax)], ['hype', graph.hype]]) {
     ctx.strokeStyle = COLORS[key];
     ctx.lineWidth = key === 'hype' ? 2.5 : 1.5;
     ctx.beginPath();
-    values.forEach((v, i) => { const x = xOf(graph.start + i * 1000), y = yOf(v); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    // A smooth curve through the midpoints between seconds.
+    const points = values.map((v, i) => [xOf(graph.start + i * 1000), yOf(v)]);
+    ctx.moveTo(...points[0]);
+    for (let i = 1; i < points.length; i++) {
+      const [px, py] = points[i - 1], [x, y] = points[i];
+      ctx.quadraticCurveTo(px, py, (px + x) / 2, (py + y) / 2);
+    }
+    ctx.lineTo(...points.at(-1));
     ctx.stroke();
   }
+  ctx.restore();
   ctx.fillStyle = COLORS.hype;
   const ids = channels.find((c) => c.login === selected)?.ids ?? new Set();
   for (const clip of clips.filter((c) => ids.has(c.session_id))) {
