@@ -474,6 +474,7 @@ details.insp-section:not([open]) { gap: 0; }
 .live-tab.on { background: var(--surface2); border-color: var(--sky); }
 .live-tab .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text2, #999); }
 .live-tab .dot.on-air { background: #ff453a; box-shadow: 0 0 0 3px rgba(255, 69, 58, .2); }
+.live-tab .dot.waiting { background: #ff9f0a; }
 .live-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 .live-title { display: inline-flex; align-items: center; gap: 10px; font-size: 22px; }
 .live-head #live-stop { margin-left: auto; }

@@ -78,8 +78,8 @@ async function refresh() {
 
 function render() {
   if (!host?.isConnected) return;
-  host.querySelector('#live-tabs').innerHTML = channels.map((c) => `<button role="tab" aria-selected="${c.login === selected}" class="live-tab ${c.login === selected ? 'on' : ''}" data-live-tab="${esc(c.login)}" title="Right-click to delete">
-    <span class="dot ${ACTIVE.includes(c.row.state) ? 'on-air' : ''}" aria-hidden="true"></span>${esc(c.login)}</button>`).join('');
+  host.querySelector('#live-tabs').innerHTML = channels.map((c) => `<button role="tab" aria-selected="${c.login === selected}" class="live-tab ${c.login === selected ? 'on' : ''}" data-live-tab="${esc(c.login)}" title="${esc(STATE_TEXT[c.row.state])} · right-click to delete">
+    <span class="dot ${c.row.state === 'recording' ? 'on-air' : ACTIVE.includes(c.row.state) ? 'waiting' : ''}" aria-hidden="true"></span>${esc(c.login)}</button>`).join('');
   for (const tab of host.querySelectorAll('[data-live-tab]')) {
     tab.addEventListener('click', () => { selected = tab.dataset.liveTab; render(); refresh(); });
     tab.addEventListener('contextmenu', (event) => { event.preventDefault(); remove(tab.dataset.liveTab); });
