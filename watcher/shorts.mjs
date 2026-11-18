@@ -14,8 +14,8 @@ export const DIR = path.join(homedir(), 'shorts');
 const MODEL = 'xiaomi/mimo-v2.6-flash';
 const PROVIDER = { zdr: true, data_collection: 'deny', order: ['makora'], allow_fallbacks: false };
 const FONTS = '/usr/share/fonts/truetype/montserrat';
-const FONT = `${FONTS}/Montserrat-ExtraBold.ttf`;
-const LOGO = new URL('./logo.png', import.meta.url).pathname;
+// The app's own moving watermark as transparent frames (make-watermark.mjs), looped over the whole Short.
+const WATERMARK = new URL('./wm/%04d.png', import.meta.url).pathname;
 const YELLOW = '&H0000D7FF&';
 // The AI's 0–10 score a moment needs to become a Short.
 const MIN_SCORE = 6;
@@ -65,7 +65,8 @@ silent streamer, a menu or loading screen, ads. Be strict.
         method: 'POST', signal: AbortSignal.timeout(90_000),
         headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model, provider: PROVIDER, temperature: 0.2, max_tokens: 6000, reasoning: { effort: 'low', exclude: true },
+          // MiMo ignores "think briefly" here and spends every token thinking: thinking off answers in seconds, for a tenth of the cost.
+          model, provider: PROVIDER, temperature: 0.2, max_tokens: 6000, reasoning: { enabled: false },
           messages: [
             { role: 'system', content: `Reply with only one JSON object, no other text and no code fences, that matches this JSON Schema: ${JSON.stringify(schema)}` },
             { role: 'user', content: [{ type: 'text', text: prompt },
@@ -113,7 +114,7 @@ export function webcamBox(box) {
   return ok ? { x: box.x, y: box.y, w: Math.min(box.w, 1 - box.x), h: Math.min(box.h, 1 - box.y) } : null;
 }
 
-/** The picture for each layout: an ffmpeg filter from [0:v] to [frame], where captions go, and where the mark goes. */
+/** The picture for each layout: an ffmpeg filter from [0:v] to [frame], and where the captions and title go. */
 export function layout(kind, webcam, width, height) {
   if (kind === 'webcam' && webcam) {
     // Camera on top (1080×700), gameplay below (1080×1220), as streamers' Shorts usually look.
@@ -121,18 +122,18 @@ export function layout(kind, webcam, width, height) {
     const gw = even(Math.min(width, height * (1080 / 1220)));
     return {
       filter: `[0:v]split[c][g];[c]crop=${cam.w}:${cam.h}:${cam.x}:${cam.y},scale=1080:700:flags=lanczos[top];[g]crop=${gw}:${height}:${Math.round((width - gw) / 2)}:0,scale=1080:1220:flags=lanczos[bottom];[top][bottom]vstack[frame]`,
-      captionY: 760, titleY: 90, markY: 1330,
+      captionY: 760, titleY: 90,
     };
   }
   if (kind === 'person') {
     // The streamer fills the screen: a 9:16 window from the middle of the frame.
     const w = even(Math.min(width, height * 9 / 16));
-    return { filter: `[0:v]crop=${w}:${height}:${Math.round((width - w) / 2)}:0,scale=1080:1920:flags=lanczos[frame]`, captionY: 1180, titleY: 220, markY: 420 };
+    return { filter: `[0:v]crop=${w}:${height}:${Math.round((width - w) / 2)}:0,scale=1080:1920:flags=lanczos[frame]`, captionY: 1180, titleY: 220 };
   }
   // A game or screen: all of it, on a blurred copy of itself.
   return {
     filter: '[0:v]split[a][b];[a]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=25:3,eq=brightness=-0.12[bg];[b]scale=1080:-2:flags=lanczos[fg];[bg][fg]overlay=0:(H-h)/2[frame]',
-    captionY: 1330, titleY: 400, markY: 520,
+    captionY: 1330, titleY: 400,
   };
 }
 
@@ -202,11 +203,10 @@ export async function makeShort(clip, clipSeconds, momentAt, fallbackTitle, rece
   try {
     const filter = [
       look.filter,
-      `[frame]ass=${subs}:fontsdir=${FONTS},drawbox=x=48:y=${look.markY}:w=380:h=92:color=0x0e1016@0.82:t=fill[v1]`,
-      '[1:v]scale=64:64[logo]',
-      `[v1][logo]overlay=62:${look.markY + 14},drawtext=fontfile=${FONT}:text='Relio Clips':fontcolor=white:fontsize=42:x=142:y=${look.markY + 24},fps=30,format=yuv420p[v]`,
+      `[frame]ass=${subs}:fontsdir=${FONTS},fps=30[v1]`,
+      '[v1][1:v]overlay=0:0:shortest=1,format=yuv420p[v]',
     ].join(';');
-    await ffmpeg(['-y', '-ss', String(start), '-t', String(end - start), '-i', clip, '-i', LOGO, '-filter_complex', filter,
+    await ffmpeg(['-y', '-ss', String(start), '-t', String(end - start), '-i', clip, '-framerate', '30', '-stream_loop', '-1', '-i', WATERMARK, '-filter_complex', filter,
       '-map', '[v]', '-map', '0:a?', '-af', 'loudnorm=I=-14:TP=-1.5:LRA=11', '-ar', '48000',
       '-c:v', 'libx264', '-preset', 'faster', '-crf', '18', '-maxrate', '10M', '-bufsize', '20M', '-profile:v', 'high',
       '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', out]);
