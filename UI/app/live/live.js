@@ -173,8 +173,24 @@ function play(clip) {
   dialog.innerHTML = `<div class="live-watch-head"><strong>${esc(clip.short.title)}</strong><button class="link" data-close aria-label="Close">✕</button></div>
     <video src="${esc(clip.short.video)}" poster="${esc(clip.short.poster)}" controls autoplay playsinline></video>
     <div class="row between"><span class="muted small">${clock(Date.parse(clip.at))} · ${esc(clip.why)} · ${Math.round(clip.duration)} s</span>
-      <a class="button primary" href="${esc(clip.short.video)}" download target="_blank" rel="noopener">Download</a></div>`;
+      <button class="button primary" data-download>Download</button></div>`;
   document.body.append(dialog);
+  // The video lives on another site, where a plain download link only opens it: fetch it and save it under its title.
+  dialog.querySelector('[data-download]').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.textContent = 'Downloading…';
+    try {
+      const blob = await (await fetch(clip.short.video)).blob();
+      const link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `${clip.short.title.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'Relio Short'}.mp4` });
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 10_000);
+      button.textContent = 'Downloaded';
+    } catch {
+      button.textContent = 'Download failed · try again';
+      button.disabled = false;
+    }
+  });
   dialog.addEventListener('close', () => dialog.remove());
   dialog.addEventListener('click', (event) => { if (event.target === dialog || event.target.closest('[data-close]')) dialog.close(); });
   dialog.showModal();
