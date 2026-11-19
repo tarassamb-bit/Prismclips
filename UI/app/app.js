@@ -892,8 +892,13 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
     body = `<div class="box">
         <div class="who"><span class="avatar" aria-hidden="true">${esc((email ?? '?')[0].toUpperCase())}</span><div><strong>${email ? esc(email) : 'Not signed in'}</strong><span class="muted small">${email ? 'Signed in' : 'Sign in to track your stats'}</span></div></div>
         <p class="muted small">Your projects, Shorts and videos are saved to your account, and each export adds its date, number of Shorts, length and quality to your stats under Overview.</p>
-        ${email ? '<div class="row"><button class="button ghost" data-action="tutorial">Show tutorial</button><button class="button ghost" data-action="live-tutorial">Show the Live tour again</button><button class="button ghost" data-action="signout">Sign out</button><button class="button ghost danger" data-action="delete-account">Delete account</button></div><p id="delete-account-note" class="error small" role="alert"></p>' : ''}
+        ${email ? '<div class="row"><button class="button ghost" data-action="signout">Sign out</button><button class="button ghost danger" data-action="delete-account">Delete account</button></div><p id="delete-account-note" class="error small" role="alert"></p>' : ''}
       </div>
+      ${email ? `<div class="box stack">
+        <strong>Tutorials</strong>
+        <p class="muted small">Each tutorial runs once by itself. Start one again here.</p>
+        <div class="row"><button class="button ghost" data-action="tutorial">Making Shorts</button><button class="button ghost" data-action="live-tutorial">Live clipping</button></div>
+      </div>` : ''}
       ${email ? `<form id="profile-form" class="box stack">
         <strong>Profile</strong>
         <div class="profile-fields">
