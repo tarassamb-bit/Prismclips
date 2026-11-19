@@ -13,7 +13,8 @@ export const DIR = path.join(homedir(), 'shorts');
 // The same cheap model the rest of Relio uses. It gets text (whisper's transcript) and pictures, never sound, so any of its
 // providers can answer: sound on MiMo has one provider, and when that one is down every Short lost its AI.
 const MODEL = 'xiaomi/mimo-v2.6-flash';
-const PROVIDER = { zdr: true, data_collection: 'deny' };
+// No zero-retention requirement: the stream is public Twitch content, and requiring it left only MiMo's two least reliable providers.
+const PROVIDER = { data_collection: 'deny' };
 const FONTS = '/usr/share/fonts/truetype/montserrat';
 // The app's own moving watermark as transparent frames (make-watermark.mjs), looped over the whole Short.
 const WATERMARK = new URL('./wm/%04d.png', import.meta.url).pathname;
