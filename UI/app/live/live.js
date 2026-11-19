@@ -117,7 +117,7 @@ async function refresh() {
   channels = nextChannels;
   selected = nextSelected;
   if (channels.some((c) => ACTIVE.includes(c.row.state))) tourDid(0);
-  if (clips.some((c) => c.short && c.short.state !== 'failed')) tourDid(2);
+  if (clips.some((c) => c.short?.state === 'ready')) tourDid(2);
   render();
 }
 
@@ -176,7 +176,8 @@ function render() {
   pill.className = `live-pill ${current.state === 'recording' ? 'on' : ''}`;
   view.querySelector('#live-meta').textContent = current.state === 'recording' ? `${Math.floor(current.buffered / 60)} of 15 min kept${current.chat ? ' · chat connected' : ' · chat not connected'}` : '';
   view.querySelector('#live-stop').hidden = !active;
-  const own = clips.filter((c) => channel.ids.has(c.session_id) && c.short);
+  // Only finished Shorts show: one being made appears once it's ready.
+  const own = clips.filter((c) => channel.ids.has(c.session_id) && c.short?.state === 'ready');
   const ready = own.filter((c) => c.short.state === 'ready');
   view.querySelector('#live-count').textContent = ready.length ? `${ready.length} ready · kept for 2 days` : '';
   const problem = current.detail ? `<p class="error">${esc(current.detail)}</p>` : '';
@@ -221,9 +222,7 @@ const TOUR = [
   { target: '#live-form', text: 'Paste a Twitch channel here, like <strong>twitch.tv/name</strong>, and press <strong>Start recording</strong>. Relio records it on its server, even after you close this tab.' },
   { target: '#live-graph', text: 'This graph shows the last five minutes: <span style="color:#34c759">green</span> voice, <span style="color:#ff9f0a">orange</span> chat, <span style="color:#ff453a">red</span> hype. Point at it to see any second.' },
   { target: '#live-clips', text: 'When the stream gets much louder or chat explodes, a finished Short with captions appears here about a minute later. Waiting for a big moment…' },
-  { target: '.live-short:not(:disabled)', text: 'Your first Short is ready. Click it to watch it, and download it from there.',
-    // Until it's ready, the bubble waits on the card being made.
-    waiting: '.live-short', waitingText: 'Your first Short is being made: the best part, captions and layout. It takes about a minute…' },
+  { target: '.live-short:not(:disabled)', text: 'Your first Short is ready. Click it to watch it, and download it from there.' },
 ];
 const TOUR_KEY = 'relio-live-tour';
 const tourStep = () => { try { return localStorage.getItem(TOUR_KEY); } catch { return 'done'; } };
@@ -244,8 +243,7 @@ function tourHint() {
   const hint = Number.isInteger(step) && host?.isConnected ? TOUR[step] : null;
   // Steps already done earlier (a channel was already recording) count right away.
   if (hint && tourDone.has(step)) { tourDid(step); return; }
-  const ready = hint && host.querySelector(hint.target);
-  const target = ready ?? (hint?.waiting ? host.querySelector(hint.waiting) : null);
+  const target = hint && host.querySelector(hint.target);
   const blockers = [...document.querySelectorAll('.live-block')];
   if (!hint || !target || !target.getBoundingClientRect().width || document.querySelector('dialog[open]')) { ring?.remove(); bubble?.remove(); blockers.forEach((b) => b.remove()); return; }
   if (!bubble) {
@@ -255,7 +253,7 @@ function tourHint() {
     ring = document.getElementById('live-ring'); bubble = document.getElementById('live-bubble');
   }
   const html = `<p class="eyebrow">Live clipping · step ${step + 1} of ${TOUR.length}</p><div class="tour-bar" aria-hidden="true"><div style="width:${Math.round(((step + 1) / TOUR.length) * 100)}%"></div></div>
-    <p>${ready ? hint.text : hint.waitingText}</p><div class="row between"><button class="link" data-tour-skip>Skip tour</button></div>`;
+    <p>${hint.text}</p><div class="row between"><button class="link" data-tour-skip>Skip tour</button></div>`;
   if (bubble.dataset.html !== html) {
     bubble.dataset.html = html;
     bubble.innerHTML = html;

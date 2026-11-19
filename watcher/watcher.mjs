@@ -263,6 +263,8 @@ async function cleanup() {
     else if (clip.media_id?.startsWith('live-')) await deleteObject(`${clip.user_id}/${clip.media_id}`).catch(() => {});
     await db(`live_clips?id=eq.${clip.id}`, { method: 'DELETE' });
   }
+  // A Short left "making" by a restart, or one that failed, never shows: its row goes.
+  await db(`live_clips?or=(short->>state.eq.failed,and(short->>state.eq.making,created.lt.${new Date(Date.now() - 15 * 60_000).toISOString()}))`, { method: 'DELETE' }).catch(() => {});
   // The disk is small: past the limit, the oldest Shorts go first, even before two days.
   let files = await onDisk();
   // Shorts of a recording the person deleted have no row anymore. Ten minutes' grace: a Short being made has no row id yet.
