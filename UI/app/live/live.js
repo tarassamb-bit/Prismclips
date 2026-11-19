@@ -354,24 +354,26 @@ function drawGraph() {
   chatScale = chatScale === null ? Math.max(3, ...visible) : chatScale * 0.95 + Math.max(3, ...visible) * 0.05;
   const chatMax = chatScale;
   // A second with no measured sound (a late piece, a skipped ad) comes as 0: it keeps the last real level instead of dipping.
+  // null is a stretch the server didn't record (a restart): it stays a gap in every line.
   let level = 0;
-  const loud = graph.loud.map((v) => (v > 0 ? (level = v) : level));
+  const loud = graph.loud.map((v) => (v === null ? null : v > 0 ? (level = v) : level));
   // Chat comes in bursts: a 3-second average reads as a line, not a comb.
-  const chat = graph.chat.map((_, i) => (graph.chat[i - 1] ?? graph.chat[i]) / 3 + graph.chat[i] / 3 + (graph.chat[i + 1] ?? graph.chat[i]) / 3);
+  const chat = graph.chat.map((v, i) => (v === null ? null : (graph.chat[i - 1] ?? v) / 3 + v / 3 + (graph.chat[i + 1] ?? v) / 3));
   ctx.save();
   ctx.beginPath(); ctx.rect(0, 0, width, height); ctx.clip();
-  for (const [key, values] of [['loud', loud], ['chat', chat.map((n) => n / chatMax)], ['hype', graph.hype]]) {
+  for (const [key, values] of [['loud', loud], ['chat', chat.map((n) => (n === null ? null : n / chatMax))], ['hype', graph.hype]]) {
     ctx.strokeStyle = COLORS[key];
     ctx.lineWidth = key === 'hype' ? 2.5 : 1.5;
     ctx.beginPath();
     // A smooth curve through the midpoints between seconds.
-    const points = values.map((v, i) => [xOf(graph.start + i * 1000), yOf(v)]);
-    ctx.moveTo(...points[0]);
-    for (let i = 1; i < points.length; i++) {
-      const [px, py] = points[i - 1], [x, y] = points[i];
-      ctx.quadraticCurveTo(px, py, (px + x) / 2, (py + y) / 2);
-    }
-    ctx.lineTo(...points.at(-1));
+    const points = values.map((v, i) => (v === null ? null : [xOf(graph.start + i * 1000), yOf(v)]));
+    points.forEach((point, i) => {
+      if (!point) return;
+      const previous = points[i - 1];
+      if (!previous) { ctx.moveTo(...point); return; }
+      ctx.quadraticCurveTo(previous[0], previous[1], (previous[0] + point[0]) / 2, (previous[1] + point[1]) / 2);
+      if (!points[i + 1]) ctx.lineTo(...point);
+    });
     ctx.stroke();
   }
   ctx.restore();
@@ -398,7 +400,8 @@ function readout(ctx, width, height, current) {
   const step = xOf(graph.start + 1000) - xOf(graph.start);
   const index = Math.max(0, Math.min(graph.loud.length - 1, Math.round((hoverX - xOf(graph.start)) / step)));
   const at = graph.start + index * 1000, x = xOf(at);
-  if (x < 0 || x > width) return;
+  // Nothing to read over a gap the server didn't record.
+  if (x < 0 || x > width || loud[index] === null) return;
   ctx.strokeStyle = 'rgba(128,128,128,.7)';
   ctx.lineWidth = 1;
   ctx.setLineDash([4, 4]);

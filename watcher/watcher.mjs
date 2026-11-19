@@ -241,7 +241,8 @@ class Recorder {
 }
 
 /** The graph continued from the one saved before a restart: saved seconds fill the five minutes before this run's own data,
- * and a gap between them keeps the last saved values. Graphs are { start (ms), loud, chat, hype } with one value per second. */
+ * and the seconds between them (the restart) are null, drawn as a break. Graphs are { start (ms), loud, chat, hype }, one
+ * value per second. */
 export function withSaved(current, saved) {
   if (!saved?.loud?.length) return current;
   const savedEnd = saved.start + (saved.loud.length - 1) * 1000;
@@ -249,8 +250,8 @@ export function withSaved(current, saved) {
   if (first >= current.start || savedEnd < first) return current;
   const out = { start: first, loud: [], chat: [], hype: [] };
   for (let at = first; at < current.start; at += 1000) {
-    const i = Math.min(saved.loud.length - 1, Math.round((Math.min(at, savedEnd) - saved.start) / 1000));
-    out.loud.push(saved.loud[i]); out.chat.push(at > savedEnd ? 0 : saved.chat[i]); out.hype.push(at > savedEnd ? 0 : saved.hype[i]);
+    const i = Math.round((at - saved.start) / 1000), known = at <= savedEnd;
+    out.loud.push(known ? saved.loud[i] : null); out.chat.push(known ? saved.chat[i] : null); out.hype.push(known ? saved.hype[i] : null);
   }
   for (const key of ['loud', 'chat', 'hype']) out[key].push(...current[key]);
   return out;
