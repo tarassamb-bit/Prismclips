@@ -892,7 +892,7 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
     body = `<div class="box">
         <div class="who"><span class="avatar" aria-hidden="true">${esc((email ?? '?')[0].toUpperCase())}</span><div><strong>${email ? esc(email) : 'Not signed in'}</strong><span class="muted small">${email ? 'Signed in' : 'Sign in to track your stats'}</span></div></div>
         <p class="muted small">Your projects, Shorts and videos are saved to your account, and each export adds its date, number of Shorts, length and quality to your stats under Overview.</p>
-        ${email ? '<div class="row"><button class="button ghost" data-action="tutorial">Show tutorial</button><button class="button ghost" data-action="signout">Sign out</button><button class="button ghost danger" data-action="delete-account">Delete account</button></div><p id="delete-account-note" class="error small" role="alert"></p>' : ''}
+        ${email ? '<div class="row"><button class="button ghost" data-action="tutorial">Show tutorial</button><button class="button ghost" data-action="live-tutorial">Show the Live tour again</button><button class="button ghost" data-action="signout">Sign out</button><button class="button ghost danger" data-action="delete-account">Delete account</button></div><p id="delete-account-note" class="error small" role="alert"></p>' : ''}
       </div>
       ${email ? `<form id="profile-form" class="box stack">
         <strong>Profile</strong>
@@ -2179,7 +2179,7 @@ const safeName = (value) => value.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g,
 // MARK: Events
 
 // Actions that leave the current screen; while a task runs they ask to stop it first.
-const LEAVES = new Set(['home', 'open', 'open-folder', 'create', 'make', 'nav', 'signout', 'tutorial']);
+const LEAVES = new Set(['home', 'open', 'open-folder', 'create', 'make', 'nav', 'signout', 'tutorial', 'live-tutorial']);
 document.addEventListener('click', async (event) => {
   const choice = event.target.closest('[data-create],[data-style],[data-type]');
   if (choice && state.create && state.task && !(await confirmStop())) return;
@@ -2200,6 +2200,8 @@ document.addEventListener('click', async (event) => {
   else if (action === 'delete-project') deleteProjectNow(state.project.id);
   else if (action === 'games') showGames();
   else if (action === 'tutorial') showTutorial();
+  // The Live tour runs once by itself; only this setting starts it again.
+  else if (action === 'live-tutorial') { try { localStorage.removeItem('relio-live-tour'); } catch { /* storage blocked */ } showLive(); }
   else if (action === 'home') showHome();
   else if (action === 'open') openProject(target.dataset.id);
   else if (action === 'retry-download' && lastDownload) fetchFromCloud(lastDownload.project, lastDownload.media, lastDownload.shortPart);

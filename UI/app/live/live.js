@@ -33,7 +33,7 @@ export function mountLive(element, dbGetter) {
   shownChannel = null;
   host.innerHTML = `<section class="live-screen">
     <form id="live-form" class="row live-form"><input id="live-url" type="text" inputmode="url" autocomplete="off" placeholder="Paste a Twitch channel, like twitch.tv/name" aria-label="Twitch channel">
-      <button class="button primary" type="submit">Start recording</button><button class="button ghost" type="button" id="live-guide">How it works</button></form>
+      <button class="button primary" type="submit">Start recording</button></form>
     <p id="live-notice" class="error" role="alert" hidden></p>
     <div id="live-tabs" class="live-tabs" role="tablist"></div>
     <div id="live-view"></div>
@@ -43,10 +43,9 @@ export function mountLive(element, dbGetter) {
     const input = host.querySelector('#live-url');
     if (await start(input.value)) input.value = '';
   });
-  // The tour starts by itself the first time someone opens Live on this device; "How it works" starts it again.
+  // The tour runs by itself the first time someone opens Live on this device; Settings › Account can start it again.
   tourDone = new Set();
   if (tourStep() === null) setTourStep(0);
-  host.querySelector('#live-guide').addEventListener('click', () => { tourDone = new Set(); setTourStep(0); });
   clearInterval(polling);
   refresh();
   polling = setInterval(() => (host?.isConnected ? refresh() : clearInterval(polling)), 2500);
@@ -247,9 +246,12 @@ function tourHint() {
   if (hint && tourDone.has(step)) { tourDid(step); return; }
   const ready = hint && host.querySelector(hint.target);
   const target = ready ?? (hint?.waiting ? host.querySelector(hint.waiting) : null);
-  if (!hint || !target || !target.getBoundingClientRect().width || document.querySelector('dialog[open]')) { ring?.remove(); bubble?.remove(); return; }
+  const blockers = [...document.querySelectorAll('.live-block')];
+  if (!hint || !target || !target.getBoundingClientRect().width || document.querySelector('dialog[open]')) { ring?.remove(); bubble?.remove(); blockers.forEach((b) => b.remove()); return; }
   if (!bubble) {
-    document.body.insertAdjacentHTML('beforeend', '<div id="live-ring" class="tour-ring" aria-hidden="true"></div><div id="live-bubble" class="tour-bubble" role="status"></div>');
+    // Four dark panels around the highlighted part: the rest of the page is dimmed and can't be clicked until the step is done.
+    document.body.insertAdjacentHTML('beforeend', '<div class="live-block" aria-hidden="true"></div>'.repeat(4)
+      + '<div id="live-ring" class="tour-ring live-spot" aria-hidden="true"></div><div id="live-bubble" class="tour-bubble" role="status"></div>');
     ring = document.getElementById('live-ring'); bubble = document.getElementById('live-bubble');
   }
   const html = `<p class="eyebrow">Live clipping · step ${step + 1} of ${TOUR.length}</p><div class="tour-bar" aria-hidden="true"><div style="width:${Math.round(((step + 1) / TOUR.length) * 100)}%"></div></div>
@@ -262,6 +264,12 @@ function tourHint() {
   }
   const rect = target.getBoundingClientRect();
   Object.assign(ring.style, { left: `${rect.left - 6}px`, top: `${rect.top - 6}px`, width: `${rect.width + 12}px`, height: `${rect.height + 12}px` });
+  const [top, bottom, left_, right] = document.querySelectorAll('.live-block');
+  const hole = { l: rect.left - 6, t: rect.top - 6, r: rect.right + 6, b: rect.bottom + 6 };
+  Object.assign(top.style, { left: '0', top: '0', width: '100vw', height: `${Math.max(0, hole.t)}px` });
+  Object.assign(bottom.style, { left: '0', top: `${hole.b}px`, width: '100vw', height: `${Math.max(0, innerHeight - hole.b)}px` });
+  Object.assign(left_.style, { left: '0', top: `${hole.t}px`, width: `${Math.max(0, hole.l)}px`, height: `${hole.b - hole.t}px` });
+  Object.assign(right.style, { left: `${hole.r}px`, top: `${hole.t}px`, width: `${Math.max(0, innerWidth - hole.r)}px`, height: `${hole.b - hole.t}px` });
   // Below the target when there is room, otherwise above it; always inside the window. The arrow points at the target's middle.
   const width = bubble.offsetWidth, height = bubble.offsetHeight, gap = 16;
   const below = rect.bottom + gap + height < innerHeight;

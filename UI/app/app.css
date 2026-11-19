@@ -446,6 +446,9 @@ details.insp-section:not([open]) { gap: 0; }
 .tour-bubble .button { padding: 6px 14px; }
 .tour-bar { height: 3px; margin: 0 0 10px; border-radius: 2px; background: var(--border); overflow: hidden; }
 .tour-bar div { height: 100%; background: var(--sky); transition: width .3s; }
+/* Live tour: the page around the highlighted part is dark and takes no clicks. */
+.live-block { position: fixed; z-index: 44; background: rgba(0, 0, 0, .62); }
+.live-spot { z-index: 45; }
 .tour-bubble .eyebrow { margin-bottom: 4px; color: var(--accent); }
 /* The arrow: a rotated square on the edge facing the target. */
 .tour-bubble::before { content: ""; position: absolute; left: var(--arrow-x, 50%); width: 12px; height: 12px; margin-left: -6px;
