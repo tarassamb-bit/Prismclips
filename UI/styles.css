@@ -110,6 +110,8 @@ h2 { font-size: clamp(30px, 3.2vw, 44px); }
 .hero-description { font-size: 14px; line-height: 1.9; color: var(--text2); max-width: 395px; }
 .hero-actions { display: flex; gap: 10px; align-items: center; margin-top: 29px; }
 .hero-footnote { display: flex; align-items: center; gap: 9px; color: var(--text2); font-size: 10px; margin-top: 16px; }
+/* The glow behind the preview reaches past the column; clipped so it never widens the page on phones. */
+.home-hero { overflow-x: clip; }
 .home-hero-visual { position: relative; min-width: 0; }
 .home-hero-visual::before { content: ""; position: absolute; inset: -15% -6%; z-index: -1; pointer-events: none; background: radial-gradient(ellipse, #3fa9f51a, transparent 70%); }
 .preview-label { display: flex; align-items: center; gap: 8px; font: 9px/1.5 var(--mono); letter-spacing: .04em; color: var(--text2); margin-bottom: 14px; }
@@ -513,7 +515,7 @@ td.table-message { text-align: center; line-height: 1.9; padding: 22px 8px; }
   .footer-main > nav > a { font-size: 10px; }
   .footer-bottom { font-size: 8px; margin-top: 23px; gap: 12px; }
 }
-@media (max-width: 380px) {
+@media (max-width: 400px) {
   .container { width: calc(100% - 32px); }
   .brand { font-size: 24px; gap: 6px; }
   .brand img { width: 24px; height: 24px; }
@@ -567,3 +569,8 @@ td.table-message { text-align: center; line-height: 1.9; padding: 22px 8px; }
 
 .turnstile-slot:empty { display: none; }
 .turnstile-slot { margin: 4px 0 12px; }
+/* The narrowest phones (320 px): after the 400 px rules, so these win. */
+@media (max-width: 340px) {
+  .brand { font-size: 20px; }
+  .nav-signin, .nav-download { padding-inline: 7px; }
+}
