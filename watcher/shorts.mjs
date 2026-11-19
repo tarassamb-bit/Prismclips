@@ -121,6 +121,29 @@ export function groupWords(words) {
   return groups.map((g) => ({ text: g.words.map((w) => w.text).join(' '), start: g.words[0].start, end: g.words.at(-1).end, words: g.words }));
 }
 
+/** Whether the box (fractions of the frame) at `second` of the clip shows a person on camera, not game or screen graphics. */
+async function isCamera(clip, second, box) {
+  const crop = `crop=iw*${box.w.toFixed(4)}:ih*${box.h.toFixed(4)}:iw*${box.x.toFixed(4)}:ih*${box.y.toFixed(4)},scale=320:-2`;
+  const image = await ffmpeg(['-ss', String(Math.max(0, second - 1)), '-i', clip, '-frames:v', '1', '-vf', crop, '-q:v', '5', '-f', 'image2', 'pipe:1']).catch(() => null);
+  if (!image?.length) return false;
+  try {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST', signal: AbortSignal.timeout(30_000),
+      headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: MODEL, provider: PROVIDER, temperature: 0, max_tokens: 50, reasoning: { enabled: false },
+        messages: [{ role: 'user', content: [
+          { type: 'text', text: 'Is this image mostly a real person filmed by a webcam (a streamer\'s face camera), not game graphics, a menu, buildings or a screen? Reply with only {"camera": true} or {"camera": false}.' },
+          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${image.toString('base64')}` } }] }],
+      }),
+    });
+    const text = (await response.json()).choices?.[0]?.message?.content ?? '';
+    return /"camera"\s*:\s*true/.test(text);
+  } catch {
+    return false;
+  }
+}
+
 /** The part to keep, inside the clip and 10–60 s long; around the moment when the AI's pick is unusable. */
 export function bounds(answer, clipSeconds, momentAt) {
   let start = Number(answer?.start), end = Number(answer?.end);
@@ -230,8 +253,11 @@ export async function makeShort(clip, clipSeconds, momentAt, fallbackTitle, rece
   const answer = audio?.length ? await pick(audio, frame, clipSeconds, momentAt, recent) : null;
   if (answer && (answer.repeat === true || Number(answer.score) < MIN_SCORE)) return { skipped: true, score: answer.score, repeat: answer.repeat === true, title: clean(answer.title) };
   const { start, end } = bounds(answer, clipSeconds, momentAt);
-  const webcam = webcamBox(answer?.webcam);
-  const look = layout(answer?.layout === 'webcam' && !webcam ? 'screen' : answer?.layout, webcam, width || 1280, height || 720);
+  let webcam = webcamBox(answer?.webcam);
+  // The AI's camera box is often off: the cut-out is checked to really be a person's camera, or the whole screen is used.
+  if (answer?.layout === 'webcam' && webcam && !(await isCamera(clip, momentAt, webcam))) webcam = null;
+  const kind = answer?.layout === 'webcam' && !webcam ? 'screen' : answer?.layout ?? 'screen';
+  const look = layout(kind, webcam, width || 1280, height || 720);
   const title = clean(answer?.title).slice(0, 80) || fallbackTitle;
   const subs = path.join(DIR, `${id}.ass`);
   await writeFile(subs, captionsFile(groupWords(await hear(clip, start, end)), start, end, clean(answer?.title), look));
@@ -250,7 +276,7 @@ export async function makeShort(clip, clipSeconds, momentAt, fallbackTitle, rece
   } finally {
     rm(subs, { force: true }).catch(() => {});
   }
-  return { id, title, duration: Math.round((end - start) * 10) / 10, bytes: (await stat(out)).size };
+  return { id, title, layout: kind, duration: Math.round((end - start) * 10) / 10, bytes: (await stat(out)).size };
 }
 
 /** Deletes a Short's files. */

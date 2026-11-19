@@ -190,7 +190,7 @@ class Recorder {
       this.recentTitles.push(short.title);
       await db(`live_clips?id=eq.${rowId}`, { method: 'PATCH', body: JSON.stringify({ bytes: short.bytes, duration: short.duration,
         short: { state: 'ready', id: short.id, title: short.title, video: `${PUBLIC_URL}/${short.id}.mp4`, poster: `${PUBLIC_URL}/${short.id}.jpg` } }) });
-      log(this.login, 'short ready', short.title, Math.round(short.bytes / 1e6), 'MB', short.duration, 's');
+      log(this.login, 'short ready', short.title, short.layout, Math.round(short.bytes / 1e6), 'MB', short.duration, 's');
     } catch (error) {
       log(this.login, 'short failed', error.message);
       await db(`live_clips?id=eq.${rowId}`, { method: 'PATCH', body: JSON.stringify({ short: { state: 'failed' } }) }).catch(() => {});
