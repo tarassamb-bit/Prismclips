@@ -70,6 +70,8 @@ class Recorder {
     await mkdir(this.dir, { recursive: true });
     // A note from an earlier run (a full day's Shorts, an older version's message) no longer applies.
     await update(this.id, { detail: null }).catch(() => {});
+    // After a restart the graph carries on from the saved one instead of starting empty.
+    this.saved = (await db(`live_sessions?id=eq.${this.id}&select=graph`, { headers: { Prefer: '' } }).catch(() => null))?.[0]?.graph ?? null;
     this.listenToChat();
     while (!this.stopped) {
       if (Date.now() - this.began > MAX_HOURS * 3600_000) return this.finish('ended', `Stopped after ${MAX_HOURS} hours.`);
@@ -231,11 +233,27 @@ class Recorder {
       // 1.2 (120% up) is where a moment triggers; it sits at 0.5 on the graph.
       hype.push(Math.round(Math.min(1, Math.max(0, Math.max(loudJump, chatJump)) / 2.4) * 100) / 100);
     }
-    return { start: this.startedAt + from * 1000, loud, chat: messages, hype };
+    return withSaved({ start: this.startedAt + from * 1000, loud, chat: messages, hype }, this.saved);
   }
 
   stop() { this.stopped = true; this.socket?.close(); rm(this.dir, { recursive: true, force: true }).catch(() => {}); }
   async finish(state, detail) { this.stop(); await update(this.id, { state, detail }).catch(() => {}); log(this.login, state, detail); }
+}
+
+/** The graph continued from the one saved before a restart: saved seconds fill the five minutes before this run's own data,
+ * and a gap between them keeps the last saved values. Graphs are { start (ms), loud, chat, hype } with one value per second. */
+export function withSaved(current, saved) {
+  if (!saved?.loud?.length) return current;
+  const savedEnd = saved.start + (saved.loud.length - 1) * 1000;
+  const first = Math.max(saved.start, current.start + (current.loud.length - 1) * 1000 - 300_000);
+  if (first >= current.start || savedEnd < first) return current;
+  const out = { start: first, loud: [], chat: [], hype: [] };
+  for (let at = first; at < current.start; at += 1000) {
+    const i = Math.min(saved.loud.length - 1, Math.round((Math.min(at, savedEnd) - saved.start) / 1000));
+    out.loud.push(saved.loud[i]); out.chat.push(at > savedEnd ? 0 : saved.chat[i]); out.hype.push(at > savedEnd ? 0 : saved.hype[i]);
+  }
+  for (const key of ['loud', 'chat', 'hype']) out[key].push(...current[key]);
+  return out;
 }
 
 const running = new Map();
