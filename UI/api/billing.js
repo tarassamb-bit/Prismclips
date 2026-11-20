@@ -41,7 +41,9 @@ module.exports = async (req, res) => {
         const transaction = await paddle(`/transactions/${transactionId}`);
         if (transaction.custom_data?.supabase_user_id !== user.id) throw new HttpError(403, 'This purchase belongs to another account.');
         await recordPacks(transaction, user.id);
-        // Paddle attaches the subscription a moment after payment; the browser asks again.
+        // A pack on its own is done here; for a plan, Paddle attaches the subscription a moment after payment and the browser asks again.
+        const forPlan = (transaction.items ?? []).some((item) => item.price?.billing_cycle);
+        if (!forPlan) return send(res, 200, { result: 'pack' });
         if (!transaction.subscription_id) return send(res, 202, { pending: true });
         return send(res, 200, { result: await syncSubscription(transaction.subscription_id) });
       }

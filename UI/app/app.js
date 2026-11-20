@@ -877,7 +877,7 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
     const plan = state.plan, paid = plan && plan.tier !== 'free';
     body = `${plan ? `<div class="box plan-box">
         <div class="row between"><span><span class="muted small">Your plan</span><strong class="plan-name">${esc(plan.name)}</strong></span>
-          <a class="button ${paid ? 'ghost' : 'primary'}" href="/pricing">${paid ? 'Change plan' : 'Upgrade'}</a></div>
+          <span class="row"><a class="button ghost" href="/pricing?pack=1">Buy 100 extra minutes</a><a class="button ${paid ? 'ghost' : 'primary'}" href="/pricing">${paid ? 'Change plan' : 'Upgrade'}</a></span></div>
         <p class="muted small">${paid ? `${plan.upload_minutes} minutes of video a month` : 'Your beta allowance'} · ${plan.export} exports${plan.watermark ? ' with watermark' : ', no watermark'} ·
           Live: ${plan.live_channels} ${plan.live_channels === 1 ? 'channel' : 'channels'}, ${plan.live_hours} h a month, ${plan.live_shorts_per_day} Shorts a day</p>
       </div>` : ''}<div class="box">
@@ -1439,7 +1439,7 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
       const u = state.usage;
       const left = u ? Math.max(0, u.allowance - u.used) : null;
       throw new GeminiError('usageLimit', 429, left === null ? null
-        : `This video is ${Math.ceil(minutes)} min long, but you have ${Math.floor(left)} of your ${Math.floor(u.allowance)} minutes left. A video you already used doesn't count again. ${PLANS_ON ? 'Pick a bigger plan for more minutes, or enter a promo code in Settings › Usage.' : 'Ask for a promo code to get more, then enter it in Settings › Usage.'}`);
+        : `This video is ${Math.ceil(minutes)} min long, but you have ${Math.floor(left)} of your ${Math.floor(u.allowance)} minutes left. A video you already used doesn't count again. ${PLANS_ON ? 'Buy 100 extra minutes for this month, pick a bigger plan, or enter a promo code in Settings › Usage.' : 'Ask for a promo code to get more, then enter it in Settings › Usage.'}`);
     }
     track('analysis_started', { length: lengthBucket(minutes) });
     const results = await Shorts.analyze(source, configuration, {
@@ -1688,7 +1688,7 @@ function closeDialog() {
 }
 function showError(title, message, kind = '', retry = null) {
   openDialog(`<div class="stack"><h2>${esc(title)}</h2><p>${esc(message)}</p>
-    <div class="row end">${kind === 'limit' ? `<button class="button ghost" data-action="usage">Usage</button>${PLANS_ON ? '<a class="button primary" href="/pricing">See plans</a>' : ''}` : ''}${retry
+    <div class="row end">${kind === 'limit' ? `<button class="button ghost" data-action="usage">Usage</button>${PLANS_ON ? '<a class="button ghost" href="/pricing">See plans</a><a class="button primary" href="/pricing?pack=1">Buy 100 extra minutes</a>' : ''}` : ''}${retry
       ? '<button class="button ghost" data-action="close">Not now</button><button class="button primary" id="dialog-retry">Retry</button>'
       : '<button class="button primary" data-action="close">OK</button>'}</div></div>`);
   $('#dialog-retry')?.addEventListener('click', () => { closeDialog(); retry(); });

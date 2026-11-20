@@ -156,7 +156,7 @@
     finishing = true;
     recordPurchase(event.data?.transaction_id)
       .catch((error) => console.error(error))
-      .finally(() => location.assign('/app'));
+      .finally(() => location.assign(new URLSearchParams(location.search).has('pack') ? '/app/settings/usage' : '/app'));
   }
 
   async function start() {
@@ -187,6 +187,20 @@
     }
     label();
     say('');
+    // /pricing?pack=1 (from the app, when minutes run out): straight to a checkout for the extra minutes alone.
+    if (pack && new URLSearchParams(location.search).has('pack')) buyPack();
+  }
+
+  /** A checkout for the extra-minute pack only, for an account that has used up its minutes. */
+  function buyPack() {
+    if (!user) { location.href = '/login?next=' + encodeURIComponent('/pricing?pack=1'); return; }
+    say(`Buying ${pack.minutes} extra minutes for this month${packPrice ? ` (${packPrice})` : ''}.`);
+    paddle.Checkout.open({
+      items: [{ priceId: pack.priceId, quantity: 1 }],
+      customer: user.email ? { email: user.email } : undefined,
+      customData: { supabase_user_id: user.id },
+      settings: { displayMode: 'overlay', variant: 'one-page' },
+    });
   }
 
   say('Loading prices for your country…');
