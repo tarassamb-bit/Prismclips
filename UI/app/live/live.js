@@ -83,7 +83,7 @@ async function showHours() {
   const out = limits.hours_used >= limits.hours_allowed;
   line.hidden = false;
   line.innerHTML = `${out ? '<strong>Your Live hours for this month are used up.</strong> ' : ''}Live this month: ${limits.hours_used.toFixed(1)} of ${Math.round(limits.hours_allowed)} hours used
-    · up to ${limits.channels} ${limits.channels === 1 ? 'channel' : 'channels'} at once · <a href="/pricing?pack=live">Buy 10 Live hours</a> · <a href="/pricing">Plans</a>`;
+    · up to ${limits.channels} ${limits.channels === 1 ? 'channel' : 'channels'} at once · <a href="/pricing?pack=live" data-pack="live">Buy 10 Live hours</a> · <a href="/pricing">Plans</a>`;
 }
 
 async function start(text) {

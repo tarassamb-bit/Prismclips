@@ -130,6 +130,13 @@ async function route() {
   // The address as the screen itself spells it (a short link or an old name becomes the proper one).
   if (state.path && location.pathname !== state.path) history.replaceState(null, '', state.path);
 }
+// A pack bought in the app (checkout.js): show the new minutes or Live hours where the person is.
+window.addEventListener('prism:purchased', async () => {
+  await refreshUsage();
+  if (state.screen === 'settings') showSettings(state.settingsTab);
+  else if (state.screen === 'live') showLive();
+});
+
 window.addEventListener('popstate', async () => {
   // The browser's Back button leaves the screen too: stay put unless the person stops the task.
   if (state.task && !(await confirmStop())) return history.pushState(null, '', state.path);
@@ -305,7 +312,6 @@ async function expireUntouched() {
 // First sign-in: a welcome, then a guided tour through the first project. Hints point at the real buttons, one at a time,
 // and follow the person's own steps: Start creating, the video, the settings, the wait, the first Shorts and Export. The
 // early hints come from where the person is; only the last ones need a saved stage ('on' -> 'edit' -> 'export' -> 'done').
-// Settings › Account › Show tutorial starts it again.
 const tourKey = () => `relio.tour.${userId()}`;
 const tourStage = () => { try { return localStorage.getItem(tourKey()); } catch { return null; } };
 function setTourStage(stage) { try { localStorage.setItem(tourKey(), stage); } catch { /* storage blocked: the tour ends with this page */ } tourHint(); }
@@ -377,7 +383,6 @@ function tourHint() {
 new MutationObserver(tourHint).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] });
 addEventListener('resize', tourHint);
 addEventListener('scroll', tourHint, true);
-function showTutorial() { setTourStage('on'); showHome(); }
 
 const retentionKey = () => `relio.retention-notice.${userId()}`;
 function firstRunNotice() {
@@ -924,9 +929,9 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
       <h3 class="section-title">Need more this month?</h3>
       <div class="plan-packs">
         <div class="box"><strong>100 video minutes</strong><p class="muted small">For making Shorts from uploaded videos. Added to this month, on top of your plan.</p>
-          <a class="button ghost" href="/pricing?pack=minutes">Buy for €5</a></div>
+          <a class="button ghost" href="/pricing?pack=minutes" data-pack="minutes">Buy for €5</a></div>
         <div class="box"><strong>10 Live hours</strong><p class="muted small">For recording live streams. Added to this month, on top of your plan.</p>
-          <a class="button ghost" href="/pricing?pack=live">Buy for €3</a></div>
+          <a class="button ghost" href="/pricing?pack=live" data-pack="live">Buy for €3</a></div>
       </div>` : `<div class="box plan-box">
         <div class="row between"><span><span class="muted small">Your plan</span><strong class="plan-name">${state.session ? 'Couldn\'t load your plan' : 'Sign in to see your plan'}</strong>
           ${state.session ? '<span class="muted small">Check your connection and open this page again.</span>' : ''}</span>
@@ -943,11 +948,6 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
         <p class="muted small">Your projects, Shorts and videos are saved to your account, and each export adds its date, number of Shorts, length and quality to your stats under Overview.</p>
         ${email ? '<div class="row"><button class="button ghost" data-action="signout">Sign out</button><button class="button ghost danger" data-action="delete-account">Delete account</button></div><p id="delete-account-note" class="error small" role="alert"></p>' : ''}
       </div>
-      ${email ? `<div class="box stack">
-        <strong>Tutorials</strong>
-        <p class="muted small">Each tutorial runs once by itself. Start one again here.</p>
-        <div class="row"><button class="button ghost" data-action="tutorial">Making Shorts</button><button class="button ghost" data-action="live-tutorial">Live clipping</button></div>
-      </div>` : ''}
       ${email ? `<form id="profile-form" class="box stack">
         <strong>Profile</strong>
         <div class="profile-fields">
@@ -1726,7 +1726,7 @@ function closeDialog() {
 }
 function showError(title, message, kind = '', retry = null) {
   openDialog(`<div class="stack"><h2>${esc(title)}</h2><p>${esc(message)}</p>
-    <div class="row end">${kind === 'limit' ? `<button class="button ghost" data-action="usage">Usage</button>${PLANS_ON ? '<a class="button ghost" href="/pricing">See plans</a><a class="button primary" href="/pricing?pack=minutes">Buy 100 video minutes</a>' : ''}` : ''}${retry
+    <div class="row end">${kind === 'limit' ? `<button class="button ghost" data-action="usage">Usage</button>${PLANS_ON ? '<a class="button ghost" href="/pricing">See plans</a><a class="button primary" href="/pricing?pack=minutes" data-pack="minutes">Buy 100 video minutes</a>' : ''}` : ''}${retry
       ? '<button class="button ghost" data-action="close">Not now</button><button class="button primary" id="dialog-retry">Retry</button>'
       : '<button class="button primary" data-action="close">OK</button>'}</div></div>`);
   $('#dialog-retry')?.addEventListener('click', () => { closeDialog(); retry(); });
@@ -2233,7 +2233,7 @@ const safeName = (value) => value.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g,
 // MARK: Events
 
 // Actions that leave the current screen; while a task runs they ask to stop it first.
-const LEAVES = new Set(['home', 'open', 'open-folder', 'create', 'make', 'nav', 'signout', 'tutorial', 'live-tutorial']);
+const LEAVES = new Set(['home', 'open', 'open-folder', 'create', 'make', 'nav', 'signout']);
 document.addEventListener('click', async (event) => {
   const choice = event.target.closest('[data-create],[data-style],[data-type]');
   if (choice && state.create && state.task && !(await confirmStop())) return;
@@ -2253,9 +2253,7 @@ document.addEventListener('click', async (event) => {
   else if (action === 'cancel') cancelTask();
   else if (action === 'delete-project') deleteProjectNow(state.project.id);
   else if (action === 'games') showGames();
-  else if (action === 'tutorial') showTutorial();
   // The Live tour runs once by itself; only this setting starts it again.
-  else if (action === 'live-tutorial') { try { localStorage.removeItem('relio-live-tour'); } catch { /* storage blocked */ } showLive(); }
   else if (action === 'home') showHome();
   else if (action === 'open') openProject(target.dataset.id);
   else if (action === 'retry-download' && lastDownload) fetchFromCloud(lastDownload.project, lastDownload.media, lastDownload.shortPart);
