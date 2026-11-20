@@ -4,19 +4,25 @@
 //   POST ?action=portal                      link to the Paddle billing portal for their subscriptions
 const { ACTIVE, HttpError, send, fail, requireEnv, paddle, supabase, getUser, syncSubscription } = require('./_lib');
 
-// The one-time "Extra 100 minutes" price (Paddle sandbox), offered next to a plan at checkout.
-const PACKS = { pri_01m7wykejd7qj2jm895kpb8cyy: 100 };
+// The one-time packs (Paddle sandbox prices): 100 extra video minutes, or 10 extra Live hours, for the month they're bought.
+const PACKS = {
+  pri_01m7wykejd7qj2jm895kpb8cyy: { table: 'minute_packs', field: 'minutes', amount: 100 },
+  pri_01m7x801j9rtht27jw31r9vavh: { table: 'live_packs', field: 'hours', amount: 10 },
+};
 
-/** Saves the extra-minute packs of a paid transaction to the account, once per transaction. */
+/** Saves the packs of a paid transaction to the account, once per transaction. */
 async function recordPacks(transaction, userId) {
   if (!['paid', 'completed'].includes(transaction.status)) return;
-  const minutes = (transaction.items ?? []).reduce((sum, item) => sum + (PACKS[item.price?.id] ?? 0) * (item.quantity ?? 1), 0);
-  if (!minutes) return;
-  const { response, text } = await supabase('minute_packs?on_conflict=transaction_id', {
-    method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
-    body: JSON.stringify({ transaction_id: transaction.id, user_id: userId, minutes }),
-  });
-  if (!response.ok) throw new HttpError(502, `Supabase returned ${response.status}: ${text}`);
+  for (const table of ['minute_packs', 'live_packs']) {
+    const kinds = (transaction.items ?? []).map((item) => ({ pack: PACKS[item.price?.id], quantity: item.quantity ?? 1 })).filter((x) => x.pack?.table === table);
+    if (!kinds.length) continue;
+    const field = kinds[0].pack.field, total = kinds.reduce((sum, x) => sum + x.pack.amount * x.quantity, 0);
+    const { response, text } = await supabase(`${table}?on_conflict=transaction_id`, {
+      method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
+      body: JSON.stringify({ transaction_id: transaction.id, user_id: userId, [field]: total }),
+    });
+    if (!response.ok) throw new HttpError(502, `Supabase returned ${response.status}: ${text}`);
+  }
 }
 
 async function userSubscriptions(userId, filter = '') {

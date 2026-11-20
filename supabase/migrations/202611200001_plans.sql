@@ -86,3 +86,59 @@ language sql stable security definer set search_path = public, pg_temp as $$
 $$;
 revoke all on function public.my_plan() from public, anon;
 grant execute on function public.my_plan() to authenticated;
+
+-- Live clipping follows the plan too: hours recorded each month (the watcher adds each recorded piece's length to its
+-- session), packs of extra Live hours, and the limits the watcher and the Live screen check.
+alter table public.live_sessions add column if not exists recorded_seconds integer not null default 0;
+
+create table if not exists public.live_packs (
+  transaction_id text primary key,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  hours integer not null check (hours > 0),
+  bought timestamptz not null default now()
+);
+alter table public.live_packs enable row level security;
+drop policy if exists "own live packs" on public.live_packs;
+create policy "own live packs" on public.live_packs for select to authenticated using (user_id = auth.uid());
+grant select on public.live_packs to authenticated;
+
+-- An account's Live limits this month: its plan's (Free without one) plus Live-hour packs bought this month.
+-- shortcut: hours count by the calendar month a recording started in; switch to the billing period when billing goes live.
+create or replace function public.prism_live_limits(p_user uuid)
+returns table (channels integer, hours_allowed double precision, hours_used double precision, max_recording_hours integer, shorts_per_day integer)
+language sql stable security definer set search_path = public, pg_temp as $$
+  select l.live_channels,
+         l.live_hours + coalesce((select sum(hours) from public.live_packs where user_id = p_user and bought >= date_trunc('month', now())), 0),
+         coalesce((select sum(recorded_seconds) from public.live_sessions where user_id = p_user and created >= date_trunc('month', now())), 0) / 3600.0,
+         l.max_recording_hours, l.live_shorts_per_day
+  from public.plan_limits l where l.tier = coalesce(public.prism_plan(p_user), 'free');
+$$;
+revoke all on function public.prism_live_limits(uuid) from public, anon, authenticated;
+grant execute on function public.prism_live_limits(uuid) to service_role;
+
+create or replace function public.my_live_limits()
+returns table (channels integer, hours_allowed double precision, hours_used double precision, max_recording_hours integer, shorts_per_day integer)
+language sql stable security definer set search_path = public, pg_temp as $$
+  select * from public.prism_live_limits(auth.uid());
+$$;
+revoke all on function public.my_live_limits() from public, anon;
+grant execute on function public.my_live_limits() to authenticated;
+
+-- Starting a recording: within the plan's channels at once and its Live hours this month, and a channel only once.
+create or replace function public.prism_check_live_session() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare
+  v_limits record;
+begin
+  select * into v_limits from public.prism_live_limits(new.user_id);
+  if (select count(*) from public.live_sessions where user_id = new.user_id and state in ('starting', 'recording', 'offline')) >= v_limits.channels then
+    raise exception 'Your plan records % % at once. Stop one first, or upgrade.', v_limits.channels, case when v_limits.channels = 1 then 'channel' else 'channels' end;
+  end if;
+  if v_limits.hours_used >= v_limits.hours_allowed then
+    raise exception 'You used your Live hours for this month. Buy 10 more hours, or upgrade.';
+  end if;
+  if exists (select 1 from public.live_sessions where user_id = new.user_id and login = new.login and state in ('starting', 'recording', 'offline')) then
+    raise exception 'That channel is already recording.';
+  end if;
+  return new;
+end $$;

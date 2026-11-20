@@ -118,7 +118,7 @@
           <p class="card-eyebrow">ONE MORE THING</p>
           <h3>Need more minutes this month?</h3>
           <label class="bump-option"><input type="checkbox" name="pack">
-            <span><strong>Add ${pack.minutes} extra minutes${packPrice ? ` for ${packPrice}` : ''}</strong>
+            <span><strong>Add ${pack.minutes} extra video minutes${packPrice ? ` for ${packPrice}` : ''}</strong>
             <span class="muted">On top of ${tier.name}, for this month. Paid once, no subscription.</span></span></label>
           <div class="bump-actions"><button class="button button-secondary" value="cancel" type="submit">Back</button>
             <button class="button button-primary" value="go" type="submit">Continue to checkout</button></div>
@@ -156,7 +156,7 @@
     finishing = true;
     recordPurchase(event.data?.transaction_id)
       .catch((error) => console.error(error))
-      .finally(() => location.assign(new URLSearchParams(location.search).has('pack') ? '/app/settings/usage' : '/app'));
+      .finally(() => location.assign(new URLSearchParams(location.search).get('pack') === 'live' ? '/app/live' : new URLSearchParams(location.search).has('pack') ? '/app/settings/usage' : '/app'));
   }
 
   async function start() {
@@ -187,16 +187,19 @@
     }
     label();
     say('');
-    // /pricing?pack=1 (from the app, when minutes run out): straight to a checkout for the extra minutes alone.
-    if (pack && new URLSearchParams(location.search).has('pack')) buyPack();
+    // /pricing?pack=minutes or ?pack=live (from the app, when minutes or Live hours run out): straight to that pack's checkout.
+    const wanted = new URLSearchParams(location.search).get('pack');
+    if (wanted) buyPack(wanted === 'live' ? 'live' : 'minutes');
   }
 
-  /** A checkout for the extra-minute pack only, for an account that has used up its minutes. */
-  function buyPack() {
-    if (!user) { location.href = '/login?next=' + encodeURIComponent('/pricing?pack=1'); return; }
-    say(`Buying ${pack.minutes} extra minutes for this month${packPrice ? ` (${packPrice})` : ''}.`);
+  /** A checkout for one pack only: 'minutes' (video minutes) or 'live' (Live hours). */
+  function buyPack(kind) {
+    const chosen = kind === 'live' ? window.PRISM_LIVE_PACK : pack;
+    if (!chosen) return;
+    if (!user) { location.href = '/login?next=' + encodeURIComponent(`/pricing?pack=${kind}`); return; }
+    say(kind === 'live' ? `Buying ${chosen.hours} extra Live hours for this month.` : `Buying ${chosen.minutes} extra video minutes for this month${packPrice ? ` (${packPrice})` : ''}.`);
     paddle.Checkout.open({
-      items: [{ priceId: pack.priceId, quantity: 1 }],
+      items: [{ priceId: chosen.priceId, quantity: 1 }],
       customer: user.email ? { email: user.email } : undefined,
       customData: { supabase_user_id: user.id },
       settings: { displayMode: 'overlay', variant: 'one-page' },

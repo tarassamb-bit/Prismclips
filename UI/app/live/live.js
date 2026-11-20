@@ -35,6 +35,7 @@ export function mountLive(element, dbGetter) {
     <form id="live-form" class="row live-form"><input id="live-url" type="text" inputmode="url" autocomplete="off" placeholder="Paste a Twitch channel, like twitch.tv/name" aria-label="Twitch channel">
       <button class="button primary" type="submit">Start recording</button></form>
     <p id="live-notice" class="error" role="alert" hidden></p>
+    <p id="live-hours" class="muted small" hidden></p>
     <div id="live-tabs" class="live-tabs" role="tablist"></div>
     <div id="live-view"></div>
   </section>`;
@@ -67,12 +68,34 @@ function notice(text) {
   return false;
 }
 
+// shortcut: plans and packs show on localhost only (the Paddle sandbox experiment), like the rest of the app.
+const PLANS_ON = ['localhost', '127.0.0.1'].includes(location.hostname);
+let hoursAt = 0;
+
+/** "3.2 of 100 Live hours used this month", with a way to buy more; read every half minute. */
+async function showHours() {
+  const line = host?.querySelector('#live-hours');
+  if (!PLANS_ON || !line || Date.now() - hoursAt < 30_000) return;
+  hoursAt = Date.now();
+  const { data, error } = await db().rpc('my_live_limits');
+  const limits = !error && data?.[0];
+  if (!limits) return;
+  const out = limits.hours_used >= limits.hours_allowed;
+  line.hidden = false;
+  line.innerHTML = `${out ? '<strong>Your Live hours for this month are used up.</strong> ' : ''}Live this month: ${limits.hours_used.toFixed(1)} of ${Math.round(limits.hours_allowed)} hours used
+    · up to ${limits.channels} ${limits.channels === 1 ? 'channel' : 'channels'} at once · <a href="/pricing?pack=live">Buy 10 Live hours</a> · <a href="/pricing">Plans</a>`;
+}
+
 async function start(text) {
   const login = parseLogin(text);
   if (!login) return notice('Paste a Twitch channel link, like twitch.tv/name.');
   notice('');
   const { data, error } = await db().from('live_sessions').insert({ login }).select('id').single();
-  if (error) return notice(/two channels|already recording/.test(error.message) ? error.message : 'The recording could not be started. Please try again.');
+  if (error) {
+    hoursAt = 0;
+    showHours();
+    return notice(/channels? at once|already recording|Live hours/.test(error.message) ? error.message : 'The recording could not be started. Please try again.');
+  }
   selected = data.id;
   await refresh();
   return true;
@@ -113,6 +136,7 @@ async function refresh() {
   // Another channel may have been chosen while this refresh waited.
   if (nextSelected !== selected && channels.some((c) => c.login === selected) && nextChannels.some((c) => c.login === selected)) return;
   rows = nextRows;
+  showHours();
   clips = clipRows.data;
   channels = nextChannels;
   selected = nextSelected;

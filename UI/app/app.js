@@ -60,11 +60,13 @@ const PLANS_ON = ['localhost', '127.0.0.1'].includes(location.hostname);
 async function refreshUsage() {
   if (!state.session) return;
   const account = userId();
-  const [{ data, error }, plan] = await Promise.all([db().rpc('my_usage'), PLANS_ON ? db().rpc('my_plan') : { error: true }]);
+  const [{ data, error }, plan, live] = await Promise.all([db().rpc('my_usage'), PLANS_ON ? db().rpc('my_plan') : { error: true },
+    PLANS_ON ? db().rpc('my_live_limits') : { error: true }]);
   if (userId() !== account) return;
   state.usage = !error && data?.[0] ? { used: data[0].used, allowance: data[0].allowance } : null;
   // The plan and its limits (Free without a paid plan); null where the database doesn't know plans yet.
   state.plan = !plan.error && plan.data?.[0] ? plan.data[0] : null;
+  state.live = !live.error && live.data?.[0] ? live.data[0] : null;
   renderUsage();
 }
 
@@ -877,9 +879,11 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
     const plan = state.plan, paid = plan && plan.tier !== 'free';
     body = `${plan ? `<div class="box plan-box">
         <div class="row between"><span><span class="muted small">Your plan</span><strong class="plan-name">${esc(plan.name)}</strong></span>
-          <span class="row"><a class="button ghost" href="/pricing?pack=1">Buy 100 extra minutes</a><a class="button ${paid ? 'ghost' : 'primary'}" href="/pricing">${paid ? 'Change plan' : 'Upgrade'}</a></span></div>
+          <a class="button ${paid ? 'ghost' : 'primary'}" href="/pricing">${paid ? 'Change plan' : 'Upgrade'}</a></div>
         <p class="muted small">${paid ? `${plan.upload_minutes} minutes of video a month` : 'Your beta allowance'} · ${plan.export} exports${plan.watermark ? ' with watermark' : ', no watermark'} ·
           Live: ${plan.live_channels} ${plan.live_channels === 1 ? 'channel' : 'channels'}, ${plan.live_hours} h a month, ${plan.live_shorts_per_day} Shorts a day</p>
+        ${state.live ? `<p class="small">Live this month: <strong>${state.live.hours_used.toFixed(1)} of ${Math.round(state.live.hours_allowed)} hours</strong> used</p>` : ''}
+        <div class="row"><a class="button ghost" href="/pricing?pack=minutes">Buy 100 video minutes</a><a class="button ghost" href="/pricing?pack=live">Buy 10 Live hours</a></div>
       </div>` : ''}<div class="box">
         <div class="big-number"><b>${u ? Math.ceil(u.used) : '—'}</b><span>${u ? `of ${Math.floor(u.allowance)} minutes used` : state.session ? 'Usage is unavailable. Check your connection and try again.' : 'Sign in to see usage.'}</span></div>
         <div class="meter ${percent >= 85 ? 'warn' : ''}"><div style="width:${percent}%"></div></div>
@@ -1688,7 +1692,7 @@ function closeDialog() {
 }
 function showError(title, message, kind = '', retry = null) {
   openDialog(`<div class="stack"><h2>${esc(title)}</h2><p>${esc(message)}</p>
-    <div class="row end">${kind === 'limit' ? `<button class="button ghost" data-action="usage">Usage</button>${PLANS_ON ? '<a class="button ghost" href="/pricing">See plans</a><a class="button primary" href="/pricing?pack=1">Buy 100 extra minutes</a>' : ''}` : ''}${retry
+    <div class="row end">${kind === 'limit' ? `<button class="button ghost" data-action="usage">Usage</button>${PLANS_ON ? '<a class="button ghost" href="/pricing">See plans</a><a class="button primary" href="/pricing?pack=minutes">Buy 100 video minutes</a>' : ''}` : ''}${retry
       ? '<button class="button ghost" data-action="close">Not now</button><button class="button primary" id="dialog-retry">Retry</button>'
       : '<button class="button primary" data-action="close">OK</button>'}</div></div>`);
   $('#dialog-retry')?.addEventListener('click', () => { closeDialog(); retry(); });

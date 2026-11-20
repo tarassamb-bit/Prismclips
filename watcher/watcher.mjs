@@ -13,7 +13,9 @@ import { ffmpeg, makeShort, removeShort, onDisk, serve } from './shorts.mjs';
 
 const { deleteObject } = createRequire(import.meta.url)('./lib/_r2.cjs');
 // Shorts per person per day (each costs an AI call), and the disk kept for Shorts on this 6 GB machine.
-const DAILY_SHORTS = 30, DISK_FOR_SHORTS = 3.5e9;
+const DISK_FOR_SHORTS = 3.5e9;
+// Used until the account's plan limits are read (and if they can't be): the old fixed limits.
+const FALLBACK_LIMITS = { channels: 2, hours_allowed: Infinity, hours_used: 0, max_recording_hours: 8, shorts_per_day: 30 };
 const PUBLIC_URL = (process.env.PUBLIC_URL ?? '').replace(/\/$/, '');
 // Accounts with no daily Shorts limit (the owner's), comma-separated user ids.
 const UNLIMITED = new Set((process.env.UNLIMITED_USERS ?? '').split(',').map((id) => id.trim()).filter(Boolean));
@@ -22,7 +24,7 @@ const KEY = process.env.SUPABASE_SECRET_KEY;
 const CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
 const KEEP = 15 * 60, BEFORE = 60, AFTER = 30;
 const MAX_STREAMS = Number(process.env.MAX_STREAMS) || 5;
-const MAX_HOURS = 8, OFFLINE_GIVE_UP = 30 * 60 * 1000, CLIP_DAYS = 2;
+const OFFLINE_GIVE_UP = 30 * 60 * 1000, CLIP_DAYS = 2;
 const DATA = path.join(tmpdir(), 'relio-live');
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const log = (...parts) => console.log(new Date().toISOString(), ...parts);
@@ -60,6 +62,8 @@ class Recorder {
     this.inits = new Map();     // init url -> file
     this.detector = new Detector();
     this.startedAt = null; this.lastSequence = -1; this.offlineSince = null; this.began = Date.now();
+    // Recorded time this run (seconds of stream kept), added to what the session had recorded before a restart.
+    this.recordedBefore = 0; this.recordedNow = 0; this.limits = FALLBACK_LIMITS; this.limitsAt = 0;
     this.recentTitles = [];
   }
 
@@ -71,10 +75,12 @@ class Recorder {
     // A note from an earlier run (a full day's Shorts, an older version's message) no longer applies.
     await update(this.id, { detail: null }).catch(() => {});
     // After a restart the graph carries on from the saved one instead of starting empty.
-    this.saved = (await db(`live_sessions?id=eq.${this.id}&select=graph`, { headers: { Prefer: '' } }).catch(() => null))?.[0]?.graph ?? null;
+    const saved = (await db(`live_sessions?id=eq.${this.id}&select=graph,recorded_seconds`, { headers: { Prefer: '' } }).catch(() => null))?.[0];
+    this.saved = saved?.graph ?? null;
+    this.recordedBefore = saved?.recorded_seconds ?? 0;
     this.listenToChat();
     while (!this.stopped) {
-      if (Date.now() - this.began > MAX_HOURS * 3600_000) return this.finish('ended', `Stopped after ${MAX_HOURS} hours.`);
+      if (await this.overLimit()) return;
       let url;
       try { url = await playlistUrl(this.login); }
       catch (error) {
@@ -106,7 +112,8 @@ class Recorder {
         this.lastSequence = piece.sequence;
         await this.record(piece, playlist.init).catch((error) => log(this.login, 'piece failed', error.message));
       }
-      await update(this.id, { state: 'recording', buffered: this.buffered(), chat: this.chatOn, graph: this.graph() }).catch(() => {});
+      await update(this.id, { state: 'recording', buffered: this.buffered(), chat: this.chatOn, graph: this.graph(), recorded_seconds: Math.round(this.recordedBefore + this.recordedNow) }).catch(() => {});
+      if (await this.overLimit()) return;
       if (playlist.ended) return;
       await wait(2000);
     }
@@ -130,6 +137,7 @@ class Recorder {
     const at = piece.at ?? Date.now();
     this.startedAt ??= at;
     this.pieces.set(piece.sequence, { file, at, duration: piece.duration, init });
+    this.recordedNow += piece.duration;
     for (const [sequence, old] of this.pieces) {
       if (old.at >= at - KEEP * 1000) break;
       this.pieces.delete(sequence);
@@ -172,9 +180,10 @@ class Recorder {
     const at = new Date(momentAt).toISOString();
     try {
       const today = new Date(new Date().toISOString().slice(0, 10)).toISOString();
+      const perDay = this.limits.shorts_per_day;
       const made = UNLIMITED.has(this.user) ? [] : await db(`live_clips?user_id=eq.${this.user}&created=gte.${today}&select=id`, { headers: { Prefer: '' } });
-      if (made.length >= DAILY_SHORTS && !UNLIMITED.has(this.user)) {
-        await update(this.id, { detail: `You reached today's ${DAILY_SHORTS} live Shorts. Recording goes on; new Shorts start again tomorrow.` }).catch(() => {});
+      if (made.length >= perDay && !UNLIMITED.has(this.user)) {
+        await update(this.id, { detail: `You reached today's ${perDay} live Shorts on your plan. Recording goes on; new Shorts start again tomorrow.` }).catch(() => {});
         return;
       }
       await ffmpeg(['-y', '-i', joined, '-c', 'copy', '-movflags', '+faststart', out]);
@@ -235,6 +244,21 @@ class Recorder {
       hype.push(Math.round(Math.min(1, Math.max(0, Math.max(loudJump, chatJump)) / 2.4) * 100) / 100);
     }
     return withSaved({ start: this.startedAt + from * 1000, loud, chat: messages, hype }, this.saved);
+  }
+
+  /** Reads the account's Live limits (once a minute) and stops the recording when the month's hours or the plan's longest
+   * recording are used up. True when it stopped. The owner's accounts (UNLIMITED_USERS) have no limits. */
+  async overLimit() {
+    if (UNLIMITED.has(this.user)) return false;
+    if (Date.now() - this.limitsAt > 60_000) {
+      this.limitsAt = Date.now();
+      const rows = await db('rpc/prism_live_limits', { method: 'POST', body: JSON.stringify({ p_user: this.user }), headers: { Prefer: '' } }).catch(() => null);
+      if (rows?.[0]) this.limits = rows[0];
+    }
+    const { hours_allowed: allowed, hours_used: used, max_recording_hours: longest } = this.limits;
+    if (used >= allowed) { await this.finish('ended', 'You used your Live hours for this month. Buy 10 more hours, or upgrade your plan.'); return true; }
+    if (Date.now() - this.began > longest * 3600_000) { await this.finish('ended', `Stopped after ${longest} hours, your plan's longest recording.`); return true; }
+    return false;
   }
 
   stop() { this.stopped = true; this.socket?.close(); rm(this.dir, { recursive: true, force: true }).catch(() => {}); }
