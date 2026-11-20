@@ -522,3 +522,6 @@ details.insp-section:not([open]) { gap: 0; }
 .live-watch-head .link { font-size: 18px; }
 .live-empty { text-align: center; padding: 40px 24px; }
 @media (max-width: 1000px) { .live-stage { grid-template-columns: 1fr; } .live-chat { height: 380px; } }
+
+/* Settings › Usage: the plan box. */
+.plan-box .plan-name { display: block; font-size: 22px; margin-top: 2px; }

@@ -54,12 +54,17 @@ function accountToken(account = userId()) {
   };
 }
 
+// shortcut: plans and checkout show on localhost only (the Paddle sandbox experiment); show them everywhere when billing goes live.
+const PLANS_ON = ['localhost', '127.0.0.1'].includes(location.hostname);
+
 async function refreshUsage() {
   if (!state.session) return;
   const account = userId();
-  const { data, error } = await db().rpc('my_usage');
+  const [{ data, error }, plan] = await Promise.all([db().rpc('my_usage'), PLANS_ON ? db().rpc('my_plan') : { error: true }]);
   if (userId() !== account) return;
   state.usage = !error && data?.[0] ? { used: data[0].used, allowance: data[0].allowance } : null;
+  // The plan and its limits (Free without a paid plan); null where the database doesn't know plans yet.
+  state.plan = !plan.error && plan.data?.[0] ? plan.data[0] : null;
   renderUsage();
 }
 
@@ -869,11 +874,17 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
   let body;
   if (tab === 'usage') {
     const percent = u ? Math.min(100, u.used / u.allowance * 100) : 0;
-    body = `<div class="box">
+    const plan = state.plan, paid = plan && plan.tier !== 'free';
+    body = `${plan ? `<div class="box plan-box">
+        <div class="row between"><span><span class="muted small">Your plan</span><strong class="plan-name">${esc(plan.name)}</strong></span>
+          <a class="button ${paid ? 'ghost' : 'primary'}" href="/pricing">${paid ? 'Change plan' : 'Upgrade'}</a></div>
+        <p class="muted small">${paid ? `${plan.upload_minutes} minutes of video a month` : 'Your beta allowance'} · ${plan.export} exports${plan.watermark ? ' with watermark' : ', no watermark'} ·
+          Live: ${plan.live_channels} ${plan.live_channels === 1 ? 'channel' : 'channels'}, ${plan.live_hours} h a month, ${plan.live_shorts_per_day} Shorts a day</p>
+      </div>` : ''}<div class="box">
         <div class="big-number"><b>${u ? Math.ceil(u.used) : '—'}</b><span>${u ? `of ${Math.floor(u.allowance)} minutes used` : state.session ? 'Usage is unavailable. Check your connection and try again.' : 'Sign in to see usage.'}</span></div>
         <div class="meter ${percent >= 85 ? 'warn' : ''}"><div style="width:${percent}%"></div></div>
         ${u ? `<p class="muted small">${Math.max(0, Math.floor(u.allowance - u.used))} minutes left.</p>` : ''}
-        <p class="muted small">Every account gets 60 minutes of video to make Shorts from. A video you already used doesn't count again; making Shorts from it again uses half of its length.</p>
+        <p class="muted small">${paid ? `Your plan includes ${plan.upload_minutes} minutes of video each month; the count starts again on the 1st.` : 'Every account gets 60 minutes of video to make Shorts from.'} A video you already used doesn't count again; making Shorts from it again uses half of its length.</p>
       </div>
       ${email ? `<div class="box"><strong>Videos in the cloud</strong><p id="cloud-video-text">Checking…</p><div class="meter"><div id="cloud-video-bar"></div></div>
         <p class="muted small">Videos you add are saved to your account too, so a project opens on any device without choosing the file again. The same video is stored once, however many projects use it. When a new video doesn’t fit, Relio asks before deleting your oldest cloud videos. A video bigger than all your space stays on its device.</p>
@@ -1428,7 +1439,7 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
       const u = state.usage;
       const left = u ? Math.max(0, u.allowance - u.used) : null;
       throw new GeminiError('usageLimit', 429, left === null ? null
-        : `This video is ${Math.ceil(minutes)} min long, but you have ${Math.floor(left)} of your ${Math.floor(u.allowance)} beta minutes left. A video you already used doesn't count again. Ask for a promo code to get more, then enter it in Settings › Usage.`);
+        : `This video is ${Math.ceil(minutes)} min long, but you have ${Math.floor(left)} of your ${Math.floor(u.allowance)} minutes left. A video you already used doesn't count again. ${PLANS_ON ? 'Pick a bigger plan for more minutes, or enter a promo code in Settings › Usage.' : 'Ask for a promo code to get more, then enter it in Settings › Usage.'}`);
     }
     track('analysis_started', { length: lengthBucket(minutes) });
     const results = await Shorts.analyze(source, configuration, {
@@ -1677,7 +1688,7 @@ function closeDialog() {
 }
 function showError(title, message, kind = '', retry = null) {
   openDialog(`<div class="stack"><h2>${esc(title)}</h2><p>${esc(message)}</p>
-    <div class="row end">${kind === 'limit' ? '<button class="button ghost" data-action="usage">Usage</button>' : ''}${retry
+    <div class="row end">${kind === 'limit' ? `<button class="button ghost" data-action="usage">Usage</button>${PLANS_ON ? '<a class="button primary" href="/pricing">See plans</a>' : ''}` : ''}${retry
       ? '<button class="button ghost" data-action="close">Not now</button><button class="button primary" id="dialog-retry">Retry</button>'
       : '<button class="button primary" data-action="close">OK</button>'}</div></div>`);
   $('#dialog-retry')?.addEventListener('click', () => { closeDialog(); retry(); });

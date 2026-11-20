@@ -1,37 +1,35 @@
-// Checkout stays disabled until live plans, entitlements and billing have been verified end to end.
-// The IDs below are from the Paddle sandbox catalog and must not be used for live sales.
-window.PRISM_BILLING_ENABLED = false;
+// The paid plans. These are the Paddle SANDBOX prices (test cards only, no real money); swap in the live price IDs at launch.
+// Checkout works only where the server has the Paddle settings (localhost with the sandbox keys); relioclips.com still sends
+// /pricing to the app (vercel.json) until billing goes live.
+window.PRISM_BILLING_ENABLED = true;
 /**
  * @typedef {Object} Tier
- * @property {'Trial' | 'Creator' | 'Studio'} name
+ * @property {string} name
  * @property {string} description
  * @property {string[]} features
  * @property {string} priceId
  * @property {string} [badge]
- * @property {string} [trialLabel]
  */
 
 /** @type {Tier[]} */
 window.PRISM_TIERS = [
   {
-    name: 'Trial',
-    description: 'A low-cost way to start making Shorts.',
-    features: [], // TODO: real perks for this plan
-    priceId: 'pri_01m5h8qse4hefjmw1j9j9tn708',
+    name: 'Tier 1',
+    description: 'Start making Shorts every month.',
+    features: ['150 minutes of video a month', '1080p exports, no watermark', 'Live clipping: 1 channel, 25 hours a month', 'Recordings up to 4 hours', '30 live Shorts a day'],
+    priceId: 'pri_01m7wxv785xs9pzn319erq7wtn',
   },
   {
     name: 'Creator',
     description: 'For creators publishing every week.',
-    features: [], // TODO: real perks for this plan
-    priceId: 'pri_01m5h8qspmxxtzsnankzef16t2',
+    features: ['450 minutes of video a month', '1080p exports, no watermark', 'Live clipping: 2 channels at once, 100 hours a month', 'Recordings up to 24 hours', '100 live Shorts a day'],
+    priceId: 'pri_01m7wxv7jvh2e830hj69y0merw',
     badge: 'Most popular',
-    trialLabel: '7-day free trial',
   },
   {
     name: 'Studio',
     description: 'For teams and channels at full speed.',
-    features: [], // TODO: real perks for this plan
-    priceId: 'pri_01m5h8qszm3h86qpkn06wyx1y3',
-    trialLabel: '7-day free trial',
+    features: ['2,000 minutes of video a month', '1080p exports, no watermark', 'Live clipping: 5 channels at once, 400 hours a month', 'Recordings up to 48 hours', '300 live Shorts a day'],
+    priceId: 'pri_01m7wxv7wmheyjcr6qqz3cy41b',
   },
 ];
