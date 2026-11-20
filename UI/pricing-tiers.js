@@ -11,6 +11,9 @@ window.PRISM_BILLING_ENABLED = true;
  * @property {string} [badge]
  */
 
+// The add-on offered before checkout: 100 extra minutes this month, one time.
+window.PRISM_PACK = { priceId: 'pri_01m7wykejd7qj2jm895kpb8cyy', minutes: 100 };
+
 /** @type {Tier[]} */
 window.PRISM_TIERS = [
   {

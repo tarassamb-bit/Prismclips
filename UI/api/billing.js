@@ -4,6 +4,21 @@
 //   POST ?action=portal                      link to the Paddle billing portal for their subscriptions
 const { ACTIVE, HttpError, send, fail, requireEnv, paddle, supabase, getUser, syncSubscription } = require('./_lib');
 
+// The one-time "Extra 100 minutes" price (Paddle sandbox), offered next to a plan at checkout.
+const PACKS = { pri_01m7wykejd7qj2jm895kpb8cyy: 100 };
+
+/** Saves the extra-minute packs of a paid transaction to the account, once per transaction. */
+async function recordPacks(transaction, userId) {
+  if (!['paid', 'completed'].includes(transaction.status)) return;
+  const minutes = (transaction.items ?? []).reduce((sum, item) => sum + (PACKS[item.price?.id] ?? 0) * (item.quantity ?? 1), 0);
+  if (!minutes) return;
+  const { response, text } = await supabase('minute_packs?on_conflict=transaction_id', {
+    method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
+    body: JSON.stringify({ transaction_id: transaction.id, user_id: userId, minutes }),
+  });
+  if (!response.ok) throw new HttpError(502, `Supabase returned ${response.status}: ${text}`);
+}
+
 async function userSubscriptions(userId, filter = '') {
   const { response, body } = await supabase(
     `subscriptions?user_id=eq.${userId}${filter}&select=id,customer_id&order=event_at.desc&limit=20`,
@@ -25,6 +40,7 @@ module.exports = async (req, res) => {
         if (!/^txn_[a-z0-9]+$/.test(transactionId)) throw new HttpError(400, 'Invalid transaction ID.');
         const transaction = await paddle(`/transactions/${transactionId}`);
         if (transaction.custom_data?.supabase_user_id !== user.id) throw new HttpError(403, 'This purchase belongs to another account.');
+        await recordPacks(transaction, user.id);
         // Paddle attaches the subscription a moment after payment; the browser asks again.
         if (!transaction.subscription_id) return send(res, 202, { pending: true });
         return send(res, 200, { result: await syncSubscription(transaction.subscription_id) });

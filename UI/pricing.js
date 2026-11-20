@@ -90,8 +90,10 @@
         return;
       }
       say('');
+      const withPack = await offerPack(tier);
+      if (withPack === null) return;
       paddle.Checkout.open({
-        items: [{ priceId: tier.priceId, quantity: 1 }],
+        items: [{ priceId: tier.priceId, quantity: 1 }, ...(withPack ? [{ priceId: pack.priceId, quantity: 1 }] : [])],
         customer: user.email ? { email: user.email } : undefined,
         customData: { supabase_user_id: user.id },
         settings: { displayMode: 'overlay', variant: 'one-page' },
@@ -102,6 +104,33 @@
       opening = false;
       for (const { button } of cards) button.disabled = finishing;
     }
+  }
+
+  // The add-on, offered once before checkout: true to add it, false without it, null when the person closes the box.
+  const pack = window.PRISM_PACK;
+  let packPrice = '';
+  function offerPack(tier) {
+    if (!pack) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      const dialog = document.createElement('dialog');
+      dialog.className = 'bump';
+      dialog.innerHTML = `<form method="dialog" class="bump-body">
+          <p class="card-eyebrow">ONE MORE THING</p>
+          <h3>Need more minutes this month?</h3>
+          <label class="bump-option"><input type="checkbox" name="pack">
+            <span><strong>Add ${pack.minutes} extra minutes${packPrice ? ` for ${packPrice}` : ''}</strong>
+            <span class="muted">On top of ${tier.name}, for this month. Paid once, no subscription.</span></span></label>
+          <div class="bump-actions"><button class="button button-secondary" value="cancel" type="submit">Back</button>
+            <button class="button button-primary" value="go" type="submit">Continue to checkout</button></div>
+        </form>`;
+      document.body.append(dialog);
+      dialog.addEventListener('close', () => {
+        const go = dialog.returnValue === 'go';
+        resolve(go ? dialog.querySelector('[name=pack]').checked : null);
+        dialog.remove();
+      });
+      dialog.showModal();
+    });
   }
 
   // Saves the purchase to the account straight away instead of waiting for Paddle's webhook,
@@ -127,7 +156,7 @@
     finishing = true;
     recordPurchase(event.data?.transaction_id)
       .catch((error) => console.error(error))
-      .finally(() => location.assign('/welcome'));
+      .finally(() => location.assign('/app'));
   }
 
   async function start() {
@@ -146,10 +175,11 @@
     hasPlan = await checkPlan();
 
     const preview = await paddle.PricePreview({
-      items: tiers.map((tier) => ({ priceId: tier.priceId, quantity: 1 })),
+      items: [...tiers.map((tier) => ({ priceId: tier.priceId, quantity: 1 })), ...(pack ? [{ priceId: pack.priceId, quantity: 1 }] : [])],
       ...(config.country && { address: { countryCode: config.country } }),
     });
     const totals = new Map(preview.data.details.lineItems.map((item) => [item.price.id, item.formattedTotals.total]));
+    if (pack) packPrice = totals.get(pack.priceId) ?? '';
     for (const { tier, price, per, button } of cards) {
       price.textContent = totals.get(tier.priceId) ?? '—';
       price.append(per);

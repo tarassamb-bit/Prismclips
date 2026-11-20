@@ -574,3 +574,13 @@ td.table-message { text-align: center; line-height: 1.9; padding: 22px 8px; }
   .brand { font-size: 20px; }
   .nav-signin, .nav-download { padding-inline: 7px; }
 }
+
+/* Pricing: the add-on box shown before checkout. */
+.bump { border: 1px solid var(--border); border-radius: 16px; padding: 0; width: min(440px, calc(100vw - 32px)); background: var(--surface1); color: var(--text); }
+.bump::backdrop { background: rgba(0, 0, 0, .55); }
+.bump-body { display: grid; gap: 14px; padding: 24px; }
+.bump-body h3 { margin: 0; }
+.bump-option { display: flex; gap: 12px; align-items: flex-start; padding: 14px; border: 1px solid var(--border); border-radius: 12px; cursor: pointer; }
+.bump-option input { width: 20px; height: 20px; margin-top: 2px; accent-color: var(--sky); }
+.bump-option span { display: grid; gap: 4px; }
+.bump-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }

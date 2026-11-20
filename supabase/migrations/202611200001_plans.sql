@@ -1,5 +1,8 @@
 -- The paid plans (Paddle sandbox catalog of 2026-11-20): which price is which plan, what each plan includes, and the
--- upload minutes a paying account gets each month. Accounts without a paid plan keep their beta allowance.
+-- upload minutes a paying account gets each month, plus extra-minute packs. Accounts without a paid plan keep their beta
+-- allowance. plan_prices was planned in 202610270002 but never applied to this database, so it is created here if missing.
+create table if not exists public.plan_prices (price_id text primary key, tier text not null);
+alter table public.plan_prices enable row level security;  -- no policies: only the functions below read it
 alter table public.plan_prices drop constraint if exists plan_prices_tier_check;
 alter table public.plan_prices add constraint plan_prices_tier_check check (tier in ('trial', 'tier1', 'creator', 'studio'));
 insert into public.plan_prices (price_id, tier) values
@@ -43,11 +46,24 @@ $$;
 revoke all on function public.prism_plan(uuid) from public, anon;
 grant execute on function public.prism_plan(uuid) to authenticated, service_role;
 
--- A paid plan's monthly minutes; otherwise the beta allowance (60, or what was granted).
+-- Extra-minute packs bought at checkout ("Extra 100 minutes"), one row per Paddle transaction. Written by the server only.
+create table if not exists public.minute_packs (
+  transaction_id text primary key,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  minutes integer not null check (minutes > 0),
+  bought timestamptz not null default now()
+);
+alter table public.minute_packs enable row level security;
+drop policy if exists "own minute packs" on public.minute_packs;
+create policy "own minute packs" on public.minute_packs for select to authenticated using (user_id = auth.uid());
+grant select on public.minute_packs to authenticated;
+
+-- A paid plan's monthly minutes, otherwise the beta allowance (60, or what was granted); plus packs bought this month.
 create or replace function public.prism_allowance(p_user uuid)
 returns double precision language sql stable security definer set search_path = public, pg_temp as $$
   select coalesce((select l.upload_minutes from public.plan_limits l where l.tier = public.prism_plan(p_user)),
-                  (select minutes from public.usage_allowance where user_id = p_user), 60);
+                  (select minutes from public.usage_allowance where user_id = p_user), 60)
+       + coalesce((select sum(minutes) from public.minute_packs where user_id = p_user and bought >= date_trunc('month', now())), 0);
 $$;
 
 -- On a paid plan only this calendar month's use counts; without one, all use since the start (the beta rule).
