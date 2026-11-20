@@ -193,6 +193,27 @@ window.prismAuth = (() => {
             validate();
           }, 350);
         });
+        // Typing a name fills in a username from it (José Luis → @joseluis), with a few random letters if it's taken,
+        // until the person edits the username themselves.
+        let ownUsername = false, suggestTimer = 0, suggesting = 0;
+        username.addEventListener('input', (event) => { if (event.isTrusted) ownUsername = !!username.value; });
+        const free = async (value) => {
+          const { data, error } = await Promise.resolve(db.rpc('username_available', { p_username: value })).catch((e) => ({ error: e }));
+          return error ? true : data === true;
+        };
+        field('name').addEventListener('input', () => {
+          if (ownUsername) return;
+          clearTimeout(suggestTimer);
+          const ticket = ++suggesting;
+          suggestTimer = setTimeout(async () => {
+            const base = field('name').value.normalize('NFD').toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 16);
+            let pick = base.length >= 3 ? base : base ? base + Math.random().toString(36).slice(2, 5) : '';
+            for (let i = 0; pick && i < 5 && !(await free(pick)); i++) pick = base.slice(0, 16) + Math.random().toString(36).slice(2, 5);
+            if (ticket !== suggesting || ownUsername) return;
+            username.value = pick;
+            username.dispatchEvent(new Event('input'));
+          }, 400);
+        });
         human = window.prismTurnstile?.mount(root.querySelector('.auth-human')) ?? null;
         beta = window.prismBeta?.attach(db, form, { note: 'auth-spots', field: 'auth-field', button: 'auth-submit' }) ?? null;
       }
