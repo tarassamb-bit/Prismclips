@@ -525,3 +525,11 @@ details.insp-section:not([open]) { gap: 0; }
 
 /* Settings › Usage: the plan box. */
 .plan-box .plan-name { display: block; font-size: 22px; margin-top: 2px; }
+.plan-box .row.between > span { display: grid; gap: 2px; }
+.plan-features { list-style: none; margin: 16px 0 0; padding: 16px 0 0; border-top: 1px solid var(--border); display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px 24px; }
+.plan-features li { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; }
+.plan-features svg { flex: none; width: 18px; height: 18px; fill: none; stroke: var(--accent, #2f9bf0); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; margin-top: 1px; }
+.plan-meters, .plan-packs { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.plan-meters .big-number { margin: 6px 0 10px; }
+.plan-packs .box { display: grid; gap: 8px; align-content: start; }
+.plan-packs .button { justify-self: start; }

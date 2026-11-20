@@ -60,12 +60,19 @@ const PLANS_ON = ['localhost', '127.0.0.1'].includes(location.hostname);
 async function refreshUsage() {
   if (!state.session) return;
   const account = userId();
-  const [{ data, error }, plan, live] = await Promise.all([db().rpc('my_usage'), PLANS_ON ? db().rpc('my_plan') : { error: true },
-    PLANS_ON ? db().rpc('my_live_limits') : { error: true }]);
+  const [{ data, error }, plan, live, subs] = await Promise.all([db().rpc('my_usage'), PLANS_ON ? db().rpc('my_plan') : { error: true },
+    PLANS_ON ? db().rpc('my_live_limits') : { error: true },
+    PLANS_ON ? db().from('subscriptions').select('price_id, status, next_billed_at, scheduled_change').in('status', ['active', 'trialing', 'past_due']) : { error: true }]);
   if (userId() !== account) return;
   state.usage = !error && data?.[0] ? { used: data[0].used, allowance: data[0].allowance } : null;
-  // The plan and its limits (Free without a paid plan); null where the database doesn't know plans yet.
-  state.plan = !plan.error && plan.data?.[0] ? plan.data[0] : null;
+  // The plan and its limits (Free without a paid plan). The subscription itself gives the name and renewal date, so the
+  // plan still shows where the database doesn't know plans yet (limits then come from the pricing page's list).
+  const tiers = window.PRISM_TIERS ?? [];
+  const sub = !subs.error ? (subs.data ?? []).map((s) => ({ ...s, tier: tiers.find((t) => t.priceId === s.price_id) }))
+    .filter((s) => s.tier).sort((a, b) => tiers.indexOf(b.tier) - tiers.indexOf(a.tier))[0] : null;
+  const limits = !plan.error && plan.data?.[0] ? plan.data[0] : null;
+  const known = limits ?? (sub ? { name: sub.tier.name, tier: 'paid' } : !subs.error ? { name: 'Free', tier: 'free' } : null);
+  state.plan = known && { ...known, sub, features: (known.tier === 'free' ? window.PRISM_FREE : tiers.find((t) => t.name === known.name))?.features ?? [] };
   state.live = !live.error && live.data?.[0] ? live.data[0] : null;
   renderUsage();
 }
@@ -894,18 +901,36 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
         <p id="promo-status" class="muted small" role="status"></p>
       </form>`;
   } else if (tab === 'plan') {
-    const plan = state.plan, paid = plan && plan.tier !== 'free';
+    const plan = state.plan, paid = plan && plan.tier !== 'free', live = state.live;
+    const when = (d) => new Date(d).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+    const renew = plan?.sub?.scheduled_change?.action === 'cancel' ? `Ends on ${when(plan.sub.scheduled_change.effective_at)}`
+      : plan?.sub?.status === 'past_due' ? 'Payment failed: update your card in the email from Paddle'
+      : plan?.sub?.next_billed_at ? `Renews on ${when(plan.sub.next_billed_at)}` : paid ? '' : 'No payment needed';
+    const check = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>';
     body = plan ? `<div class="box plan-box">
-        <div class="row between"><span><span class="muted small">Your plan</span><strong class="plan-name">${esc(plan.name)}</strong></span>
+        <div class="row between"><span><span class="muted small">Your plan</span><strong class="plan-name">${esc(plan.name)}</strong>
+          <span class="muted small">${esc(renew)}</span></span>
           <a class="button ${paid ? 'ghost' : 'primary'}" href="/pricing">${paid ? 'Change plan' : 'Upgrade'}</a></div>
-        <p class="muted small">${paid ? `${plan.upload_minutes} minutes of video a month` : 'Your beta allowance'} · ${plan.export} exports${plan.watermark ? ' with watermark' : ', no watermark'} ·
-          Live: ${plan.live_channels} ${plan.live_channels === 1 ? 'channel' : 'channels'}, ${plan.live_hours} h a month, ${plan.live_shorts_per_day} Shorts a day</p>
-        ${state.live ? `<p class="small">Live this month: <strong>${state.live.hours_used.toFixed(1)} of ${Math.round(state.live.hours_allowed)} hours</strong> used</p>` : ''}
-        <div class="row"><a class="button ghost" href="/pricing?pack=minutes">Buy 100 video minutes</a><a class="button ghost" href="/pricing?pack=live">Buy 10 Live hours</a></div>
+        ${plan.features.length ? `<ul class="plan-features">${plan.features.map((f) => `<li>${check}${esc(f)}</li>`).join('')}</ul>` : ''}
+      </div>
+      <div class="plan-meters">
+        <div class="box"><span class="muted small">Video minutes this month</span>
+          <div class="big-number"><b>${u ? Math.ceil(u.used) : '—'}</b><span>${u ? `of ${Math.floor(u.allowance)} used` : 'Unavailable'}</span></div>
+          <div class="meter ${u && u.used / u.allowance >= 0.85 ? 'warn' : ''}"><div style="width:${u ? Math.min(100, u.used / u.allowance * 100) : 0}%"></div></div></div>
+        <div class="box"><span class="muted small">Live hours this month</span>
+          <div class="big-number"><b>${live ? live.hours_used.toFixed(1) : '—'}</b><span>${live ? `of ${Math.round(live.hours_allowed)} used` : 'Shown soon'}</span></div>
+          <div class="meter ${live && live.hours_used / live.hours_allowed >= 0.85 ? 'warn' : ''}"><div style="width:${live ? Math.min(100, live.hours_used / Math.max(live.hours_allowed, 0.01) * 100) : 0}%"></div></div></div>
+      </div>
+      <h3 class="section-title">Need more this month?</h3>
+      <div class="plan-packs">
+        <div class="box"><strong>100 video minutes</strong><p class="muted small">For making Shorts from uploaded videos. Added to this month, on top of your plan.</p>
+          <a class="button ghost" href="/pricing?pack=minutes">Buy for €5</a></div>
+        <div class="box"><strong>10 Live hours</strong><p class="muted small">For recording live streams. Added to this month, on top of your plan.</p>
+          <a class="button ghost" href="/pricing?pack=live">Buy for €3</a></div>
       </div>` : `<div class="box plan-box">
-        <div class="row between"><span><span class="muted small">Your plan</span><strong class="plan-name">${state.session ? 'Plan details are unavailable right now' : 'Sign in to see your plan'}</strong></span>
+        <div class="row between"><span><span class="muted small">Your plan</span><strong class="plan-name">${state.session ? 'Couldn\'t load your plan' : 'Sign in to see your plan'}</strong>
+          ${state.session ? '<span class="muted small">Check your connection and open this page again.</span>' : ''}</span>
           <a class="button primary" href="/pricing">See plans</a></div>
-        <div class="row"><a class="button ghost" href="/pricing?pack=minutes">Buy 100 video minutes</a><a class="button ghost" href="/pricing?pack=live">Buy 10 Live hours</a></div>
       </div>`;
   } else if (tab === 'overview') {
     body = `<div class="stat-row"><div class="stat"><b id="stat-exports">—</b><span>Exports</span></div><div class="stat"><b id="stat-shorts">—</b><span>Shorts made</span></div><div class="stat"><b id="stat-minutes">—</b><span>Minutes of Shorts</span></div></div>

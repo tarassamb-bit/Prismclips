@@ -15,6 +15,9 @@ window.PRISM_BILLING_ENABLED = true;
 window.PRISM_PACK = { priceId: 'pri_01m7wykejd7qj2jm895kpb8cyy', minutes: 100 };
 window.PRISM_LIVE_PACK = { priceId: 'pri_01m7x801j9rtht27jw31r9vavh', hours: 10 };
 
+// What an account without a paid plan gets; shown in Settings › Plan.
+window.PRISM_FREE = { name: 'Free', features: ['20 minutes of video', '720p exports with watermark', 'Live clipping: 1 channel, 1 hour a month', 'Recordings up to 1 hour', '3 live Shorts a day'] };
+
 /** @type {Tier[]} */
 window.PRISM_TIERS = [
   {
