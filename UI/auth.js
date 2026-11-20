@@ -193,7 +193,7 @@ window.prismAuth = (() => {
             validate();
           }, 350);
         });
-        // Typing a name fills in a username from it (José Luis → @joseluis), with a few random letters if it's taken,
+        // Typing a name fills in a username from it (José Luis → @joseluis), with _ and 3 random digits if it's taken (@taras_123),
         // until the person edits the username themselves.
         let ownUsername = false, suggestTimer = 0, suggesting = 0;
         username.addEventListener('input', (event) => { if (event.isTrusted) ownUsername = !!username.value; });
@@ -207,8 +207,9 @@ window.prismAuth = (() => {
           const ticket = ++suggesting;
           suggestTimer = setTimeout(async () => {
             const base = field('name').value.normalize('NFD').toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 16);
-            let pick = base.length >= 3 ? base : base ? base + Math.random().toString(36).slice(2, 5) : '';
-            for (let i = 0; pick && i < 5 && !(await free(pick)); i++) pick = base.slice(0, 16) + Math.random().toString(36).slice(2, 5);
+            const numbered = () => `${base}_${String(Math.floor(Math.random() * 900) + 100)}`;
+            let pick = base.length >= 3 ? base : base ? numbered() : '';
+            for (let i = 0; pick && i < 5 && !(await free(pick)); i++) pick = numbered();
             if (ticket !== suggesting || ownUsername) return;
             username.value = pick;
             username.dispatchEvent(new Event('input'));
