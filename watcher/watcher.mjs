@@ -225,8 +225,9 @@ class Recorder {
     const mean = (list, a, b, gaps) => { let sum = 0, n = 0; for (let t = Math.max(0, a); t < b; t++) { if (list[t] !== undefined) { sum += list[t]; n++; } else if (gaps) n++; } return n ? sum / n : 0; };
     const loud = [], messages = [], hype = [];
     for (let t = from; t <= now; t++) {
-      const amp = mean(level, t - 1, t + 1, false);
-      loud.push(amp > 0 ? Math.round(Math.min(1, Math.max(0, (20 * Math.log10(amp) + 60) / 60)) * 100) / 100 : 0);
+      // A second with no stream sound measured (a Twitch ad break: those pieces are skipped) is null, drawn as a gap.
+      const amp = level[t] === undefined ? 0 : mean(level, t - 1, t + 1, false);
+      loud.push(amp > 0 ? Math.round(Math.min(1, Math.max(0, (20 * Math.log10(amp) + 60) / 60)) * 100) / 100 : null);
       messages.push(chat[t] ?? 0);
       const loudJump = mean(level, t - 6, t, false) / (mean(level, t - 180, t - 10, false) || Infinity) - 1;
       const chatJump = mean(chat, t - 8, t, true) / Math.max(0.5, mean(chat, t - 180, t - 10, true)) - 1;

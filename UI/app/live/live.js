@@ -377,6 +377,21 @@ function drawGraph() {
     ctx.stroke();
   }
   ctx.restore();
+  // Stretches of 10 s or more with no stream sound: a Twitch ad break (chat goes on) or a server restart (nothing at all).
+  ctx.save();
+  ctx.font = '11px system-ui, sans-serif';
+  for (let i = 0, run = null; i <= loud.length; i++) {
+    if (loud[i] === null && i < loud.length) { run ??= i; continue; }
+    if (run !== null && i - run >= 10) {
+      const x1 = Math.max(0, xOf(graph.start + run * 1000)), x2 = Math.min(width, xOf(graph.start + (i - 1) * 1000));
+      if (x2 > x1) {
+        ctx.fillStyle = 'rgba(128,128,128,.12)'; ctx.fillRect(x1, 0, x2 - x1, height);
+        ctx.fillStyle = 'rgba(128,128,128,.9)'; if (x2 - x1 > 70) ctx.fillText(graph.chat[run] === null ? 'Not recorded' : 'Twitch ad', x1 + 6, 14);
+      }
+    }
+    run = null;
+  }
+  ctx.restore();
   ctx.fillStyle = COLORS.hype;
   const ids = channels.find((c) => c.login === selected)?.ids ?? new Set();
   for (const clip of clips.filter((c) => ids.has(c.session_id))) {
