@@ -818,7 +818,7 @@ async function createAction(action) {
 
 // MARK: Settings (Account, Overview, Usage): the website's dashboard, now inside the app. No plans or prices for now.
 
-const SETTINGS_TABS = ['account', 'overview', 'usage'];
+const SETTINGS_TABS = ['account', 'overview', 'usage', ...(PLANS_ON ? ['plan'] : [])];
 const count = new Intl.NumberFormat();
 const lengthText = (seconds) => { const s = Math.round(seconds); return s >= 60 ? `${count.format(Math.floor(s / 60))}m ${s % 60}s` : `${s}s`; };
 
@@ -855,12 +855,13 @@ function showLive() {
 async function showSettings(tab = state.settingsTab ?? 'account') {
   const account = userId();
   // Old addresses: the export history moved into Overview, and plans are switched off for now.
-  if (tab === 'exports' || tab === 'plans') tab = 'overview';
+  if (tab === 'exports' || (tab === 'plans' && !PLANS_ON)) tab = 'overview';
+  if (tab === 'plans') tab = 'plan';
   if (!SETTINGS_TABS.includes(tab)) tab = 'account';
   state.settingsTab = tab;
   setScreen('settings');
   setUrl(`/app/settings/${tab}`);
-  if (state.session && tab === 'usage') await refreshUsage();
+  if (state.session && (tab === 'usage' || tab === 'plan')) await refreshUsage();
   if (userId() !== account || state.screen !== 'settings' || state.settingsTab !== tab) return;
   const u = state.usage;
   const email = state.session?.user?.email;
@@ -869,6 +870,7 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
     ['account', 'Account', email ?? 'Sign in to track your stats', '<path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0"/>', 'Your Relio account.'],
     ['overview', 'Overview', 'Stats and exports', '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>', 'What you have made with Relio, and your exports.'],
     ['usage', 'Usage', used, '<path d="M5 18a8 8 0 1 1 14 0M12 18l4-6"/>', 'Minutes of video you can make Shorts from, and your space for videos in the cloud.'],
+    ...(PLANS_ON ? [['plan', 'Plan', state.plan?.name ?? 'Plans and extra packs', '<path d="M3 7h18v12H3zM3 11h18M7 15h4"/>', 'Your plan, what it includes, and extra minutes or Live hours.']] : []),
   ];
   const nav = NAV.map(([id, title, detail, icon]) => `<button class="settings-item" data-action="settings-tab" data-tab="${id}" ${tab === id ? 'aria-current="page"' : ''}>
       <svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg><span><strong>${title}</strong><span class="muted small">${esc(detail)}</span></span></button>`).join('');
@@ -877,14 +879,7 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
   if (tab === 'usage') {
     const percent = u ? Math.min(100, u.used / u.allowance * 100) : 0;
     const plan = state.plan, paid = plan && plan.tier !== 'free';
-    body = `${plan ? `<div class="box plan-box">
-        <div class="row between"><span><span class="muted small">Your plan</span><strong class="plan-name">${esc(plan.name)}</strong></span>
-          <a class="button ${paid ? 'ghost' : 'primary'}" href="/pricing">${paid ? 'Change plan' : 'Upgrade'}</a></div>
-        <p class="muted small">${paid ? `${plan.upload_minutes} minutes of video a month` : 'Your beta allowance'} · ${plan.export} exports${plan.watermark ? ' with watermark' : ', no watermark'} ·
-          Live: ${plan.live_channels} ${plan.live_channels === 1 ? 'channel' : 'channels'}, ${plan.live_hours} h a month, ${plan.live_shorts_per_day} Shorts a day</p>
-        ${state.live ? `<p class="small">Live this month: <strong>${state.live.hours_used.toFixed(1)} of ${Math.round(state.live.hours_allowed)} hours</strong> used</p>` : ''}
-        <div class="row"><a class="button ghost" href="/pricing?pack=minutes">Buy 100 video minutes</a><a class="button ghost" href="/pricing?pack=live">Buy 10 Live hours</a></div>
-      </div>` : ''}<div class="box">
+    body = `<div class="box">
         <div class="big-number"><b>${u ? Math.ceil(u.used) : '—'}</b><span>${u ? `of ${Math.floor(u.allowance)} minutes used` : state.session ? 'Usage is unavailable. Check your connection and try again.' : 'Sign in to see usage.'}</span></div>
         <div class="meter ${percent >= 85 ? 'warn' : ''}"><div style="width:${percent}%"></div></div>
         ${u ? `<p class="muted small">${Math.max(0, Math.floor(u.allowance - u.used))} minutes left.</p>` : ''}
@@ -898,6 +893,20 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
         <div class="row"><input id="promo-code" name="code" placeholder="Enter code" autocomplete="off"><button class="button primary">Redeem</button></div>
         <p id="promo-status" class="muted small" role="status"></p>
       </form>`;
+  } else if (tab === 'plan') {
+    const plan = state.plan, paid = plan && plan.tier !== 'free';
+    body = plan ? `<div class="box plan-box">
+        <div class="row between"><span><span class="muted small">Your plan</span><strong class="plan-name">${esc(plan.name)}</strong></span>
+          <a class="button ${paid ? 'ghost' : 'primary'}" href="/pricing">${paid ? 'Change plan' : 'Upgrade'}</a></div>
+        <p class="muted small">${paid ? `${plan.upload_minutes} minutes of video a month` : 'Your beta allowance'} · ${plan.export} exports${plan.watermark ? ' with watermark' : ', no watermark'} ·
+          Live: ${plan.live_channels} ${plan.live_channels === 1 ? 'channel' : 'channels'}, ${plan.live_hours} h a month, ${plan.live_shorts_per_day} Shorts a day</p>
+        ${state.live ? `<p class="small">Live this month: <strong>${state.live.hours_used.toFixed(1)} of ${Math.round(state.live.hours_allowed)} hours</strong> used</p>` : ''}
+        <div class="row"><a class="button ghost" href="/pricing?pack=minutes">Buy 100 video minutes</a><a class="button ghost" href="/pricing?pack=live">Buy 10 Live hours</a></div>
+      </div>` : `<div class="box plan-box">
+        <div class="row between"><span><span class="muted small">Your plan</span><strong class="plan-name">${state.session ? 'Plan details are unavailable right now' : 'Sign in to see your plan'}</strong></span>
+          <a class="button primary" href="/pricing">See plans</a></div>
+        <div class="row"><a class="button ghost" href="/pricing?pack=minutes">Buy 100 video minutes</a><a class="button ghost" href="/pricing?pack=live">Buy 10 Live hours</a></div>
+      </div>`;
   } else if (tab === 'overview') {
     body = `<div class="stat-row"><div class="stat"><b id="stat-exports">—</b><span>Exports</span></div><div class="stat"><b id="stat-shorts">—</b><span>Shorts made</span></div><div class="stat"><b id="stat-minutes">—</b><span>Minutes of Shorts</span></div></div>
       <h3 class="section-title">Export history</h3>
