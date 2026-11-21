@@ -122,4 +122,4 @@ async function syncSubscription(id) {
   return 'synced';
 }
 
-module.exports = { ACTIVE, HttpError, send, fail, misconfigured, requireEnv, paddle, supabase, getUser, syncSubscription };
+module.exports = { PADDLE_API, ACTIVE, HttpError, send, fail, misconfigured, requireEnv, paddle, supabase, getUser, syncSubscription };

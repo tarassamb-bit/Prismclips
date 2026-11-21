@@ -168,7 +168,9 @@
     }
 
     if (config.environment === 'sandbox') window.Paddle.Environment.set('sandbox');
-    window.Paddle.Initialize({ token: config.token, eventCallback: onCheckoutEvent });
+    const customer = (await db?.from('subscriptions').select('customer_id').order('event_at', { ascending: false }).limit(1).maybeSingle().catch(() => null))?.data?.customer_id;
+    // Paddle Retain knows the person by their Paddle customer ID (never our own ID or their email).
+    window.Paddle.Initialize({ token: config.token, eventCallback: onCheckoutEvent, ...(customer && { pwCustomer: { id: customer } }) });
     paddle = window.Paddle;
 
     user = (await db?.auth.getSession().catch(() => null))?.data?.session?.user ?? null;

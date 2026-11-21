@@ -4,10 +4,11 @@
 //   POST ?action=portal                      link to the Paddle billing portal for their subscriptions
 const { ACTIVE, HttpError, send, fail, requireEnv, paddle, supabase, getUser, syncSubscription } = require('./_lib');
 
-// The one-time packs (Paddle sandbox prices): 100 extra video minutes, or 10 extra Live hours, for the month they're bought.
+// The one-time packs (Paddle sandbox and live prices): 100 extra video minutes, or 10 extra Live hours, for the month they're bought.
+const MINUTES = { table: 'minute_packs', field: 'minutes', amount: 100 }, HOURS = { table: 'live_packs', field: 'hours', amount: 10 };
 const PACKS = {
-  pri_01m7wykejd7qj2jm895kpb8cyy: { table: 'minute_packs', field: 'minutes', amount: 100 },
-  pri_01m7x801j9rtht27jw31r9vavh: { table: 'live_packs', field: 'hours', amount: 10 },
+  pri_01m7wykejd7qj2jm895kpb8cyy: MINUTES, pri_01m7z8ycnqttzw183g03j59jre: MINUTES,
+  pri_01m7x801j9rtht27jw31r9vavh: HOURS, pri_01m7z8yd2m4w7cv2nasnt49grn: HOURS,
 };
 
 /** Saves the packs of a paid transaction to the account, once per transaction. */
@@ -79,3 +80,4 @@ module.exports = async (req, res) => {
     fail(res, error);
   }
 };
+module.exports.recordPacks = recordPacks;
