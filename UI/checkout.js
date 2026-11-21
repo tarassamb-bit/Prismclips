@@ -3,6 +3,8 @@
 // the page hears 'prism:purchased' to refresh what it shows.
 (() => {
   'use strict';
+  // Paddle's checkout follows the page's theme: light or dark, the person's choice first, then their system's.
+  const prismTheme = () => (document.documentElement.dataset.theme ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
   let paddle = null;
   let loading = null;
   let kind = null;
@@ -64,7 +66,7 @@
         items: [{ priceId: chosen.priceId, quantity: 1 }],
         customer: user.email ? { email: user.email } : undefined,
         customData: { supabase_user_id: user.id },
-        settings: { displayMode: 'overlay', variant: 'one-page' },
+        settings: { displayMode: 'overlay', variant: 'one-page', theme: prismTheme() },
       });
     } catch (error) {
       console.error(error);

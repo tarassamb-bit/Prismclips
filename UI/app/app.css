@@ -574,3 +574,6 @@ details.insp-section:not([open]) { gap: 0; }
 .live-badge.on { background: #e91916; }
 .live-home-hours { text-decoration: none; } .live-home-hours:hover { text-decoration: underline; }
 .live-screen > .back-home { justify-self: start; }
+/* The Live icon is red, like a live dot. */
+.side-button[data-screen="live"] svg { color: #e91916; }
+.brand-row { color: inherit; text-decoration: none; }

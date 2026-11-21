@@ -923,7 +923,8 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
     body = plan ? `<div class="box plan-box">
         <div class="row between"><span><span class="muted small">Your plan</span><strong class="plan-name">${esc(plan.name)}</strong>
           <span class="muted small">${esc(renew)}</span></span>
-          <a class="button ${paid ? 'ghost' : 'primary'}" href="/pricing">${paid ? 'Change plan' : 'Upgrade'}</a></div>
+          <span class="row">${plan.sub ? '<button class="button ghost" data-action="manage-plan">Manage or cancel</button>' : ''}<a class="button ${paid ? 'ghost' : 'primary'}" href="/pricing">${paid ? 'Change plan' : 'Upgrade'}</a></span></div>
+        <p id="manage-note" class="error small" role="alert" hidden></p>
         ${plan.features.length ? `<ul class="plan-features">${plan.features.map((f) => `<li>${check}${esc(f)}</li>`).join('')}</ul>` : ''}
       </div>
       <div class="plan-meters">
@@ -2281,6 +2282,16 @@ document.addEventListener('click', async (event) => {
     else if (screen === 'live') showLive();
   }
   else if (action === 'settings-tab') showSettings(target.dataset.tab);
+  else if (action === 'manage-plan') {
+    // Paddle's customer portal: cancel, change card, invoices. Opened in a new tab so Relio stays open.
+    const note = $('#manage-note');
+    const tab = window.open('', '_blank');
+    const response = await fetch('/api/billing?action=portal', { method: 'POST', headers: { Authorization: `Bearer ${await accessToken()}` } }).catch(() => null);
+    const body = await response?.json().catch(() => ({}));
+    if (response?.ok && body?.url) { tab.location = body.url; return; }
+    tab?.close();
+    if (note) { note.hidden = false; note.textContent = body?.error || 'Couldn’t open your billing page. Try again, or write to support@relioclips.com.'; }
+  }
   else if (action === 'signout') { const { error } = await db().auth.signOut(); if (error) showError('Couldn’t sign out', error.message); }
   else if (action === 'delete-account') deleteAccount();
   else if (action === 'theme') switchTheme(target.dataset.theme);

@@ -1,5 +1,7 @@
 (() => {
   'use strict';
+  // Paddle's checkout follows the page's theme: light or dark, the person's choice first, then their system's.
+  const prismTheme = () => (document.documentElement.dataset.theme ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
 
   const grid = document.getElementById('tiers');
   const status = document.getElementById('pricing-status');
@@ -96,7 +98,7 @@
         items: [{ priceId: tier.priceId, quantity: 1 }, ...(withPack ? [{ priceId: pack.priceId, quantity: 1 }] : [])],
         customer: user.email ? { email: user.email } : undefined,
         customData: { supabase_user_id: user.id },
-        settings: { displayMode: 'overlay', variant: 'one-page' },
+        settings: { displayMode: 'overlay', variant: 'one-page', theme: prismTheme() },
       });
     } catch (error) {
       say(`Couldn’t open checkout. ${error.message || 'Please try again.'}`, 'error');
@@ -204,7 +206,7 @@
       items: [{ priceId: chosen.priceId, quantity: 1 }],
       customer: user.email ? { email: user.email } : undefined,
       customData: { supabase_user_id: user.id },
-      settings: { displayMode: 'overlay', variant: 'one-page' },
+      settings: { displayMode: 'overlay', variant: 'one-page', theme: prismTheme() },
     });
   }
 
