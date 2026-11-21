@@ -683,7 +683,7 @@ details.insp-section:not([open]) { gap: 0; }
 .history-stats > div { background: var(--surface1); border: 1px solid var(--border); padding: 18px; gap: 4px; border-radius: 14px; display: grid; }
 .history-stats .row-icon { width: 36px; height: 36px; border-radius: 10px; background: var(--sky); color: #0e0f14; margin-bottom: 8px; }
 .history-stats b { font: 500 34px/1.1 var(--display); }
-.history-empty { justify-items: center; text-align: center; padding: 40px 20px; gap: 8px; }
+.history-empty { justify-items: center; text-align: center; padding: 28px 20px; }
 .history-empty .row-icon { width: 44px; height: 44px; border-radius: 12px; background: var(--sky); color: #0e0f14; }
 .history-empty .button { margin-top: 8px; justify-self: center; }
 #stats-note:empty { display: none; }

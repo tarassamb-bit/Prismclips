@@ -1010,9 +1010,7 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
         <div><span class="row-icon sky" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span><b id="stat-minutes">—</b><span>Minutes of Shorts</span></div>
       </div>
       <div class="box flush history-table"><div class="table-wrap"><table><thead><tr><th scope="col">Date</th><th scope="col">Shorts</th><th scope="col">Length</th><th scope="col">Quality</th></tr></thead><tbody id="export-rows"></tbody></table></div></div>
-      <div class="box history-empty" hidden><span class="row-icon sky" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></span>
-        <strong>No exports yet</strong><span class="muted small">Every Short you export shows up here with its date, length and quality.</span>
-        <button class="button primary" data-action="create">Make Shorts</button></div>
+      <div class="box history-empty" hidden><strong>No exports yet</strong></div>
       <p id="stats-note" class="muted small" role="status">Loading your export history…</p>`;
   } else {
     const initial = esc((email ?? '?')[0].toUpperCase());
