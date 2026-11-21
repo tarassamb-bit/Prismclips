@@ -15,8 +15,14 @@
   window.prismAuth.mount(root, { db, mode, redirectTo: location.origin + '/app/', onSignedIn: () => location.replace(next) });
   // Already signed in: straight on (except when choosing a new password from the email link). On sign-up, say who is
   // signed in instead, so making a new account never silently opens the old one.
-  if (!reset) db.auth.getSession().then(({ data }) => {
+  if (!reset) db.auth.getSession().then(async ({ data }) => {
     if (!data.session) return;
+    // A saved login the server already ended (a password change ends every session) is dropped, not used.
+    const { error } = await db.auth.getUser().catch((e) => ({ error: e }));
+    if (error && (error.status === 401 || error.status === 403 || /session missing|session_not_found|sub claim/i.test(error.message ?? ''))) {
+      await db.auth.signOut({ scope: 'local' }).catch(() => {});
+      return;
+    }
     if (mode !== 'signup') return location.replace(next);
     const box = document.createElement('div');
     box.className = 'auth-signed-in';

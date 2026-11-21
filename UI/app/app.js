@@ -152,6 +152,16 @@ window.addEventListener('popstate', async () => {
 
 const SCREEN_TITLES = { home: 'Home', create: 'Create Shorts', live: 'Live clipping', settings: 'Settings', games: 'Play while you wait' };
 
+/** A login saved in this browser can outlive its session on the server (a password change ends every session): ask the
+ * server, and if it says the session is gone, sign out here. Offline or a server error keeps the login. */
+async function checkSessionAlive() {
+  if (!state.session) return;
+  const { error } = await db().auth.getUser().catch((e) => ({ error: e }));
+  if (error && (error.status === 401 || error.status === 403 || /session missing|session_not_found|sub claim/i.test(error.message ?? ''))) {
+    await db().auth.signOut({ scope: 'local' }).catch(() => {});
+  }
+}
+
 /** Account changes can arrive from another tab while an editor or AI request is open. */
 function setSession(session) {
   const changedAccount = userId() !== (session?.user?.id ?? null);
@@ -204,6 +214,8 @@ async function boot() {
     return renderGate('Sign-in is unavailable right now. Check your connection and reload.');
   }
   state.session = (await db().auth.getSession()).data.session;
+  checkSessionAlive();
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkSessionAlive(); });
   db().auth.onAuthStateChange((_event, session) => {
     const changedAccount = setSession(session);
     renderGate();
