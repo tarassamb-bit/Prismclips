@@ -41,8 +41,8 @@ export async function mountLiveHome(element, dbGetter, open) {
   ]);
   if (!element.isConnected) return;
   const all = sessionRows.data ?? [], ready = (clipRows.data ?? []).filter((c) => c.short?.state === 'ready');
-  const key = (r) => (r.platform === 'kick' ? `kick/${r.login}` : r.login);
-  // One card per channel: the newest recording's state, and every Short of its recordings.
+  // One card per recording: a channel recorded again is a new card, like a new video.
+  const key = (r) => r.id;
   const cards = [...new Set(all.map(key))].map((k) => {
     const sessions = all.filter((r) => key(r) === k), ids = new Set(sessions.map((r) => r.id));
     return { key: k, row: sessions[0], shorts: ready.filter((c) => ids.has(c.session_id)) };
@@ -193,7 +193,7 @@ async function start(text) {
     showHours();
     return notice(/channels? at once|already recording|Live hours/.test(error.message) ? error.message : 'The recording could not be started. Please try again.');
   }
-  selected = channel.platform === 'kick' ? `kick/${login}` : login;
+  selected = data.id;
   if (goTo) { goTo(selected); return true; }
   await refresh();
   return true;
@@ -210,9 +210,8 @@ async function refresh() {
   if (sessionRows.error || clipRows.error) return;
   // Everything new is gathered first and swapped in at once: the graph is never drawn from a list that has no graph yet.
   const nextRows = sessionRows.data;
-  // One tab per channel: rows come newest first, so the first row of a channel is the one shown.
-  // A channel is its site and name ("kick/name"; Twitch ones keep just the name): the same name on both is two channels.
-  const key = (r) => (r.platform === 'kick' ? `kick/${r.login}` : r.login);
+  // One tab per recording (its id): recording a channel again starts a new tab, not the old one.
+  const key = (r) => r.id;
   const nextChannels = [...new Set(nextRows.map(key))].map((login) => ({ login, row: nextRows.find((r) => key(r) === login), ids: new Set(nextRows.filter((r) => key(r) === login).map((r) => r.id)) }));
   let nextSelected = selected;
   // Nothing chosen is a new recording; a chosen channel that disappeared (deleted elsewhere) gives way to another.
