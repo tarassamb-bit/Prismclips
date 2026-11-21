@@ -32,10 +32,18 @@ export function mountLive(element, dbGetter) {
   db = dbGetter;
   shownChannel = null;
   host.innerHTML = `<section class="live-screen">
-    <form id="live-form" class="row live-form"><input id="live-url" type="text" inputmode="url" autocomplete="off" placeholder="Paste a Twitch channel, like twitch.tv/name" aria-label="Twitch channel">
-      <button class="button primary" type="submit">Start recording</button></form>
-    <p id="live-notice" class="error" role="alert" hidden></p>
-    <p id="live-hours" class="muted small" hidden></p>
+    <div class="live-top">
+      <div class="live-start">
+        <h2 class="live-hero">Clip a live stream</h2>
+        <p class="live-lede">Relio records a Twitch channel on its server, even with this tab closed, and turns each big moment into a Short with captions.</p>
+        <form id="live-form" class="live-form">
+          <label class="live-field"><span class="live-prefix" aria-hidden="true">twitch.tv/</span>
+            <input id="live-url" type="text" inputmode="url" autocomplete="off" spellcheck="false" autocapitalize="none" placeholder="channel name or link" aria-label="Twitch channel name or link"></label>
+          <button class="button primary" type="submit">Start recording</button></form>
+        <p id="live-notice" class="error small" role="alert" hidden></p>
+      </div>
+      <aside id="live-hours" class="live-hours" hidden></aside>
+    </div>
     <div id="live-tabs" class="live-tabs" role="tablist"></div>
     <div id="live-view"></div>
   </section>`;
@@ -44,7 +52,7 @@ export function mountLive(element, dbGetter) {
     const input = host.querySelector('#live-url');
     if (await start(input.value)) input.value = '';
   });
-  // The tour runs by itself the first time someone opens Live on this device; Settings › Account can start it again.
+  // The tour runs by itself the first time someone opens Live on this device.
   tourDone = new Set();
   if (tourStep() === null) setTourStep(0);
   clearInterval(polling);
@@ -81,9 +89,13 @@ async function showHours() {
   const limits = !error && data?.[0];
   if (!limits) return;
   const out = limits.hours_used >= limits.hours_allowed;
+  const percent = Math.min(100, limits.hours_used / Math.max(limits.hours_allowed, 0.01) * 100);
   line.hidden = false;
-  line.innerHTML = `${out ? '<strong>Your Live hours for this month are used up.</strong> ' : ''}Live this month: ${limits.hours_used.toFixed(1)} of ${Math.round(limits.hours_allowed)} hours used
-    · up to ${limits.channels} ${limits.channels === 1 ? 'channel' : 'channels'} at once · <a href="/pricing?pack=live" data-pack="live">Buy 10 Live hours</a> · <a href="/pricing">Plans</a>`;
+  line.innerHTML = `<span class="live-hours-label">Live hours this month</span>
+    <span class="live-hours-num"><b>${limits.hours_used.toFixed(1)}</b> of ${Math.round(limits.hours_allowed)} h used</span>
+    <div class="meter ${percent >= 85 ? 'warn' : ''}"><div style="width:${percent}%"></div></div>
+    <span class="small ${out ? 'error' : 'muted'}">${out ? 'Used up. Buy more hours to keep recording.' : `Record up to ${limits.channels} ${limits.channels === 1 ? 'channel' : 'channels'} at once`}</span>
+    <span class="live-hours-actions"><a class="button ${out ? 'primary' : 'ghost'} small" href="/pricing?pack=live" data-pack="live">Buy 10 hours</a><a class="link small" href="/app/settings/plan">Your plan</a></span>`;
 }
 
 async function start(text) {
@@ -145,8 +157,31 @@ async function refresh() {
   render();
 }
 
+/** The empty screen's picture: a calm stretch of stream, one spike in voice, chat and hype, and the Short it becomes. */
+function demoGraph() {
+  const line = (base, spike, wobble, seed) => Array.from({ length: 61 }, (_, i) => {
+    const near = Math.exp(-((i - 40) ** 2) / 18);
+    const y = 120 - base - spike * near - wobble * (Math.sin(i * 1.7 + seed) + Math.sin(i * 0.6 + seed * 2)) / 2;
+    return `${i * 8},${y.toFixed(1)}`;
+  }).join(' ');
+  return `<svg class="live-demo" viewBox="0 0 640 150" role="img" aria-label="A stream graph with one spike that becomes a Short">
+    <line class="live-demo-base" x1="0" y1="120" x2="480" y2="120"/>
+    <rect class="live-demo-zone" x="290" y="10" width="78" height="110" rx="8"/>
+    <polyline points="${line(18, 14, 6, 3)}" style="stroke:${COLORS.chat}"/>
+    <polyline points="${line(10, 70, 4, 7)}" style="stroke:${COLORS.hype}"/>
+    <polyline points="${line(34, 52, 9, 1)}" style="stroke:${COLORS.loud}"/>
+    <circle cx="320" cy="20" r="6" fill="${COLORS.hype}"/>
+    <path class="live-demo-arrow" d="M378 64 C 430 64, 450 64, 506 64" marker-end="url(#live-demo-head)"/>
+    <defs><marker id="live-demo-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="live-demo-head"/></marker></defs>
+    <g transform="translate(528 4)"><rect class="live-demo-short" width="80" height="142" rx="12"/>
+      <rect class="live-demo-cam" x="8" y="8" width="64" height="40" rx="6"/><rect class="live-demo-game" x="8" y="54" width="64" height="80" rx="6"/>
+      <rect x="16" y="104" width="48" height="8" rx="3" fill="#fff"/><rect x="26" y="116" width="28" height="8" rx="3" fill="#ffd60a"/></g>
+  </svg>`;
+}
+
 function render() {
   if (!host?.isConnected) return;
+  host.querySelector('.live-screen')?.classList.toggle('is-empty', channels.length === 0);
   const tabs = host.querySelector('#live-tabs');
   if (setHtml(tabs, channels.map((c) => `<button role="tab" aria-selected="${c.login === selected}" class="live-tab ${c.login === selected ? 'on' : ''}" data-live-tab="${esc(c.login)}" title="${esc(STATE_TEXT[c.row.state])} · right-click to delete">
     <span class="dot ${c.row.state === 'recording' ? 'on-air' : ACTIVE.includes(c.row.state) ? 'waiting' : ''}" aria-hidden="true"></span>${esc(c.login)}</button>`).join(''))) for (const tab of tabs.querySelectorAll('[data-live-tab]')) {
@@ -159,8 +194,12 @@ function render() {
   const current = channel?.row;
   if (!current) {
     shownChannel = null;
-    view.innerHTML = `<div class="panel live-empty"><strong>Nothing recording yet</strong><p class="muted">Paste a Twitch channel above. Relio records it on its server,
-      even after you close this tab, and turns every big moment into a finished Short with captions. Up to two channels at once.</p></div>`;
+    view.innerHTML = `<div class="live-empty">${demoGraph()}
+      <ol class="live-steps">
+        <li><strong>Paste a channel</strong><span>Recording starts as soon as the stream is live, and waits while it's offline.</span></li>
+        <li><strong>Relio follows every second</strong><span>Voice, chat and hype are measured as the stream runs.</span></li>
+        <li><strong>Shorts appear here</strong><span>Each spike becomes a 9:16 Short with captions, about a minute later.</span></li>
+      </ol></div>`;
     return;
   }
   const active = ACTIVE.includes(current.state);
