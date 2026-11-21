@@ -973,27 +973,31 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
       : plan?.sub?.status === 'past_due' ? 'Payment failed: update your card in the email from Paddle'
       : plan?.sub?.next_billed_at ? `Renews on ${when(plan.sub.next_billed_at)}` : paid ? '' : 'No payment needed';
     const check = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>';
-    body = plan ? `<div class="box plan-box">
-        <div class="row between"><span><span class="muted small">Your plan</span><strong class="plan-name">${esc(plan.name)}</strong>
-          <span class="muted small">${esc(renew)}</span></span>
-          <span class="row">${plan.sub ? '<button class="button ghost" data-action="manage-plan">Manage or cancel</button>' : ''}<a class="button ${paid ? 'ghost' : 'primary'}" href="/pricing">${paid ? 'Change plan' : 'Upgrade'}</a></span></div>
-        <p id="manage-note" class="error small" role="alert" hidden></p>
-        ${plan.features.length ? `<ul class="plan-features">${plan.features.map((f) => `<li>${check}${esc(f)}</li>`).join('')}</ul>` : ''}
+    const unlimited = u && u.allowance >= 99_999;
+    const icon = (path) => `<span class="row-icon sky" aria-hidden="true"><svg viewBox="0 0 24 24">${path}</svg></span>`;
+    body = plan ? `<div class="dash-plan plan-hero"><div class="dash-main">
+          <span class="dash-eyebrow">Your plan</span>
+          <b class="dash-big">${esc(plan.name)}</b>
+          <span class="dash-sub">${esc(renew)}</span>
+          <div class="dash-actions">${plan.sub ? '<button class="button dash-cta" data-action="manage-plan">Manage or cancel</button>' : ''}<a class="button ${plan.sub ? 'dash-buy' : 'dash-cta'}" href="/pricing">${paid ? 'Change plan' : 'Upgrade'}</a></div>
+          <p id="manage-note" class="small plan-note" role="alert" hidden></p>
+        </div>
+        ${plan.features.length ? `<ul class="dash-includes" aria-label="Included in your plan">${plan.features.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}
       </div>
       <div class="plan-meters">
-        <div class="box"><span class="muted small">Video minutes this month</span>
-          <div class="big-number"><b>${u ? Math.ceil(u.used) : '—'}</b><span>${u ? `of ${Math.floor(u.allowance)} used` : 'Unavailable'}</span></div>
-          <div class="meter ${u && u.used / u.allowance >= 0.85 ? 'warn' : ''}"><div style="width:${u ? Math.min(100, u.used / u.allowance * 100) : 0}%"></div></div></div>
-        <div class="box"><span class="muted small">Live hours this month</span>
-          <div class="big-number"><b>${live ? live.hours_used.toFixed(1) : '—'}</b><span>${live ? `of ${Math.round(live.hours_allowed)} used` : 'Shown soon'}</span></div>
+        <div class="box meter-card">${icon('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3Z"/>')}<span class="muted small">Video minutes this month</span>
+          ${unlimited ? `<div class="big-number"><b>Unlimited</b><span>${Math.ceil(u.used)} min used</span></div>` : `<div class="big-number"><b>${u ? Math.ceil(u.used) : '—'}</b><span>${u ? `of ${Math.floor(u.allowance)} min used` : 'Unavailable'}</span></div>
+          <div class="meter ${u && u.used / u.allowance >= 0.85 ? 'warn' : ''}"><div style="width:${u ? Math.min(100, u.used / u.allowance * 100) : 0}%"></div></div>`}</div>
+        <div class="box meter-card">${icon('<circle cx="12" cy="12" r="3"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4"/>')}<span class="muted small">Live hours this month</span>
+          <div class="big-number"><b>${live ? live.hours_used.toFixed(1) : '—'}</b><span>${live ? `of ${Math.round(live.hours_allowed)} h used` : 'Shown soon'}</span></div>
           <div class="meter ${live && live.hours_used / live.hours_allowed >= 0.85 ? 'warn' : ''}"><div style="width:${live ? Math.min(100, live.hours_used / Math.max(live.hours_allowed, 0.01) * 100) : 0}%"></div></div></div>
       </div>
-      <h3 class="section-title">Need more this month?</h3>
+      <h3 class="group-label">Need more this month?</h3>
       <div class="plan-packs">
-        <div class="box"><strong>100 video minutes</strong><p class="muted small">For making Shorts from uploaded videos. Added to this month, on top of your plan.</p>
-          <a class="button ghost" href="/pricing?pack=minutes" data-pack="minutes">Buy for €5</a></div>
-        <div class="box"><strong>10 Live hours</strong><p class="muted small">For recording live streams. Added to this month, on top of your plan.</p>
-          <a class="button ghost" href="/pricing?pack=live" data-pack="live">Buy for €3</a></div>
+        <div class="box pack-card">${icon('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3Z"/>')}<span class="pack-text"><strong>100 video minutes</strong><span class="muted small">Added to this month, on top of your plan.</span></span>
+          <a class="button primary" href="/pricing?pack=minutes" data-pack="minutes">Buy · €5</a></div>
+        <div class="box pack-card">${icon('<circle cx="12" cy="12" r="3"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4"/>')}<span class="pack-text"><strong>10 Live hours</strong><span class="muted small">For recording live streams this month.</span></span>
+          <a class="button primary" href="/pricing?pack=live" data-pack="live">Buy · €3</a></div>
       </div>` : `<div class="box plan-box">
         <div class="row between"><span><span class="muted small">Your plan</span><strong class="plan-name">${state.session ? 'Couldn\'t load your plan' : 'Sign in to see your plan'}</strong>
           ${state.session ? '<span class="muted small">Check your connection and open this page again.</span>' : ''}</span>

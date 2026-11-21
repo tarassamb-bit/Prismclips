@@ -669,3 +669,13 @@ details.insp-section:not([open]) { gap: 0; }
 .dash-empty { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .dash-empty p { margin: 0; }
 .dash-empty #stats-note:empty { display: none; }
+/* Plan page: blue plan card like Settings, usage cards with icons, pack rows with a price button. */
+.plan-hero .dash-big { font-size: 40px; }
+.plan-note { margin: 0; padding: 8px 12px; border-radius: 10px; background: #fff; color: #b9371f; }
+.meter-card { gap: 6px; }
+.meter-card .row-icon { margin-bottom: 4px; }
+.meter-card .big-number b { font-size: 36px; }
+.pack-card { display: flex !important; align-items: center; gap: 14px; }
+.pack-text { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.pack-card .button { flex: none; }
+.meter-card .row-icon, .pack-card .row-icon { width: 36px; height: 36px; border-radius: 10px; background: var(--sky); color: #0e0f14; }
