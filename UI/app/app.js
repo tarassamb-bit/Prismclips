@@ -971,8 +971,7 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
         <div class="row"><button class="button primary" disabled>Save</button><span id="profile-status" class="muted small" role="status"></span></div>
       </form>` : ''}
       ${email ? `<div class="box"><strong>Cloud sync</strong><p id="sync-text">${esc(syncText(syncStatus()))}</p>
-        <p class="muted small">Your projects, folders, Shorts and edits are saved to your account, so you can open them on any device you sign in on. Their videos are kept in the cloud too: see Usage.</p>
-        <button class="button ghost" data-action="sync-now">Sync now</button></div>` : ''}`;
+        <p class="muted small">Your projects, folders, Shorts and edits sync by themselves to every device you sign in on. Their videos are kept in the cloud too: see Usage.</p></div>` : ''}`;
   }
   $('#app').innerHTML = `<section class="settings-layout">
     <nav class="settings-nav" aria-label="Settings categories">${nav}</nav>
@@ -2305,7 +2304,6 @@ document.addEventListener('click', async (event) => {
   else if (action === 'theme') switchTheme(target.dataset.theme);
   else if (action === 'export-dialog') openExportDialog();
   else if (action === 'export-one') openExportDialog(state.selectedId);
-  else if (action === 'sync-now') sync();
   else if (action === 'retry-upload') { videoBlock = null; uploadPending(); showSettings('usage'); }
   else if (action === 'usage') { closeDialog(); showSettings('usage'); }
   else if (action === 'retrack') edit(async (s) => { s.cropKeyframes = null; await retrack(s, await sourceFor(state.project.media.find((m) => m.id === s.mediaId))); });

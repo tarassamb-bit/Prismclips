@@ -22,6 +22,11 @@ function set(state, message = '') {
 export function configureSync(options) {
   ctx = options;
   store.onSave(() => requestSync());
+  // Changes made on other devices arrive by themselves: when this tab comes back into view or online, and every minute while it's open.
+  if (typeof document === 'undefined') return;
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') requestSync(0); });
+  addEventListener('online', () => requestSync(0));
+  setInterval(() => { if (document.visibilityState === 'visible') requestSync(0); }, 60_000);
 }
 
 let timer = 0, running = false, again = false;
