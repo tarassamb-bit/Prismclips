@@ -22,7 +22,7 @@ and who found it. Tick them off (`- [x]`) when fixed.
 - [ ] **Safari can't export HEVC** fast (≈4 frames/s), so the option is hidden in Safari.
 - [ ] **Caption timing is approximate**, weaker with music under the voice. A speech-to-text service with word timestamps
   would fix it (costs a little per hour of audio).
-- [ ] **Prism AI can be slow at busy times.** Supabase's free plan stops a request after 150 s; Mimo 2.6 stays.
+- [x] **Prism AI can be slow at busy times.** The web app's AI runs on Vercel (300 s, `api/gemini.js`), not Supabase's 150 s; slowest real answer 95 s (checked 2026-11-21). Vercel Pro is needed once payments are live (Hobby is non-commercial).
 - [ ] **Sign-up emails** come from "Supabase Auth" with Supabase's plain text, and its built-in sender only sends a few per
   hour. Supabase only lets you edit the email text with your own sender (custom SMTP). Fix: a free sender such as Brevo
   (single verified sender, no domain needed) or an own domain + Resend, then paste the branded templates from
