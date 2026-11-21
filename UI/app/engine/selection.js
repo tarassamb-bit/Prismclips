@@ -443,6 +443,12 @@ async function transcribeChunk(source, offset, length, granularity, reference, c
       if (length - half <= 0.001) return first;
       return [...first, ...await transcribeChunk(source, offset + half, length - half, granularity, reference, configuration, signal)];
     }
+    // Down to the smallest piece and the AI still won't answer properly (often music or lyrics it refuses): leave these few
+    // seconds without a transcript rather than failing the whole video over them.
+    if (error instanceof GeminiError && (error.failure === 'invalidResponse' || error.failure === 'invalidTiming')) {
+      console.warn(`Transcription skipped ${length.toFixed(1)} s at ${offset.toFixed(1)} s: ${error.failure}`);
+      return [];
+    }
     if (error instanceof GeminiError) throw new StageFailure(`Audio transcription at ${Math.floor(offset / 60)}m ${Math.floor(offset % 60)}s`, error);
     throw error;
   }
