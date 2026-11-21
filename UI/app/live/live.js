@@ -1,13 +1,13 @@
 // The Live screen: the Relio server records Twitch channels (watcher/), and this screen shows one at a time like Twitch does:
 // chat on the left, the stream on the right, a graph of the last five minutes underneath (green voice, orange chat, red hype,
 // with a marker for every clip), and the finished Shorts the server made from each spike, which play in a window over the page.
-import { parseLogin } from './twitch.js';
+import { parseChannel, PLATFORMS } from './twitch.js';
 
 const COLORS = { loud: '#34c759', chat: '#ff9f0a', hype: '#ff453a' };
 const ACTIVE = ['starting', 'recording', 'offline'];
 const STATE_TEXT = { starting: 'Starting…', recording: 'Recording', offline: 'Offline · waiting for the stream', stopped: 'Stopped', ended: 'Ended', error: 'Stopped' };
 let host = null, db = null, polling = null;
-let rows = [], clips = [], channels = [], selected = null, shownChannel = null;
+let rows = [], clips = [], channels = [], selected = null, shownChannel = null, platform = 'twitch', typing = 0;
 // Where the pointer is over the graph (CSS pixels from its left), and what the last drawing mapped, for the hover readout.
 let hoverX = null, plotted = null;
 // The graph slides on smoothly between updates: it shows the time `lag` ms behind now, so new data arrives just as it's needed.
@@ -37,8 +37,8 @@ export function mountLive(element, dbGetter) {
         <h2 class="live-hero">Clip a live stream</h2>
         <p class="live-lede">Relio records a Twitch channel on its server, even with this tab closed, and turns each big moment into a Short with captions.</p>
         <form id="live-form" class="live-form">
-          <label class="live-field"><span class="live-prefix" aria-hidden="true">twitch.tv/</span>
-            <input id="live-url" type="text" inputmode="url" autocomplete="off" spellcheck="false" autocapitalize="none" placeholder="channel name or link" aria-label="Twitch channel name or link"></label>
+          <div class="live-field"><button type="button" class="live-prefix" id="live-prefix" title="Switch between Twitch and Kick">twitch.tv/</button>
+            <input id="live-url" type="text" inputmode="url" autocomplete="off" spellcheck="false" autocapitalize="none" placeholder="channel name or link" aria-label="Twitch or Kick channel name or link"></div>
           <button class="button primary" type="submit">Start recording</button></form>
         <p id="live-notice" class="error small" role="alert" hidden></p>
       </div>
@@ -47,11 +47,31 @@ export function mountLive(element, dbGetter) {
     <div id="live-tabs" class="live-tabs" role="tablist"></div>
     <div id="live-view"></div>
   </section>`;
-  // A pasted link becomes just the channel name, since the field already shows twitch.tv/.
-  host.querySelector('#live-url').addEventListener('input', (event) => {
-    const value = event.target.value;
-    const login = /[/.:]/.test(value) && parseLogin(value);
-    if (login) event.target.value = login;
+  // The site in front of the name types itself out and deletes, Twitch then Kick, while the field is empty. Typing keeps
+  // the one showing, a pasted link picks its own, and clicking it switches.
+  const input = host.querySelector('#live-url'), prefix = host.querySelector('#live-prefix');
+  platform = 'twitch';
+  const order = Object.keys(PLATFORMS);
+  const show = (name) => { platform = name; prefix.textContent = PLATFORMS[name].prefix; };
+  const still = () => input.value || document.activeElement === input || matchMedia('(prefers-reduced-motion: reduce)').matches;
+  clearTimeout(typing);
+  let shown = PLATFORMS.twitch.prefix.length, dir = -1, at = 0;
+  const step = () => {
+    if (!host?.isConnected) return;
+    if (still()) { show(platform); typing = setTimeout(step, 400); return; }
+    const text = PLATFORMS[order[at]].prefix;
+    shown += dir;
+    prefix.textContent = text.slice(0, shown) || '\u200b';
+    if (dir < 0 && shown === 0) { at = (at + 1) % order.length; platform = order[at]; dir = 1; typing = setTimeout(step, 250); }
+    else if (dir > 0 && shown === PLATFORMS[order[at]].prefix.length) { dir = -1; typing = setTimeout(step, 2200); }
+    else typing = setTimeout(step, dir > 0 ? 80 : 45);
+  };
+  typing = setTimeout(step, 2200);
+  prefix.addEventListener('click', () => { show(order[(order.indexOf(platform) + 1) % order.length]); at = order.indexOf(platform); shown = PLATFORMS[platform].prefix.length; dir = -1; input.focus(); });
+  // A pasted link becomes just the channel name, since the field already shows the site.
+  input.addEventListener('input', () => {
+    const channel = /[/.:]/.test(input.value) && parseChannel(input.value, platform);
+    if (channel) { input.value = channel.login; show(channel.platform); at = order.indexOf(platform); shown = PLATFORMS[platform].prefix.length; }
   });
   host.querySelector('#live-form').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -105,16 +125,17 @@ async function showHours() {
 }
 
 async function start(text) {
-  const login = parseLogin(text);
-  if (!login) return notice('Paste a Twitch channel link, like twitch.tv/name.');
+  const channel = parseChannel(text, platform);
+  if (!channel) return notice('Paste a Twitch or Kick channel, like twitch.tv/name or kick.com/name.');
+  const { login } = channel;
   notice('');
-  const { data, error } = await db().from('live_sessions').insert({ login }).select('id').single();
+  const { data, error } = await db().from('live_sessions').insert({ login, platform: channel.platform }).select('id').single();
   if (error) {
     hoursAt = 0;
     showHours();
     return notice(/channels? at once|already recording|Live hours/.test(error.message) ? error.message : 'The recording could not be started. Please try again.');
   }
-  selected = data.id;
+  selected = channel.platform === 'kick' ? `kick/${login}` : login;
   await refresh();
   return true;
 }
@@ -125,14 +146,16 @@ async function refresh() {
   if (!client) return;
   const since = new Date(Date.now() - 86400_000).toISOString();
   const [sessionRows, clipRows] = await Promise.all([
-    client.from('live_sessions').select('id,login,state,detail,buffered,chat,created').gte('created', since).order('created', { ascending: false }),
+    client.from('live_sessions').select('id,login,platform,state,detail,buffered,chat,created').gte('created', since).order('created', { ascending: false }),
     client.from('live_clips').select('id,session_id,at,why,duration,short,media_id').gte('created', since).order('at', { ascending: false }),
   ]);
   if (sessionRows.error || clipRows.error) return;
   // Everything new is gathered first and swapped in at once: the graph is never drawn from a list that has no graph yet.
   const nextRows = sessionRows.data;
   // One tab per channel: rows come newest first, so the first row of a channel is the one shown.
-  const nextChannels = [...new Set(nextRows.map((r) => r.login))].map((login) => ({ login, row: nextRows.find((r) => r.login === login), ids: new Set(nextRows.filter((r) => r.login === login).map((r) => r.id)) }));
+  // A channel is its site and name ("kick/name"; Twitch ones keep just the name): the same name on both is two channels.
+  const key = (r) => (r.platform === 'kick' ? `kick/${r.login}` : r.login);
+  const nextChannels = [...new Set(nextRows.map(key))].map((login) => ({ login, row: nextRows.find((r) => key(r) === login), ids: new Set(nextRows.filter((r) => key(r) === login).map((r) => r.id)) }));
   let nextSelected = selected;
   if (!nextChannels.some((c) => c.login === nextSelected)) nextSelected = (nextChannels.find((c) => ACTIVE.includes(c.row.state)) ?? nextChannels[0])?.login ?? null;
   const current = nextChannels.find((c) => c.login === nextSelected)?.row;
@@ -190,7 +213,7 @@ function render() {
   host.querySelector('.live-screen')?.classList.toggle('is-empty', channels.length === 0);
   const tabs = host.querySelector('#live-tabs');
   if (setHtml(tabs, channels.map((c) => `<button role="tab" aria-selected="${c.login === selected}" class="live-tab ${c.login === selected ? 'on' : ''}" data-live-tab="${esc(c.login)}" title="${esc(STATE_TEXT[c.row.state])} · right-click to delete">
-    <span class="dot ${c.row.state === 'recording' ? 'on-air' : ACTIVE.includes(c.row.state) ? 'waiting' : ''}" aria-hidden="true"></span>${esc(c.login)}</button>`).join(''))) for (const tab of tabs.querySelectorAll('[data-live-tab]')) {
+    <span class="dot ${c.row.state === 'recording' ? 'on-air' : ACTIVE.includes(c.row.state) ? 'waiting' : ''}" aria-hidden="true"></span>${esc(c.row.login)}${c.row.platform === 'kick' ? '<span class="live-site">Kick</span>' : ''}</button>`).join(''))) for (const tab of tabs.querySelectorAll('[data-live-tab]')) {
     tab.addEventListener('click', () => { selected = tab.dataset.liveTab; render(); refresh(); });
     tab.addEventListener('contextmenu', (event) => { event.preventDefault(); remove(tab.dataset.liveTab); });
     tab.addEventListener('keydown', (event) => { if (event.key === 'Delete' || event.key === 'Backspace') remove(tab.dataset.liveTab); });
@@ -219,8 +242,11 @@ function render() {
         <span id="live-meta" class="muted small"></span>
         <button class="button ghost" id="live-stop">Stop recording</button></div>
       ${active ? `<div class="live-stage">
-        <iframe class="live-chat" title="Twitch chat" src="https://www.twitch.tv/embed/${encodeURIComponent(current.login)}/chat?parent=${parent}${dark ? '&darkpopout' : ''}"></iframe>
-        <iframe class="live-player" title="Twitch stream" allowfullscreen src="https://player.twitch.tv/?channel=${encodeURIComponent(current.login)}&parent=${parent}&muted=true"></iframe>
+        ${current.platform === 'kick'
+          ? `<iframe class="live-chat" title="Kick chat" src="https://kick.com/popout/${encodeURIComponent(current.login)}/chat"></iframe>
+        <iframe class="live-player" title="Kick stream" allowfullscreen src="https://player.kick.com/${encodeURIComponent(current.login)}?muted=true&autoplay=true"></iframe>`
+          : `<iframe class="live-chat" title="Twitch chat" src="https://www.twitch.tv/embed/${encodeURIComponent(current.login)}/chat?parent=${parent}${dark ? '&darkpopout' : ''}"></iframe>
+        <iframe class="live-player" title="Twitch stream" allowfullscreen src="https://player.twitch.tv/?channel=${encodeURIComponent(current.login)}&parent=${parent}&muted=true"></iframe>`}
       </div>` : ''}
       <div class="panel live-graph-panel">
         <div class="live-legend small"><span><i style="background:${COLORS.loud}"></i>Voice</span><span><i style="background:${COLORS.chat}"></i>Chat messages / s</span><span><i style="background:${COLORS.hype}"></i>Hype</span><span><b class="clip-dot"></b>Clip</span>

@@ -1,17 +1,30 @@
-// Twitch links and HLS playlists: shared by the Live screen (channel links) and the watcher server (recording).
+// Twitch and Kick links, and HLS playlists: shared by the Live screen (channel links) and the watcher server (recording).
 // shortcut: uses Twitch's own web client id and unofficial playback API; Twitch can change or block it at any time.
 const CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
 const LOGIN = /^[a-z0-9_]{3,25}$/;
 
 /** The channel name from "twitch.tv/name", "https://www.twitch.tv/name/..." or just "name"; null when it isn't one. */
 export function parseLogin(text) {
+  const channel = parseChannel(text);
+  return channel?.platform === 'twitch' ? channel.login : null;
+}
+
+// Channel names each site allows; Kick's may have hyphens.
+export const PLATFORMS = {
+  twitch: { host: /^(www\.|m\.)?twitch\.tv$/i, name: /^[a-z0-9_]{3,25}$/, prefix: 'twitch.tv/', skip: ['videos', 'directory', 'settings', 'p', 'search'] },
+  kick: { host: /^(www\.)?kick\.com$/i, name: /^[a-z0-9_-]{2,25}$/, prefix: 'kick.com/', skip: ['browse', 'categories', 'search', 'following', 'video', 'popout'] },
+};
+
+/** { platform, login } from a Twitch or Kick link, or a bare name on the given platform (Twitch by default); null otherwise. */
+export function parseChannel(text, platform = 'twitch') {
   const value = String(text || '').trim();
-  if (LOGIN.test(value.toLowerCase())) return value.toLowerCase();
+  if (PLATFORMS[platform]?.name.test(value.toLowerCase())) return { platform, login: value.toLowerCase() };
   let url;
   try { url = new URL(/^[a-z]+:\/\//i.test(value) ? value : `https://${value}`); } catch { return null; }
-  if (!/^(www\.|m\.)?twitch\.tv$/i.test(url.hostname)) return null;
+  const [found, rules] = Object.entries(PLATFORMS).find(([, r]) => r.host.test(url.hostname)) ?? [];
+  if (!found) return null;
   const name = url.pathname.split('/').filter(Boolean)[0]?.toLowerCase() ?? '';
-  return LOGIN.test(name) && !['videos', 'directory', 'settings', 'p', 'search'].includes(name) ? name : null;
+  return rules.name.test(name) && !rules.skip.includes(name) ? { platform: found, login: name } : null;
 }
 
 /** The variants of a master playlist as { url, height, fps, bandwidth }, best first. */

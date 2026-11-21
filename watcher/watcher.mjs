@@ -1,4 +1,4 @@
-// Relio's live watcher: records the Twitch channels people asked for (live_sessions), keeps the last 15 minutes of each,
+// Relio's live watcher: records the Twitch and Kick channels people asked for (live_sessions), keeps the last 15 minutes of each,
 // spots likely moments by loudness and chat (no AI), and turns each one into a finished Short (shorts.mjs) kept on this
 // machine's disk, with a live_clips row the Live screen shows. Runs on one always-on machine; needs ffmpeg, Node 22+, and
 //   SUPABASE_SECRET_KEY, OPENROUTER_API_KEY, PUBLIC_URL (this machine's public address for port 8080), and the R2_* keys
@@ -54,9 +54,27 @@ async function playlistUrl(login) {
   return pickVariant(parseMaster(await master.text()))?.url ?? null;
 }
 
+// shortcut: Kick's unofficial web API (channel info, guest chat pass); Kick can change or block it at any time.
+const KICK_HEADERS = { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36', accept: 'application/json' };
+async function kickChannel(login) {
+  const response = await fetch(`https://kick.com/api/v2/channels/${login}`, { headers: KICK_HEADERS, signal: AbortSignal.timeout(15000) });
+  if (response.status === 404) throw Object.assign(new Error(`There is no Kick channel called “${login}”.`), { permanent: true });
+  if (!response.ok) throw new Error(`Kick answered ${response.status}.`);
+  return response.json();
+}
+
+/** The stream's media playlist on Kick, null while the channel is offline. */
+async function kickPlaylistUrl(login) {
+  const channel = await kickChannel(login);
+  if (!channel.livestream || !channel.playback_url) return null;
+  const master = await fetch(channel.playback_url, { signal: AbortSignal.timeout(15000) });
+  if (!master.ok) return null;
+  return pickVariant(parseMaster(await master.text()))?.url ?? null;
+}
+
 class Recorder {
   constructor(row) {
-    Object.assign(this, { id: row.id, user: row.user_id, login: row.login, stopped: false, socket: null, chatOn: false });
+    Object.assign(this, { id: row.id, user: row.user_id, login: row.login, platform: row.platform ?? 'twitch', stopped: false, socket: null, chatOn: false });
     this.dir = path.join(DATA, row.id);
     this.pieces = new Map();    // sequence -> { file, at, duration }
     this.inits = new Map();     // init url -> file
@@ -82,7 +100,7 @@ class Recorder {
     while (!this.stopped) {
       if (await this.overLimit()) return;
       let url;
-      try { url = await playlistUrl(this.login); }
+      try { url = await (this.platform === 'kick' ? kickPlaylistUrl : playlistUrl)(this.login); }
       catch (error) {
         if (error.permanent) return this.finish('error', error.message);
         log(this.login, 'lookup failed', error.message);
@@ -211,9 +229,10 @@ class Recorder {
     }
   }
 
-  /** Anonymous read-only Twitch chat: only the number of messages per second is used. */
+  /** Anonymous read-only chat (Twitch or Kick): only the number of messages per second is used. */
   listenToChat() {
     if (this.stopped) return;
+    if (this.platform === 'kick') return this.listenToKickChat().catch((error) => { log(this.login, 'chat failed', error.message); this.chatAgain(); });
     const socket = this.socket = new WebSocket('wss://irc-ws.chat.twitch.tv:443');
     socket.onopen = () => { socket.send(`NICK justinfan${Math.floor(10000 + Math.random() * 89999)}`); socket.send(`JOIN #${this.login}`); this.chatOn = true; };
     socket.onmessage = ({ data }) => {
@@ -223,6 +242,35 @@ class Recorder {
       }
     };
     socket.onclose = () => { this.chatOn = false; if (!this.stopped) setTimeout(() => this.listenToChat(), 10_000); };
+    socket.onerror = () => {};
+  }
+
+  chatAgain() { this.chatOn = false; if (!this.stopped) setTimeout(() => this.listenToChat(), 10_000); }
+
+  /** Kick chat: a guest pass for Kick's realtime server, then the channel's chatroom. The pass lasts 45 minutes; the
+   * server then closes the connection and a new pass is fetched. */
+  async listenToKickChat() {
+    const room = (await kickChannel(this.login)).chatroom?.id;
+    const auth = await fetch('https://web.kick.com/api/v1/realtime/auth/connection', {
+      method: 'POST', headers: { ...KICK_HEADERS, 'content-type': 'application/json', 'x-app-platform': 'web', referer: 'https://kick.com/' },
+      body: JSON.stringify({ client_id: crypto.randomUUID() }), signal: AbortSignal.timeout(15000),
+    });
+    const token = (await auth.json().catch(() => null))?.data?.token;
+    if (!room || !token) throw new Error(`Kick chat pass refused (${auth.status}).`);
+    if (this.stopped) return;
+    const socket = this.socket = new WebSocket('wss://realtime.us-east-1.platform.kick.com/connection/websocket');
+    socket.onopen = () => {
+      socket.send(JSON.stringify({ connect: { token, name: 'js' }, id: 1 }));
+      socket.send(JSON.stringify({ subscribe: { channel: `chatrooms.${room}.v2` }, id: 2 }));
+      this.chatOn = true;
+    };
+    socket.onmessage = ({ data }) => {
+      for (const line of String(data).split('\n')) {
+        if (line === '{}') socket.send('{}'); // the server's ping
+        else if (line.includes('ChatMessageEvent') && this.startedAt !== null) this.detector.message(this.second(Date.now()));
+      }
+    };
+    socket.onclose = () => this.chatAgain();
     socket.onerror = () => {};
   }
 
@@ -285,7 +333,7 @@ export function withSaved(current, saved) {
 const running = new Map();
 
 async function tick() {
-  const rows = await db('live_sessions?state=in.(starting,recording,offline)&select=id,user_id,login&order=created.asc', { headers: { Prefer: '' } });
+  const rows = await db('live_sessions?state=in.(starting,recording,offline)&select=id,user_id,login,platform&order=created.asc', { headers: { Prefer: '' } });
   const wanted = new Set(rows.map((r) => r.id));
   for (const [id, recorder] of running) if (!wanted.has(id) || recorder.stopped) { recorder.stop(); running.delete(id); log(recorder.login, 'stopped'); }
   for (const row of rows) {

@@ -1,10 +1,16 @@
 // Offline check of the Twitch link and playlist parsing: node UI/app/live/twitch.test.mjs
 import assert from 'node:assert/strict';
-import { parseLogin, parseMaster, pickVariant, parseMedia } from './twitch.js';
+import { parseLogin, parseChannel, parseMaster, pickVariant, parseMedia } from './twitch.js';
 
 for (const [input, login] of [['https://www.twitch.tv/Some_Streamer', 'some_streamer'], ['twitch.tv/abc123', 'abc123'], ['m.twitch.tv/xqc/clips', 'xqc'],
   ['  ninja  ', 'ninja'], ['https://evil.com/xqc', null], ['https://twitch.tv.evil.com/xqc', null], ['https://www.twitch.tv/directory', null], ['', null], ['a b', null]]) {
   assert.equal(parseLogin(input), login, input);
+}
+
+for (const [input, platform, expected] of [['https://kick.com/west-col', undefined, { platform: 'kick', login: 'west-col' }], ['kick.com/xqc/videos', undefined, { platform: 'kick', login: 'xqc' }],
+  ['xqc', 'kick', { platform: 'kick', login: 'xqc' }], ['xqc', undefined, { platform: 'twitch', login: 'xqc' }], ['https://kick.com/browse', undefined, null],
+  ['https://kick.com.evil.com/x', undefined, null], ['twitch.tv/abc', 'kick', { platform: 'twitch', login: 'abc' }], ['a-b', 'twitch', null]]) {
+  assert.deepEqual(parseChannel(input, platform), expected, input);
 }
 
 const master = `#EXTM3U

@@ -479,7 +479,10 @@ details.insp-section:not([open]) { gap: 0; }
 .live-form { display: flex; gap: 8px; }
 .live-field { flex: 1; display: flex; align-items: center; min-width: 0; background: var(--surface1); border: 1px solid var(--border); border-radius: 12px; transition: border-color .15s, box-shadow .15s; }
 .live-field:focus-within { border-color: var(--sky); box-shadow: 0 0 0 3px color-mix(in srgb, var(--sky) 22%, transparent); }
-.live-prefix { padding-left: 14px; color: var(--text2); font-family: var(--mono); font-size: 14px; user-select: none; }
+.live-prefix { align-self: stretch; padding: 0 2px 0 14px; border: 0; background: none; color: var(--text2); font-family: var(--mono); font-size: 14px; cursor: pointer; white-space: pre; border-radius: 12px 0 0 12px; }
+.live-prefix:hover { color: var(--text); }
+.live-prefix:focus-visible { outline: 2px solid var(--sky); outline-offset: -2px; }
+.live-site { margin-left: 6px; padding: 1px 6px; border-radius: 5px; font-size: 11px; font-weight: 600; background: #53fc18; color: #0b0f0a; }
 .live-field input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 12px 14px 12px 2px; font-family: var(--mono); font-size: 14px; color: var(--text); outline: none; box-shadow: none; }
 .live-hours { display: grid; gap: 8px; padding: 16px 18px; border-radius: 16px; background: var(--surface1); border: 1px solid var(--border); }
 .live-hours-label { font-size: 13px; color: var(--text2); }
