@@ -656,3 +656,6 @@ details.insp-section:not([open]) { gap: 0; }
 .set-group.danger-zone .set-row + .set-row { border-top: 1px solid color-mix(in srgb, #d64532 25%, transparent); }
 .set-group.danger-zone .danger-outline { border-color: #d64532; color: #d64532; background: transparent; font-weight: 600; }
 .set-group.danger-zone .danger-outline:hover { background: color-mix(in srgb, #d64532 10%, transparent); }
+/* Plan card checklist: solid white box so it reads clearly on the blue. */
+.dash-includes { background: #fff; color: #12141a; box-shadow: 0 6px 18px rgb(14 15 20 / .12); }
+.dash-includes li::before { background: #3fa9f5 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 12 4 4 8-8'/%3E%3C/svg%3E") center / 12px no-repeat; }
