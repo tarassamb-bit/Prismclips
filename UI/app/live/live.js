@@ -47,6 +47,12 @@ export function mountLive(element, dbGetter) {
     <div id="live-tabs" class="live-tabs" role="tablist"></div>
     <div id="live-view"></div>
   </section>`;
+  // A pasted link becomes just the channel name, since the field already shows twitch.tv/.
+  host.querySelector('#live-url').addEventListener('input', (event) => {
+    const value = event.target.value;
+    const login = /[/.:]/.test(value) && parseLogin(value);
+    if (login) event.target.value = login;
+  });
   host.querySelector('#live-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const input = host.querySelector('#live-url');
