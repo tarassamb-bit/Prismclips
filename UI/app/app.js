@@ -943,7 +943,7 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
   const used = u ? `${Math.ceil(u.used)} of ${Math.floor(u.allowance)} min used` : 'Minutes used';
   const NAV = [
     ['account', 'Account', email ?? 'Sign in to track your stats', '<path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0"/>', 'Your profile, sign-in and sync.'],
-    ['overview', 'Export history', 'Stats and exports', '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>', 'What you have made with Relio, and your exports.'],
+    ['overview', 'Export history', 'Stats and exports', '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>', 'Every Short you have exported.'],
     ['usage', 'Usage', used, '<path d="M5 18a8 8 0 1 1 14 0M12 18l4-6"/>', 'Minutes of video you can make Shorts from, and your space for videos in the cloud.'],
     ...(PLANS_ON ? [['plan', 'Plan', state.plan?.name ?? 'Plans and extra packs', '<path d="M3 7h18v12H3zM3 11h18M7 15h4"/>', 'Your plan, what it includes, and extra minutes or Live hours.']] : []),
   ];
@@ -1004,9 +1004,15 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
           <a class="button primary" href="/pricing">See plans</a></div>
       </div>`;
   } else if (tab === 'overview') {
-    body = `<div class="stat-row"><div class="stat"><b id="stat-exports">—</b><span>Exports</span></div><div class="stat"><b id="stat-shorts">—</b><span>Shorts made</span></div><div class="stat"><b id="stat-minutes">—</b><span>Minutes of Shorts</span></div></div>
-      <h3 class="section-title">Export history</h3>
-      <div class="box flush"><div class="table-wrap"><table><thead><tr><th scope="col">Date</th><th scope="col">Shorts</th><th scope="col">Length</th><th scope="col">Quality</th></tr></thead><tbody id="export-rows"></tbody></table></div></div>
+    body = `<div class="dash-stat-row history-stats">
+        <div><span class="row-icon sky" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></span><b id="stat-exports">—</b><span>Exports</span></div>
+        <div><span class="row-icon sky" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 9l3 2-3 2Z"/></svg></span><b id="stat-shorts">—</b><span>Shorts made</span></div>
+        <div><span class="row-icon sky" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span><b id="stat-minutes">—</b><span>Minutes of Shorts</span></div>
+      </div>
+      <div class="box flush history-table"><div class="table-wrap"><table><thead><tr><th scope="col">Date</th><th scope="col">Shorts</th><th scope="col">Length</th><th scope="col">Quality</th></tr></thead><tbody id="export-rows"></tbody></table></div></div>
+      <div class="box history-empty" hidden><span class="row-icon sky" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></span>
+        <strong>No exports yet</strong><span class="muted small">Every Short you export shows up here with its date, length and quality.</span>
+        <button class="button primary" data-action="create">Make Shorts</button></div>
       <p id="stats-note" class="muted small" role="status">Loading your export history…</p>`;
   } else {
     const initial = esc((email ?? '?')[0].toUpperCase());
@@ -1034,7 +1040,6 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
             <div><span class="row-icon sky" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 9l3 2-3 2Z"/></svg></span><b id="stat-shorts">—</b><span>Shorts made</span></div>
             <div><span class="row-icon sky" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span><b id="stat-minutes">—</b><span>Minutes of Shorts</span></div>
           </div>
-          <div class="dash-empty"><p id="stats-note" class="muted small"></p><button class="button primary dash-first" data-action="create" hidden>Make your first Shorts</button></div>
         </div>
       </div>
       <h3 class="group-label">Account</h3>`;
@@ -1119,8 +1124,8 @@ async function fillAccountData(tab) {
     text('#stat-exports', count.format(totals.exports));
     text('#stat-shorts', count.format(totals.shorts));
     text('#stat-minutes', (totals.seconds / 60).toLocaleString(undefined, { maximumFractionDigits: 1 }));
-    if (tab === 'account' && totals.exports === 0 && $('.dash-first')) $('.dash-first').hidden = false;
-    text('#stats-note', totals.exports === 0 ? (tab === 'account' ? 'No exports yet. Your numbers show up after your first export.' : 'Your exported Shorts will appear here.')
+    if (totals.exports === 0 && $('.history-empty')) { $('.history-empty').hidden = false; $('.history-table').hidden = true; }
+    text('#stats-note', totals.exports === 0 ? ''
       : tab !== 'account' && totals.exports > 50 ? 'Showing your latest 50 exports. The numbers above include your full history.' : '');
     const rows = $('#export-rows');
     if (rows) {

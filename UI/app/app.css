@@ -27,7 +27,7 @@
   color-scheme: light;
 }
 * { box-sizing: border-box; }
-[hidden] { display: none !important; }
+.history-empty[hidden], .history-table[hidden] { display: none; }
 body { margin: 0; overflow: hidden; background: var(--surface0); color: var(--text); font: 400 14px/1.5 Sora, system-ui, sans-serif; min-height: 100vh; }
 h1, h2, h3 { font-family: var(--display); font-weight: 500; letter-spacing: -.02em; margin: 0; }
 h1 { font-size: 28px; } h2 { font-size: 22px; } h3 { font-size: 15px; margin: 12px 0 6px; }
@@ -679,3 +679,12 @@ details.insp-section:not([open]) { gap: 0; }
 .pack-text { display: grid; gap: 2px; flex: 1; min-width: 0; }
 .pack-card .button { flex: none; }
 .meter-card .row-icon, .pack-card .row-icon { width: 36px; height: 36px; border-radius: 10px; background: var(--sky); color: #0e0f14; }
+/* Export history: same stat tiles as Settings, a friendly empty card instead of an empty table. */
+.history-stats > div { background: var(--surface1); border: 1px solid var(--border); padding: 18px; gap: 4px; border-radius: 14px; display: grid; }
+.history-stats .row-icon { width: 36px; height: 36px; border-radius: 10px; background: var(--sky); color: #0e0f14; margin-bottom: 8px; }
+.history-stats b { font: 500 34px/1.1 var(--display); }
+.history-empty { justify-items: center; text-align: center; padding: 40px 20px; gap: 8px; }
+.history-empty .row-icon { width: 44px; height: 44px; border-radius: 12px; background: var(--sky); color: #0e0f14; }
+.history-empty .button { margin-top: 8px; justify-self: center; }
+#stats-note:empty { display: none; }
+.history-empty[hidden], .history-table[hidden] { display: none; }
