@@ -124,7 +124,6 @@ details.insp-section:not([open]) { gap: 0; }
 .side-button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border-radius: 10px; border: 0; background: transparent; cursor: pointer; font-size: 14px; font-weight: 500; text-align: left; color: var(--text); }
 .side-button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .side-button.selected { background: var(--surface2); }
-.side-button.prominent { background: var(--sky); color: #0e0f14; }
 .side-button:disabled { opacity: .45; cursor: default; }
 .side-bottom { margin-top: auto; display: grid; gap: 14px; }
 .meter { height: 8px; background: var(--surface2); border-radius: 99px; overflow: hidden; }
