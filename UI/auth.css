@@ -98,3 +98,10 @@
   .auth-main { padding: 28px 16px 40px; place-items: start center; }
 }
 @media (max-width: 420px) { .auth-row { grid-template-columns: 1fr; } }
+
+/* Sign-up while already signed in (auth-page.js): say who, offer to open the app or sign out first. */
+.auth-signed-in { position: fixed; z-index: 10; top: 16px; left: 50%; transform: translateX(-50%); width: min(420px, calc(100% - 32px));
+  display: grid; gap: 10px; justify-items: center; padding: 18px; border: 1px solid var(--a-border); border-radius: 16px;
+  background: var(--a-panel); color: var(--a-text); box-shadow: 0 12px 32px rgb(0 0 0 / 0.12); text-align: center; }
+.auth-signed-in p { margin: 0; }
+.auth-signed-in .auth-submit { display: block; text-align: center; text-decoration: none; }
