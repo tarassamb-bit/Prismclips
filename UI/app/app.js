@@ -12,7 +12,7 @@ import * as store from './store.js';
 import { hintFor, TOUR_STEPS } from './tour.js';
 import { configureSync, requestSync, sync, syncStatus, onSyncStatus } from './sync.js';
 import { uploadVideo, downloadVideo, removeVideos, removeAllVideos, cloudUsage, CloudVideoError } from './cloudvideo.js';
-import { mountLive } from './live/live.js';
+import { mountLive, mountLiveHome } from './live/live.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -117,7 +117,7 @@ async function route() {
       if (state.create?.project) { state.create.step = step; setScreen('create'); renderCreate(); }
       else startCreate();
     } else if (first === 'settings') await showSettings(second);
-    else if (first === 'live') showLive();
+    else if (first === 'live') showLive(second === 'new' ? null : second === 'kick' && third ? `kick/${third}` : second);
     else if (first === 'games') { if (state.task?.project) await showGames(); else await showHome(); }
     else if (first === 'folder' && second) {
       const folder = (await store.listFolders()).filter(isMine).find((f) => f.id.startsWith(idOf(second)));
@@ -134,7 +134,7 @@ async function route() {
 window.addEventListener('prism:purchased', async () => {
   await refreshUsage();
   if (state.screen === 'settings') showSettings(state.settingsTab);
-  else if (state.screen === 'live') showLive();
+  else if (state.screen === 'live') showLive(state.liveView);
 });
 
 window.addEventListener('popstate', async () => {
@@ -857,11 +857,18 @@ const syncText = (s) => ({
 onSyncStatus((s) => { const el = $('#sync-text'); if (el) el.textContent = syncText(s); });
 
 /** Live clipping: recordings keep running in the background; a moment opens in Create Shorts like a chosen file. */
-function showLive() {
+// Live's home lists the recordings (/app/live); opening one, or starting a new one, shows the recording screen
+// (/app/live/<channel>, /app/live/kick/<channel>, /app/live/new).
+function showLive(channel) {
   if (!state.session) return renderGate();
   setScreen('live');
-  setUrl('/app/live');
-  mountLive($('#app'), db);
+  state.liveView = channel;
+  if (channel === undefined) {
+    setUrl('/app/live');
+    return mountLiveHome($('#app'), db, (key) => showLive(key));
+  }
+  setUrl(`/app/live/${channel ?? 'new'}`);
+  mountLive($('#app'), db, channel, () => showLive());
 }
 
 async function showSettings(tab = state.settingsTab ?? 'account') {

@@ -569,3 +569,9 @@ details.insp-section:not([open]) { gap: 0; }
 .plan-meters .big-number { margin: 6px 0 10px; }
 .plan-packs .box { display: grid; gap: 8px; align-content: start; }
 .plan-packs .button { justify-self: start; }
+.live-card .poster { display: grid; place-items: center; }
+.live-card-empty { color: var(--text2); font-size: 13px; }
+.live-badge { position: absolute; left: 8px; top: 8px; padding: 2px 8px; border-radius: 6px; font: 600 11px var(--mono); background: #000b; color: #fff; }
+.live-badge.on { background: #e91916; }
+.live-home-hours { text-decoration: none; } .live-home-hours:hover { text-decoration: underline; }
+.live-screen > .back-home { justify-self: start; }

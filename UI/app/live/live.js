@@ -26,12 +26,62 @@ function setHtml(element, html) {
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-/** Shows the Live screen in `element`; `dbGetter()` gives the Supabase client. */
-export function mountLive(element, dbGetter) {
+/** Stops what the recording screen runs in the background (updates, the graph, the typing prefix). */
+function unmount() { clearInterval(polling); cancelAnimationFrame(frame); clearTimeout(typing); host = null; }
+
+/** Live's home, like Home for projects: a card to start a recording and the recordings of the last two days, each opening
+ * the recording screen through `open(key)` (null for a new one; "name" for Twitch, "kick/name" for Kick). */
+export async function mountLiveHome(element, dbGetter, open) {
+  unmount();
+  const since = new Date(Date.now() - 2 * 86400_000).toISOString();
+  const [sessionRows, clipRows, limits] = await Promise.all([
+    dbGetter().from('live_sessions').select('id,login,platform,state,created').gte('created', since).order('created', { ascending: false }),
+    dbGetter().from('live_clips').select('session_id,at,short').gte('created', since).order('at', { ascending: false }),
+    PLANS_ON ? dbGetter().rpc('my_live_limits') : { error: true },
+  ]);
+  if (!element.isConnected) return;
+  const all = sessionRows.data ?? [], ready = (clipRows.data ?? []).filter((c) => c.short?.state === 'ready');
+  const key = (r) => (r.platform === 'kick' ? `kick/${r.login}` : r.login);
+  // One card per channel: the newest recording's state, and every Short of its recordings.
+  const cards = [...new Set(all.map(key))].map((k) => {
+    const sessions = all.filter((r) => key(r) === k), ids = new Set(sessions.map((r) => r.id));
+    return { key: k, row: sessions[0], shorts: ready.filter((c) => ids.has(c.session_id)) };
+  });
+  const when = (iso) => {
+    const d = new Date(iso), today = new Date().toDateString() === d.toDateString();
+    return `${today ? 'today' : 'yesterday'} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  };
+  const card = ({ key: k, row, shorts }) => {
+    const on = ACTIVE.includes(row.state), poster = shorts[0]?.short.poster;
+    const badge = row.state === 'recording' ? '<span class="live-badge on">LIVE</span>' : on ? '<span class="live-badge">Waiting</span>' : '';
+    return `<div class="project-card live-card"><button class="open" data-live-open="${esc(k)}">
+        <div class="poster">${poster ? `<img alt="" src="${esc(poster)}">` : `<span class="live-card-empty">${on ? 'Shorts appear here' : 'No Shorts'}</span>`}${badge}</div>
+        <strong class="p-title">${esc(row.login)}${row.platform === 'kick' ? '<span class="live-site">Kick</span>' : ''}</strong>
+        <span class="muted small">${shorts.length} ${shorts.length === 1 ? 'Short' : 'Shorts'} · ${on ? 'recording since' : 'started'} ${when(row.created)}</span></button></div>`;
+  };
+  const hours = !limits.error && limits.data?.[0];
+  element.innerHTML = `<section class="dashboard">
+    <button class="start-card" data-live-open="">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="2.5"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 16.2a6 6 0 0 0 0-8.4M4.9 4.9a10 10 0 0 0 0 14.2M19.1 19.1a10 10 0 0 0 0-14.2"/></svg>
+      <span class="start-text"><strong>Start a live recording</strong><span>Paste a Twitch or Kick channel. Relio records it and turns each big moment into a Short.</span></span>
+      <span class="start-arrow" aria-hidden="true">→</span></button>
+    <div class="row between"><h2>Recordings</h2>${hours ? `<a class="muted small live-home-hours" href="/app/settings/plan">${hours.hours_used.toFixed(1)} of ${Math.round(hours.hours_allowed)} Live hours used this month</a>` : ''}</div>
+    ${cards.length ? `<div class="grid">${cards.map(card).join('')}</div>`
+      : '<div class="empty"><strong>Your recordings will appear here</strong><span class="muted">Start a live recording, and its Shorts show up here for two days.</span></div>'}
+  </section>`;
+  for (const button of element.querySelectorAll('[data-live-open]')) button.addEventListener('click', () => open(button.dataset.liveOpen || null));
+}
+
+/** Shows the recording screen in `element`; `dbGetter()` gives the Supabase client. `channel` picks the tab to show
+ * ("name" or "kick/name"; null for a new recording), and `home()` goes back to Live's home. */
+export function mountLive(element, dbGetter, channel = null, home = null) {
+  unmount();
   host = element;
   db = dbGetter;
   shownChannel = null;
+  selected = channel;
   host.innerHTML = `<section class="live-screen">
+    ${home ? '<button class="link back-home" id="live-home">← Live</button>' : ''}
     <div class="live-top">
       <div class="live-start">
         <h2 class="live-hero">Clip a live stream</h2>
@@ -47,6 +97,8 @@ export function mountLive(element, dbGetter) {
     <div id="live-tabs" class="live-tabs" role="tablist"></div>
     <div id="live-view"></div>
   </section>`;
+  host.querySelector('#live-home')?.addEventListener('click', () => home());
+  if (!channel) host.querySelector('#live-url').focus();
   // The site in front of the name types itself out and deletes, Twitch then Kick, while the field is empty. Typing keeps
   // the one showing, a pasted link picks its own, and clicking it switches.
   const input = host.querySelector('#live-url'), prefix = host.querySelector('#live-prefix');
@@ -157,7 +209,8 @@ async function refresh() {
   const key = (r) => (r.platform === 'kick' ? `kick/${r.login}` : r.login);
   const nextChannels = [...new Set(nextRows.map(key))].map((login) => ({ login, row: nextRows.find((r) => key(r) === login), ids: new Set(nextRows.filter((r) => key(r) === login).map((r) => r.id)) }));
   let nextSelected = selected;
-  if (!nextChannels.some((c) => c.login === nextSelected)) nextSelected = (nextChannels.find((c) => ACTIVE.includes(c.row.state)) ?? nextChannels[0])?.login ?? null;
+  // Nothing chosen is a new recording; a chosen channel that disappeared (deleted elsewhere) gives way to another.
+  if (nextSelected && !nextChannels.some((c) => c.login === nextSelected)) nextSelected = (nextChannels.find((c) => ACTIVE.includes(c.row.state)) ?? nextChannels[0])?.login ?? null;
   const current = nextChannels.find((c) => c.login === nextSelected)?.row;
   if (current) {
     const graph = await client.from('live_sessions').select('graph').eq('id', current.id).single();
@@ -210,7 +263,7 @@ function demoGraph() {
 
 function render() {
   if (!host?.isConnected) return;
-  host.querySelector('.live-screen')?.classList.toggle('is-empty', channels.length === 0);
+  host.querySelector('.live-screen')?.classList.toggle('is-empty', !channels.some((c) => c.login === selected));
   const tabs = host.querySelector('#live-tabs');
   if (setHtml(tabs, channels.map((c) => `<button role="tab" aria-selected="${c.login === selected}" class="live-tab ${c.login === selected ? 'on' : ''}" data-live-tab="${esc(c.login)}" title="${esc(STATE_TEXT[c.row.state])} · right-click to delete">
     <span class="dot ${c.row.state === 'recording' ? 'on-air' : ACTIVE.includes(c.row.state) ? 'waiting' : ''}" aria-hidden="true"></span>${esc(c.row.login)}${c.row.platform === 'kick' ? '<span class="live-site">Kick</span>' : ''}</button>`).join(''))) for (const tab of tabs.querySelectorAll('[data-live-tab]')) {
