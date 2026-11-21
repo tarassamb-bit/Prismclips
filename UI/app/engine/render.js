@@ -217,7 +217,7 @@ export function drawFrame(ctx, sample, segment, sourceWidth, sourceHeight, time,
  * The video's audio is kept unless the Short is muted.
  */
 export async function render(source, segment, options) {
-  const { width = 1080, height = 1920, codec = 'avc', bitrate = 12e6, metadata = {}, progress = () => {}, step = () => {}, signal } = options;
+  const { width = 1080, height = 1920, codec = 'avc', bitrate = 12e6, metadata = {}, progress = () => {}, step = () => {}, signal, watermark = true } = options;
   signal?.throwIfAborted();
   if (![segment.start, segment.duration].every(Number.isFinite) || segment.start < 0 || segment.duration <= 0 || segment.start + segment.duration > source.duration + 0.05) {
     throw new ShortMakerError('invalidRange');
@@ -255,7 +255,7 @@ export async function render(source, segment, options) {
     ctx.setTransform(width / 1080, 0, 0, height / 1920, 0, 0);
     drawFrame(ctx, sample, segment, source.width, source.height, time, bars);
     drawCaptions(ctx, layers, time);
-    drawWatermark(ctx, time);
+    if (watermark) drawWatermark(ctx, time);
     await videoSource.add(time, 1 / FPS);
     cancelled();
     progress(Math.min(1, (index + 1) / count));

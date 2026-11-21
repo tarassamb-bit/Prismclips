@@ -41,6 +41,11 @@ const state = {
 
 // MARK: Sign-in and usage
 
+// Plans: Free exports 720p with the watermark; a paid plan exports 1080p without it. While plans are off, or the plan
+// couldn't be read, nobody is limited to 720p and the watermark stays.
+const paidPlan = () => PLANS_ON && !!state.plan && state.plan.tier !== 'free';
+const freePlan = () => PLANS_ON && state.plan?.tier === 'free';
+
 async function accessToken() {
   return (await db()?.auth.getSession())?.data.session?.access_token ?? null;
 }
@@ -1863,7 +1868,7 @@ async function selectShort(id) {
     wireTimeline(segment);
     renderInspector();
     // Plays straight from the source file. When this browser can't play it, fall back to a rendered preview.
-    mountPlayer($('#player-host'), segment, source, () => renderedPreview(segment, source, token));
+    mountPlayer($('#player-host'), segment, source, () => renderedPreview(segment, source, token), { watermark: !paidPlan() });
     // Framing is found while it plays; the player reads the Short's framing every frame, so it appears as soon as it is ready.
     if (segment.cropTrackingVersion !== Framing.VERSION || !segment.cropKeyframes) {
       const note = $('#track-note');
@@ -2070,13 +2075,13 @@ function openExportDialog(onlyId = null) {
       ${esc(s.suggestedTitle || `Short ${i + 1}`)} <span class="muted small">${clock(s.duration)}</span></label>`).join('');
   // shortcut: Safari reports HEVC encoding as hardware but runs it at ~4 frames/s (2.5 min per 20 s Short), so it isn't offered there; drop when Safari's HEVC gets fast.
   const safari = /Safari\//.test(navigator.userAgent) && !/Chrome|Chromium|Edg|CriOS|FxiOS/.test(navigator.userAgent);
-  const qualities = Object.entries(EXPORT_QUALITIES).filter(([k]) => !(safari && k === 'compact')).map(([k, q]) => `<option value="${k}">${q.title} — ${q.detail}</option>`).join('');
+  const qualities = Object.entries(EXPORT_QUALITIES).filter(([k]) => !(safari && k === 'compact') && (!freePlan() || k === 'small')).map(([k, q]) => `<option value="${k}">${q.title} — ${q.detail}</option>`).join('');
   openDialog(`
     <form id="export-form" class="stack">
       <h2>Export Shorts</h2>
       ${list}
       <label>Quality <select name="quality">${qualities}</select></label>
-      <p class="muted small">Each Short downloads as an MP4.</p>
+      <p class="muted small">Each Short downloads as an MP4.${freePlan() ? ' Free exports are 720p with the Relio watermark; <a href="/pricing">a plan</a> gives 1080p without it.' : ''}</p>
       <p id="export-status" class="muted small" role="status"></p>
       <div class="row end">
         <button type="button" class="button ghost" data-action="close">Cancel</button>
@@ -2122,7 +2127,9 @@ async function exportShorts(ids, quality, folder = null) {
   const title = project.title;
   const account = userId();
   const task = beginTask('Exporting…');
-  const settings = exportSettings(quality);
+  // Free exports are 720p; the choice is checked here too, not only in the dialog.
+  if (freePlan()) quality = 'small';
+  const settings = { ...exportSettings(quality), watermark: !paidPlan() };
   const seconds = [];
   let made = 0, failure = null, bookkeepingFailure = null;
   const signal = task.controller.signal;

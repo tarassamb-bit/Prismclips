@@ -8,7 +8,7 @@ const clock = (seconds) => `${Math.floor(seconds / 60)}:${String(Math.floor(seco
 let stop = null;
 
 /** Mounts the player into `host`. `onFailure` is called when this browser can't play the source file. */
-export function mountPlayer(host, segment, source, onFailure) {
+export function mountPlayer(host, segment, source, onFailure, { watermark = true } = {}) {
   stop?.();
   host.innerHTML = `<div class="live">
       <canvas id="player" class="player" width="540" height="960" aria-label="Short preview"></canvas>
@@ -35,7 +35,7 @@ export function mountPlayer(host, segment, source, onFailure) {
     ctx.setTransform(canvas.width / 1080, 0, 0, canvas.height / 1920, 0, 0);
     drawFrame(ctx, frame, segment, source.width, source.height, t, bars);
     drawCaptions(ctx, layers, t);
-    drawWatermark(ctx, t);
+    if (watermark) drawWatermark(ctx, t);
     slider.value = t;
     time.textContent = `${clock(t)} / ${clock(segment.duration)}`;
   };
