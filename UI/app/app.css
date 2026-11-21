@@ -661,3 +661,11 @@ details.insp-section:not([open]) { gap: 0; }
 .dash-includes li::before { background: #3fa9f5 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 12 4 4 8-8'/%3E%3C/svg%3E") center / 12px no-repeat; }
 .dash-buy { background: #fff; border-color: #fff; color: #0e0f14; font-weight: 500; }
 .dash-buy:hover { background: #f6f3ec; }
+/* Your Shorts card: header with the history link, white tiles with a solid blue icon, a first-Shorts button when empty. */
+.dash-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.dash-stat-row > div { background: var(--surface1); border: 1px solid var(--border); padding: 16px; gap: 4px; }
+.dash-stat-row .row-icon { width: 36px; height: 36px; border-radius: 10px; background: var(--sky); color: #0e0f14; margin-bottom: 8px; }
+.dash-stat-row b { font-size: 34px; }
+.dash-empty { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.dash-empty p { margin: 0; }
+.dash-empty #stats-note:empty { display: none; }

@@ -1024,14 +1024,13 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
           </ul>` : ''}
         </div>
         <div class="dash-stats">
-          <strong class="dash-title">Your Shorts</strong>
+          <div class="dash-head"><strong class="dash-title">Your Shorts</strong><button class="link" data-action="settings-tab" data-tab="overview">Export history →</button></div>
           <div class="dash-stat-row">
             <div><span class="row-icon sky" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></span><b id="stat-exports">—</b><span>Exports</span></div>
             <div><span class="row-icon sky" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 9l3 2-3 2Z"/></svg></span><b id="stat-shorts">—</b><span>Shorts made</span></div>
             <div><span class="row-icon sky" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span><b id="stat-minutes">—</b><span>Minutes of Shorts</span></div>
           </div>
-          <p id="stats-note" class="muted small"></p>
-          <button class="link" data-action="settings-tab" data-tab="overview">Export history →</button>
+          <div class="dash-empty"><p id="stats-note" class="muted small"></p><button class="button primary dash-first" data-action="create" hidden>Make your first Shorts</button></div>
         </div>
       </div>
       <h3 class="group-label">Account</h3>`;
@@ -1116,6 +1115,7 @@ async function fillAccountData(tab) {
     text('#stat-exports', count.format(totals.exports));
     text('#stat-shorts', count.format(totals.shorts));
     text('#stat-minutes', (totals.seconds / 60).toLocaleString(undefined, { maximumFractionDigits: 1 }));
+    if (tab === 'account' && totals.exports === 0 && $('.dash-first')) $('.dash-first').hidden = false;
     text('#stats-note', totals.exports === 0 ? (tab === 'account' ? 'No exports yet. Your numbers show up after your first export.' : 'Your exported Shorts will appear here.')
       : tab !== 'account' && totals.exports > 50 ? 'Showing your latest 50 exports. The numbers above include your full history.' : '');
     const rows = $('#export-rows');
