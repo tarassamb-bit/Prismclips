@@ -227,7 +227,8 @@ function setScreen(screen) {
   // The editor keeps only what editing needs, so the theme switch lives on the other screens.
   $('.theme-toggle').hidden = screen === 'editor';
   for (const button of document.querySelectorAll('.side-button')) {
-    button.classList.toggle('selected', button.dataset.screen === screen);
+    // Making Shorts starts from Home (Start creating), so Home stays lit while doing it.
+    button.classList.toggle('selected', button.dataset.screen === (screen === 'create' ? 'home' : screen));
   }
 }
 
