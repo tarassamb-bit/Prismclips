@@ -111,7 +111,7 @@
     moments: {
       kicker: 'THE STORY COMES FIRST',
       title: ['More than a clip.', 'A complete thought.'],
-      description: 'Relio looks for a hook, the context, and a payoff. Cuts land on whole sentences, so your best ideas get the room they need.',
+      description: 'Relio looks for a hook, context, and a payoff, and tries to keep cuts on whole sentences. Review and refine each suggestion.',
       points: ['Moments from across your selected range', 'Review and refine every suggested Short'],
       image: 'assets/create.webp?v=2', width: 1200, height: 750,
       alt: "Relio's create screen with controls for number of Shorts, clip length, source range, and caption style.",

@@ -94,6 +94,22 @@
       say('');
       const withPack = await offerPack(tier);
       if (withPack === null) return;
+      // The add-on dialog can stay open while another tab signs out, switches accounts, or starts a plan.
+      const latestUser = (await db?.auth.getSession())?.data?.session?.user ?? null;
+      if (latestUser?.id !== user.id) {
+        user = latestUser;
+        hasPlan = false;
+        label();
+        say('Your account changed. Please start checkout again for the current account.', 'error');
+        return;
+      }
+      user = latestUser;
+      hasPlan = await checkPlan();
+      if (hasPlan) {
+        label();
+        location.href = '/app/settings/plans';
+        return;
+      }
       paddle.Checkout.open({
         items: [{ priceId: tier.priceId, quantity: 1 }, ...(withPack ? [{ priceId: pack.priceId, quantity: 1 }] : [])],
         customer: user.email ? { email: user.email } : undefined,
@@ -193,14 +209,23 @@
     say('');
     // /pricing?pack=minutes or ?pack=live (from the app, when minutes or Live hours run out): straight to that pack's checkout.
     const wanted = new URLSearchParams(location.search).get('pack');
-    if (wanted) buyPack(wanted === 'live' ? 'live' : 'minutes');
+    if (wanted) await buyPack(wanted === 'live' ? 'live' : 'minutes');
   }
 
   /** A checkout for one pack only: 'minutes' (video minutes) or 'live' (Live hours). */
-  function buyPack(kind) {
+  async function buyPack(kind) {
     const chosen = kind === 'live' ? window.PRISM_LIVE_PACK : pack;
     if (!chosen) return;
     if (!user) { location.href = '/login?next=' + encodeURIComponent(`/pricing?pack=${kind}`); return; }
+    const latestUser = (await db?.auth.getSession())?.data?.session?.user ?? null;
+    if (latestUser?.id !== user.id) {
+      user = latestUser;
+      hasPlan = false;
+      label();
+      say('Your account changed. Please open the minutes purchase again for the current account.', 'error');
+      return;
+    }
+    user = latestUser;
     say(kind === 'live' ? `Buying ${chosen.hours} extra Live hours for this month.` : `Buying ${chosen.minutes} extra video minutes for this month${packPrice ? ` (${packPrice})` : ''}.`);
     paddle.Checkout.open({
       items: [{ priceId: chosen.priceId, quantity: 1 }],

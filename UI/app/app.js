@@ -756,18 +756,20 @@ document.addEventListener('drop', (event) => {
   if (file && dropAllowed()) startCreate({ file });
 });
 
-// MARK: Create Shorts (five steps: video, settings, captions, content type, then the run)
+// MARK: Create Shorts (four setup steps, followed by analysis)
 
 // Names as Relio AI is told them; Auto detects the language once per video.
 const LANGUAGES = ['auto', 'English', 'Ukrainian', 'Polish', 'German', 'French', 'Spanish', 'Italian', 'Portuguese', 'Dutch', 'Czech',
   'Lithuanian', 'Latvian', 'Estonian', 'Romanian', 'Turkish', 'Russian', 'Arabic', 'Hindi', 'Japanese', 'Korean', 'Chinese'];
 const LENGTHS = [[0, 'Auto'], [15, '15 seconds'], [30, '30 seconds'], [45, '45 seconds'], [60, '60 seconds'], [90, '90 seconds']];
+// Round down rather than up: the initial custom end must never exceed the source duration.
+const defaultCustomEnd = (seconds) => { const end = Math.floor(seconds / 60 * 1000) / 1000; return end > 0 ? (end * 60 <= seconds ? end : end - 0.001) : seconds / 60 * (1 - Number.EPSILON); };
 
 function startCreate({ project = null, media = null, file = null } = {}) {
   setScreen('create');
   state.create = {
     step: media ? 2 : 1, project, media, count: 0, duration: 0, region: 'entireVideo', customStart: 0, language: 'auto',
-    customEnd: media ? Math.round(media.duration / 6) / 10 : 0, style: 'auto', videoType: 'auto', busy: false, error: '',
+    customEnd: media ? defaultCustomEnd(media.duration) : 0, style: 'auto', videoType: 'auto', busy: false, error: '',
   };
   if (file) chooseVideo(file);
   else renderCreate();
@@ -789,7 +791,7 @@ async function chooseVideo(file) {
     const media = await importMedia(project, file, isCurrent);
     if (!isCurrent()) return;
     await store.saveProject(project);
-    Object.assign(c, { project, media, customEnd: Math.round(media.duration / 6) / 10, step: 2 });
+    Object.assign(c, { project, media, customEnd: defaultCustomEnd(media.duration), step: 2 });
   } catch (error) {
     c.error = error.message || 'That file is not a video this browser can read.';
   }
@@ -801,19 +803,28 @@ async function chooseVideo(file) {
 function rangeProblem(c) {
   if (c.region !== 'custom') return null;
   const total = c.media.duration / 60;
-  return c.customStart >= 0 && c.customEnd > c.customStart && c.customEnd <= total + 0.01 ? null : `Choose a range inside the video: from 0 to ${total.toFixed(2)} minutes, with the end after the start.`;
+  return Number.isFinite(c.customStart) && Number.isFinite(c.customEnd) && c.customStart >= 0 && c.customEnd > c.customStart && c.customEnd <= total ? null : `Choose a range inside the video: from 0 to ${defaultCustomEnd(c.media.duration)} minutes, with the end after the start.`;
+}
+
+/** Warn before setup when the first analysis of this video may exceed the last known allowance. */
+function firstAnalysisNotice(duration, usage) {
+  if (!Number.isFinite(duration) || duration <= 0 || !usage || !Number.isFinite(usage.used) || !Number.isFinite(usage.allowance)) return null;
+  const left = Math.max(0, usage.allowance - usage.used);
+  if (duration / 60 <= left) return null;
+  return `Your last usage check showed about ${Math.floor(left * 100) / 100} min remaining. A first analysis of this ${clock(duration)} video uses its full length, even for a shorter range. If you have analyzed it before, the charge may differ. Usage is checked again before analysis.`;
 }
 
 function renderCreate() {
   const c = state.create;
   setUrl(`/app/create/${CREATE_STEPS[c.step - 1]}`);
-  const eyebrow = (n, label) => `<p class="eyebrow">Step ${n} of 5 · ${label}</p>`;
+  const eyebrow = (n, label) => `<p class="eyebrow">Step ${n} of ${CREATE_STEPS.length} · ${label}</p>`;
   const back = `<button class="link back" data-action="home">← Back to Home</button>`;
   let html;
   if (c.step === 1) {
     html = `${eyebrow(1, 'Choose video')}<h2 class="big">Choose a video</h2>
       <p class="muted">Relio keeps the video in this browser and saves it to your account, so the project opens on any device you sign in on. Relio AI reads its audio and some frames.</p>
-      <label class="drop-card ${c.busy ? 'busy' : ''}"><input id="pick" type="file" accept="video/*" hidden ${c.busy ? 'disabled' : ''}>
+      <p class="muted small">The first analysis counts the full video duration toward your monthly minutes, even if you choose a shorter range. A later analysis may use extra minutes; we’ll show the charge before you start.</p>
+      <label class="drop-card ${c.busy ? 'busy' : ''}"><input id="pick" class="file-input" type="file" accept="video/*" aria-label="Choose a video" ${c.busy ? 'disabled' : ''}>
         <span class="drop-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 16V4m-5 5 5-5 5 5M5 20h14"/></svg></span>
         <strong>${c.busy ? 'Reading the video…' : 'Drop a video here'}</strong>
         ${c.busy ? '' : '<span class="muted small">or</span><span class="button primary">Choose a video</span>'}</label>
@@ -821,53 +832,54 @@ function renderCreate() {
   } else if (c.step === 2) {
     const m = c.media;
     const problem = rangeProblem(c);
+    const usageNotice = firstAnalysisNotice(m.duration, state.usage);
     const where = { entireVideo: 'the entire video', firstHalf: 'the first half', lastHalf: 'the last half', custom: 'the chosen range' }[c.region];
-    const many = c.count > 0 ? `up to ${c.count} distinct moments` : 'as many distinct moments as are strong (about one per minute)';
+    const many = c.count > 0 ? `up to ${c.count} distinct moments` : `up to about one distinct moment per minute (maximum ${Shorts.MAX_SHORTS})`;
     const long = c.duration > 0 ? `of about ${c.duration} seconds` : 'as long as each story needs';
     html = `${eyebrow(2, 'Set up Shorts')}<h2 class="big">Choose your Short settings</h2><p class="muted">Your video is ready. Choose how to turn it into Shorts.</p>
       <div class="panel"><p class="file-line"><span class="tick">✓</span> ${esc(m.name)}</p>
         <p class="muted">Video duration: ${clock(m.duration)} · ${(m.duration / 60).toFixed(2)} minutes</p>
+        ${usageNotice ? `<p class="notice small" role="status">${esc(usageNotice)} ${PLANS_ON ? '<a href="/pricing">See plans or buy minutes</a>.' : ''}</p>` : ''}
         <button class="button ghost" data-create="different">Choose a different video</button></div>
       <div class="panel"><p class="muted small">Shorts settings</p>
         <div class="settings-row">
-          <div><span class="muted small">How many</span>
-            <span class="stepper"><button class="button ghost" data-create="less" aria-label="Fewer Shorts">−</button><strong>${c.count > 0 ? `${c.count} ${c.count === 1 ? 'Short' : 'Shorts'}` : 'Auto'}</strong><button class="button ghost" data-create="more" aria-label="More Shorts">+</button></span></div>
+          <label>How many <select id="short-count"><option value="0" ${c.count === 0 ? 'selected' : ''}>Auto</option>${Array.from({ length: Shorts.MAX_SHORTS }, (_, i) => i + 1).map((n) => `<option value="${n}" ${n === c.count ? 'selected' : ''}>${n} ${n === 1 ? 'Short' : 'Shorts'}</option>`).join('')}</select></label>
           <label>Approx. length <select id="length">${LENGTHS.map(([v, t]) => `<option value="${v}" ${v === c.duration ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
           <label>Language <select id="language">${LANGUAGES.map((l) => `<option value="${l}" ${l === c.language ? 'selected' : ''}>${l === 'auto' ? 'Auto' : l}</option>`).join('')}</select></label>
           <label>Take clips from <select id="region">${Object.entries(REGION_TITLES).map(([k, t]) => `<option value="${k}" ${k === c.region ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
         </div>
-        ${c.region === 'custom' ? `<div class="settings-row"><label>Start (minutes) <input id="from" type="number" min="0" step="0.1" value="${c.customStart}"></label>
-          <label>End (minutes) <input id="to" type="number" min="0" step="0.1" value="${c.customEnd}"></label></div>
+        ${c.region === 'custom' ? `<div class="settings-row"><label>Start (minutes) <input id="from" type="number" min="0" step="any" value="${c.customStart}"></label>
+          <label>End (minutes) <input id="to" type="number" min="0" step="any" value="${c.customEnd}"></label></div>
           <p class="muted small">${problem ? esc(problem) : `Analyze ${clock(c.customStart * 60)} to ${clock(c.customEnd * 60)} · ${clock((c.customEnd - c.customStart) * 60)} selected`}</p>` : ''}
-        <p class="muted small">Relio will analyze frames and available speech, then suggest ${many} ${long} in ${where}. Review every pick before exporting.</p></div>
+        <p class="muted small">Relio will analyze frames and available speech, then suggest ${many} ${long} in ${where}. Review every pick before exporting.</p>
+        <p class="muted small">The first analysis counts the full ${clock(m.duration)} video toward your monthly minutes, even when you select a shorter range. We’ll show any extra charge for a later analysis before it starts.</p></div>
       <button class="button primary" data-create="next" ${problem ? 'disabled' : ''}>Next: Choose captions →</button>${back}`;
   } else if (c.step === 3) {
     html = `${eyebrow(3, 'Choose captions')}<h2 class="big">Choose your captions</h2><p class="muted">Pick how spoken words appear. You can change this for each Short later.</p>
-      <div class="cards">${CAPTION_STYLES.map((s) => `<button class="choice ${s === c.style ? 'on' : ''}" data-style="${s}"><canvas class="style-preview" data-preview="${s}" aria-hidden="true"></canvas><strong>${STYLE_TITLES[s]}</strong><span class="muted small">${STYLE_DETAILS[s]}</span></button>`).join('')}
-        <button class="choice ${c.style === 'none' ? 'on' : ''}" data-style="none"><span class="style-preview no-captions" aria-hidden="true">Aa</span><strong>No captions</strong><span class="muted small">Shorts start without captions. Turn them on for any Short later.</span></button></div>
+      <div class="cards">${CAPTION_STYLES.map((s) => `<button class="choice ${s === c.style ? 'on' : ''}" data-style="${s}" aria-pressed="${s === c.style}"><canvas class="style-preview" data-preview="${s}" aria-hidden="true"></canvas><strong>${STYLE_TITLES[s]}</strong><span class="muted small">${STYLE_DETAILS[s]}</span></button>`).join('')}
+        <button class="choice ${c.style === 'none' ? 'on' : ''}" data-style="none" aria-pressed="${c.style === 'none'}"><span class="style-preview no-captions" aria-hidden="true">Aa</span><strong>No captions</strong><span class="muted small">Shorts start without captions. Turn them on for any Short later.</span></button></div>
       <div class="row"><button class="button primary" data-create="next">Next: Choose content type →</button><button class="link" data-create="prev">← Back</button></div>`;
   } else {
     html = `${eyebrow(4, 'Choose content type')}<h2 class="big">What kind of video is it?</h2><p class="muted">This tunes how Relio picks moments and frames them.</p>
-      <div class="cards">${VIDEO_TYPES.map((t) => `<button class="choice ${t === c.videoType ? 'on' : ''}" data-type="${t}"><strong>${VIDEO_TYPE_TITLES[t]}</strong><span class="muted small">${VIDEO_TYPE_DETAILS[t]}</span></button>`).join('')}</div>
+      <div class="cards">${VIDEO_TYPES.map((t) => `<button class="choice ${t === c.videoType ? 'on' : ''}" data-type="${t}" aria-pressed="${t === c.videoType}"><strong>${VIDEO_TYPE_TITLES[t]}</strong><span class="muted small">${VIDEO_TYPE_DETAILS[t]}</span></button>`).join('')}</div>
       <div class="row"><button class="button primary" data-create="make">Make Shorts</button><button class="link" data-create="prev">← Back</button></div>`;
   }
   $('#app').innerHTML = `<section class="create">${html}</section>`;
   for (const canvas of document.querySelectorAll('[data-preview]')) stylePreview(canvas, canvas.dataset.preview);
   $('#pick')?.addEventListener('change', (event) => event.target.files[0] && chooseVideo(event.target.files[0]));
-  $('#length')?.addEventListener('change', (event) => { c.duration = Number(event.target.value); renderCreate(); });
-  $('#region')?.addEventListener('change', (event) => { c.region = event.target.value; renderCreate(); });
+  $('#short-count')?.addEventListener('change', (event) => { c.count = Number(event.target.value); renderCreate(); $('#short-count')?.focus(); });
+  $('#length')?.addEventListener('change', (event) => { c.duration = Number(event.target.value); renderCreate(); $('#length')?.focus(); });
+  $('#region')?.addEventListener('change', (event) => { c.region = event.target.value; renderCreate(); $('#region')?.focus(); });
   $('#language')?.addEventListener('change', (event) => { c.language = event.target.value; });
   for (const [id, key] of [['#from', 'customStart'], ['#to', 'customEnd']]) {
-    $(id)?.addEventListener('change', (event) => { c[key] = Number(event.target.value) || 0; renderCreate(); });
+    $(id)?.addEventListener('change', (event) => { c[key] = event.target.value === '' ? NaN : Number(event.target.value); renderCreate(); $(id)?.focus(); });
   }
 }
 
 async function createAction(action) {
   const c = state.create;
   if (!c) return;
-  if (action === 'less') c.count = Math.max(0, c.count - 1);
-  else if (action === 'more') c.count = Math.min(Shorts.MAX_SHORTS, c.count + 1);
-  else if (action === 'prev') c.step -= 1;
+  if (action === 'prev') c.step -= 1;
   else if (action === 'next') c.step += 1;
   else if (action === 'different') {
     // An import that never made Shorts leaves nothing behind.
@@ -1813,12 +1825,31 @@ function renderTask() {
   document.documentElement.style.setProperty('--progress-h', `${host.offsetHeight + 12}px`);
 }
 
+let dialogOpener = null;
+function dialogControls(host) {
+  return [...host.querySelectorAll('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+    .filter((el) => !el.disabled && el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
+}
+function trapDialogFocus(event, host) {
+  if (event.key !== 'Tab') return;
+  const controls = dialogControls(host);
+  if (!controls.length) { event.preventDefault(); host.querySelector('[role="dialog"]')?.focus(); return; }
+  const current = controls.indexOf(document.activeElement);
+  if (current === -1 || (event.shiftKey && current === 0) || (!event.shiftKey && current === controls.length - 1)) {
+    event.preventDefault();
+    controls[event.shiftKey ? controls.length - 1 : 0].focus();
+  }
+}
 function openDialog(html) {
+  if (!state.dialog) dialogOpener = document.activeElement;
   state.dialog = html;
   const host = $('#dialog');
   host.hidden = false;
-  host.innerHTML = `<div class="sheet" role="dialog" aria-modal="true">${html}</div>`;
-  host.querySelector('input,select,button')?.focus();
+  host.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" tabindex="-1">${html}</div>`;
+  const sheet = host.querySelector('[role="dialog"]');
+  const title = sheet.querySelector('h2');
+  if (title) { title.id = 'dialog-title'; sheet.setAttribute('aria-labelledby', title.id); }
+  (dialogControls(host)[0] ?? sheet).focus();
 }
 function closeDialog() {
   // A question closed without an answer (Esc, the backdrop) is asked again later.
@@ -1830,6 +1861,9 @@ function closeDialog() {
   state.dialog = null;
   $('#dialog').hidden = true;
   $('#dialog').innerHTML = '';
+  const opener = dialogOpener;
+  dialogOpener = null;
+  if (opener?.isConnected) opener.focus();
 }
 function showError(title, message, kind = '', retry = null) {
   openDialog(`<div class="stack"><h2>${esc(title)}</h2><p>${esc(message)}</p>
@@ -2008,6 +2042,19 @@ async function retrack(segment, source) {
   await store.saveProject(project, { isCurrent: () => state.project === project && project.segments.includes(segment) });
 }
 
+/** Keep each caption's text attached to its own timing. */
+function captionTextFields(captions) {
+  if (!captions.length) return '<p class="muted small">No captions yet. Use Regenerate subtitles to make them.</p>';
+  return `<p class="muted small">Edit each caption below. Times are measured from the start of this Short.</p><div class="caption-lines">${captions.map((cue, index) =>
+    `<label><span class="mono small">${mmss(cue.start)}–${mmss(cue.start + cue.duration)}</span><textarea data-field="captionText" data-cue-index="${index}" rows="2">${esc(cue.text)}</textarea></label>`).join('')}</div>`;
+}
+
+function setCaptionText(segment, index, value) {
+  if (!Number.isInteger(index) || index < 0 || index >= (segment.captions ?? []).length) return false;
+  segment.captions[index] = { ...segment.captions[index], text: value };
+  return true;
+}
+
 function renderInspector() {
   const host = $('#inspector');
   if (!host) return;
@@ -2029,7 +2076,7 @@ function renderInspector() {
           <label>Size <select data-field="captionSize">${choice('captionSize', ['small', 'medium', 'large'], 'medium')}</select></label>
         </div>
         <label class="check"><input type="checkbox" data-field="captionAnimated" ${segment.captionAnimated ? 'checked' : ''}> Pop in new captions</label>
-        <label>Words <textarea data-field="captionTexts" rows="4">${esc((segment.captions ?? []).map((c) => c.text).join('\n'))}</textarea></label>
+        ${captionTextFields(segment.captions ?? [])}
         <button class="link-button" data-action="regen-captions">Regenerate subtitles</button>
       </section>
       <details class="insp-section">
@@ -2051,6 +2098,14 @@ function renderInspector() {
 }
 
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
+
+/** A source range must fit the video and leave at least half a second for the Short. */
+function timelineProblem(start, end, total) {
+  if (![start, end, total].every(Number.isFinite) || start < 0 || end > total + 0.001 || end - start < 0.5) {
+    return 'Enter a start and end within the video, at least 0.5 seconds apart.';
+  }
+  return null;
+}
 
 /** Moves or resizes a Short in its source. Captions and words are relative to the Short's start, so they shift with it. */
 function applyTiming(s, start, duration) {
@@ -2083,6 +2138,13 @@ function timelineHtml(segment) {
         <div class="tl-clip" id="tl-clip" style="left:${pct(segment.start)};width:${pct(segment.duration)}"><span class="tl-handle l" data-edge="l"></span><span class="tl-handle r" data-edge="r"></span></div>
       </div>
       <div class="row between muted small mono"><span>0:00</span><span id="tl-label">${clock(segment.start)}–${clock(segment.start + segment.duration)}</span><span>${clock(total)}</span></div>
+      <div class="timeline-fields" role="group" aria-label="Precise Short timing">
+        <label>Start (seconds) <input id="tl-start" type="number" min="0" max="${total}" step="any" value="${segment.start.toFixed(3)}" aria-describedby="tl-help tl-error"></label>
+        <label>End (seconds) <input id="tl-end" type="number" min="0" max="${total}" step="any" value="${(segment.start + segment.duration).toFixed(3)}" aria-describedby="tl-help tl-error"></label>
+        <button type="button" class="button ghost" id="tl-apply">Apply timing</button>
+      </div>
+      <p id="tl-help" class="muted small">Times are measured from the start of the source video. You can also drag the clip above.</p>
+      <p id="tl-error" class="error small" role="alert"></p>
     </div>`;
 }
 
@@ -2090,6 +2152,22 @@ function wireTimeline(segment) {
   const track = $('#tl-track'), clip = $('#tl-clip');
   if (!track || !clip) return;
   const total = Number($('.timeline').dataset.total);
+  $('#tl-apply')?.addEventListener('click', async (event) => {
+    const startInput = $('#tl-start'), endInput = $('#tl-end');
+    const start = startInput.value === '' ? NaN : Number(startInput.value);
+    const end = endInput.value === '' ? NaN : Number(endInput.value);
+    const problem = timelineProblem(start, end, total);
+    $('#tl-error').textContent = problem ?? '';
+    if (problem) return;
+    const safeEnd = Math.min(end, total);
+    if (Math.abs(start - segment.start) < 0.001 && Math.abs(safeEnd - segment.start - segment.duration) < 0.001) return;
+    event.currentTarget.disabled = true;
+    try {
+      await edit((s) => applyTiming(s, start, safeEnd - start), { awaitPreview: true });
+      if (selected()?.id === segment.id) $('#tl-apply')?.focus();
+    }
+    catch (error) { const note = $('#tl-error'); if (note) note.textContent = error.message || 'Could not save timing. Please try again.'; event.currentTarget.disabled = false; }
+  });
   clip.addEventListener('pointerdown', (event) => {
     event.preventDefault();
     clip.setPointerCapture(event.pointerId);
@@ -2119,7 +2197,7 @@ function wireTimeline(segment) {
 }
 
 /** Applies an edit to the selected Short: keeps an undo copy, saves, and re-renders the preview when the picture changed. */
-async function edit(change, { rerender = true } = {}) {
+async function edit(change, { rerender = true, awaitPreview = false } = {}) {
   const project = state.project;
   const segment = selected();
   if (!segment) return;
@@ -2129,7 +2207,7 @@ async function edit(change, { rerender = true } = {}) {
   if (state.project !== project || !project.segments.includes(segment)) return;
   await store.saveProject(project, { isCurrent: () => state.project === project && project.segments.includes(segment) });
   if (state.project !== project) return;
-  if (rerender) selectShort(segment.id);
+  if (rerender) { const ready = selectShort(segment.id); if (awaitPreview) await ready; }
   else renderEditor();
 }
 
@@ -2349,7 +2427,12 @@ document.addEventListener('click', async (event) => {
   if (choice && state.create && state.task && !(await confirmStop())) return;
   if (choice && state.create) {
     if (choice.dataset.create) await createAction(choice.dataset.create);
-    else { if (choice.dataset.style) state.create.style = choice.dataset.style; else state.create.videoType = choice.dataset.type; renderCreate(); }
+    else {
+      const selector = choice.dataset.style ? `[data-style="${choice.dataset.style}"]` : `[data-type="${choice.dataset.type}"]`;
+      if (choice.dataset.style) state.create.style = choice.dataset.style; else state.create.videoType = choice.dataset.type;
+      renderCreate();
+      $(selector)?.focus();
+    }
     return;
   }
   const target = event.target.closest('[data-action]');
@@ -2426,9 +2509,8 @@ document.addEventListener('change', async (event) => {
   if (!field || field === 'suggestedTitle' || field === 'suggestedDescription' || !selected()) return;
   const input = event.target;
   edit(async (s) => {
-    if (field === 'captionTexts') {
-      const lines = input.value.split('\n');
-      if (lines.length === (s.captions ?? []).length) s.captions = s.captions.map((c, i) => ({ ...c, text: lines[i] }));
+    if (field === 'captionText') {
+      setCaptionText(s, Number(input.dataset.cueIndex), input.value);
       return;
     }
     if (field === 'start' || field === 'duration') {
@@ -2499,6 +2581,7 @@ document.addEventListener('mousedown', (event) => { if (event.target.id === 'dia
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && $('#menu')) { closeMenu(); return; }
   if (event.key === 'Escape' && state.dialog) { closeDialog(); return; }
+  if (state.dialog && event.key === 'Tab') { trapDialogFocus(event, $('#dialog')); return; }
   // Keys in the games panel belong to the game (Space drops a block there, it doesn't play the video).
   if (event.target.closest('input,textarea,select,.games-screen') || state.dialog) return;
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); undo(); }

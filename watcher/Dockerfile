@@ -13,7 +13,7 @@ COPY --from=whisper /src/build/bin/whisper-cli /usr/local/bin/whisper-cli
 COPY --from=whisper --chmod=644 /models/ggml-base.bin /opt/whisper/ggml-base.bin
 ADD --chmod=644 https://github.com/JulietaUla/Montserrat/raw/master/fonts/ttf/Montserrat-ExtraBold.ttf /usr/share/fonts/truetype/montserrat/Montserrat-ExtraBold.ttf
 WORKDIR /opt/watcher
-COPY watcher.mjs shorts.mjs package.json ./
+COPY watcher.mjs shorts.mjs fetch-piece.js record-pieces.js package.json ./
 COPY wm ./wm
 COPY lib ./lib
 USER node

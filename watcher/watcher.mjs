@@ -8,6 +8,8 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parseMaster, pickVariant, parseMedia } from './lib/twitch.js';
+import { fetchPiece } from './fetch-piece.js';
+import { recordPieces } from './record-pieces.js';
 import { Detector } from './lib/detector.js';
 import { ffmpeg, makeShort, removeShort, onDisk, serve } from './shorts.mjs';
 
@@ -120,19 +122,16 @@ class Recorder {
   }
 
   async follow(url) {
+    let endedFailures = 0;
     for (let failures = 0; !this.stopped && failures < 3;) {
       const response = await fetch(url, { signal: AbortSignal.timeout(10000) }).catch(() => null);
       if (!response?.ok) { failures++; await wait(2000); continue; }
       failures = 0;
       const playlist = parseMedia(await response.text());
-      for (const piece of playlist.pieces.filter((p) => p.sequence > this.lastSequence)) {
-        if (this.stopped) return;
-        this.lastSequence = piece.sequence;
-        await this.record(piece, playlist.init).catch((error) => log(this.login, 'piece failed', error.message));
-      }
+      const recorded = await recordPieces(this, playlist.pieces, playlist.init, (error) => log(this.login, 'piece failed', error.message));
       await update(this.id, { state: 'recording', buffered: this.buffered(), chat: this.chatOn, graph: this.graph(), recorded_seconds: Math.round(this.recordedBefore + this.recordedNow) }).catch(() => {});
       if (await this.overLimit()) return;
-      if (playlist.ended) return;
+      if (playlist.ended && (recorded || ++endedFailures >= 3)) return;
       await wait(2000);
     }
   }
@@ -142,14 +141,12 @@ class Recorder {
     if (initUrl) {
       if (!this.inits.has(initUrl)) {
         const file = path.join(this.dir, `init-${this.inits.size}.mp4`);
-        await writeFile(file, Buffer.from(await (await fetch(initUrl)).arrayBuffer()));
+        await writeFile(file, await fetchPiece(initUrl));
         this.inits.set(initUrl, file);
       }
       init = this.inits.get(initUrl);
     }
-    const response = await fetch(piece.url, { signal: AbortSignal.timeout(15000) });
-    if (!response.ok) return;
-    const bytes = Buffer.from(await response.arrayBuffer());
+    const bytes = await fetchPiece(piece.url);
     const file = path.join(this.dir, `${piece.sequence}.bin`);
     await writeFile(file, bytes);
     const at = piece.at ?? Date.now();

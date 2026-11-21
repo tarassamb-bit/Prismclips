@@ -159,10 +159,15 @@ async function isCamera(clip, second, box) {
 
 /** The part to keep, inside the clip and 10–60 s long; around the moment when the AI's pick is unusable. */
 export function bounds(answer, clipSeconds, momentAt) {
-  let start = Number(answer?.start), end = Number(answer?.end);
-  if (!(Number.isFinite(start) && Number.isFinite(end) && end - start >= 10)) { start = momentAt - 20; end = momentAt + 20; }
-  start = Math.max(0, start);
-  end = Math.min(clipSeconds, Math.max(end, start + 10), start + 60);
+  const duration = Number.isFinite(clipSeconds) ? Math.max(0, clipSeconds) : 0;
+  const moment = Number.isFinite(momentAt) ? Math.max(0, Math.min(duration, momentAt)) : duration / 2;
+  let start = Math.max(0, Number(answer?.start)), end = Number(answer?.end);
+  end = Math.min(duration, end, start + 60);
+  // Validate after clipping to the source, too: a plausible-looking AI span can be entirely outside it.
+  if (!(Number.isFinite(start) && Number.isFinite(end) && end - start >= Math.min(10, duration))) {
+    start = Math.max(0, moment - 20);
+    end = Math.min(duration, moment + 20);
+  }
   return { start, end };
 }
 
@@ -306,14 +311,16 @@ const NAME = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(mp
 
 /** Plays the Shorts: GET /<id>.mp4 (with byte ranges, for seeking) and /<id>.jpg. Anyone with a Short's random id can watch it.
  * shortcut: the unguessable id is the only access check; add signed links if Shorts ever hold private material. */
-export function serve(port) {
-  createServer(async (req, res) => {
+export function serve(port, { directory = DIR, host = '0.0.0.0' } = {}) {
+  return createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    const name = decodeURIComponent(new URL(req.url, 'http://x').pathname.slice(1));
+    let name;
+    try { name = decodeURIComponent(new URL(req.url, 'http://x').pathname.slice(1)); }
+    catch { res.statusCode = 400; return res.end(); }
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.statusCode = 405; return res.end(); }
     if (name === 'health') return res.end('ok');
     if (!NAME.test(name)) { res.statusCode = 404; return res.end(); }
-    const file = path.join(DIR, name);
+    const file = path.join(directory, name);
     const info = await stat(file).catch(() => null);
     if (!info) { res.statusCode = 404; return res.end(); }
     res.setHeader('Content-Type', name.endsWith('.mp4') ? 'video/mp4' : 'image/jpeg');
@@ -321,8 +328,8 @@ export function serve(port) {
     res.setHeader('Accept-Ranges', 'bytes');
     const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
     let from = 0, to = info.size - 1;
-    if (range) {
-      from = range[1] ? Number(range[1]) : info.size - Number(range[2]);
+    if (range && (range[1] || range[2])) {
+      from = range[1] ? Number(range[1]) : Math.max(0, info.size - Number(range[2]));
       to = range[1] && range[2] ? Math.min(Number(range[2]), info.size - 1) : info.size - 1;
       if (!(from >= 0 && from <= to)) { res.statusCode = 416; res.setHeader('Content-Range', `bytes */${info.size}`); return res.end(); }
       res.statusCode = 206;
@@ -330,6 +337,16 @@ export function serve(port) {
     }
     res.setHeader('Content-Length', to - from + 1);
     if (req.method === 'HEAD') return res.end();
-    createReadStream(file, { start: from, end: to }).pipe(res);
-  }).listen(port, '0.0.0.0');
+    if (!info.size) return res.end();
+    const stream = createReadStream(file, { start: from, end: to });
+    // Cleanup can delete a file after stat but before or during the read.
+    stream.on('error', () => {
+      if (res.headersSent) return res.destroy();
+      res.statusCode = 404;
+      res.removeHeader('Content-Range');
+      res.setHeader('Content-Length', '0');
+      res.end();
+    });
+    stream.pipe(res);
+  }).listen(port, host);
 }

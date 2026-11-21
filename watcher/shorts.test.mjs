@@ -6,6 +6,9 @@ assert.deepEqual(bounds({ start: 20, end: 70 }, 90, 60), { start: 20, end: 70 })
 assert.deepEqual(bounds({ start: 10, end: 89 }, 90, 60), { start: 10, end: 70 }, 'at most 60 s');
 assert.deepEqual(bounds({ start: 50, end: 52 }, 90, 60), { start: 40, end: 80 }, 'too short: around the moment');
 assert.deepEqual(bounds(null, 90, 85), { start: 65, end: 90 }, 'no answer, moment near the end');
+assert.deepEqual(bounds({ start: 100, end: 120 }, 90, 60), { start: 40, end: 80 }, 'AI range after source falls back to the moment');
+assert.deepEqual(bounds({ start: -30, end: -10 }, 90, 3), { start: 0, end: 23 }, 'AI range before source falls back safely');
+assert.deepEqual(bounds({ start: 88, end: 120 }, 90, 85), { start: 65, end: 90 }, 'a range cut too short by the source falls back');
 
 // A 320×216 camera box in the top-left corner of a 1280×720 frame: the crop has the top section's shape and stays inside it.
 const cam = cropAround({ x: 0, y: 0, w: 0.25, h: 0.3 }, 1280, 720, 1080 / 700);

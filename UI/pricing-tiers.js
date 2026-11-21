@@ -18,7 +18,7 @@ window.PRISM_PACK = { priceId: prismPrice('pri_01m7wykejd7qj2jm895kpb8cyy', 'pri
 window.PRISM_LIVE_PACK = { priceId: prismPrice('pri_01m7x801j9rtht27jw31r9vavh', 'pri_01m7z8yd2m4w7cv2nasnt49grn'), hours: 10 };
 
 // What an account without a paid plan gets; shown in Settings › Plan.
-window.PRISM_FREE = { name: 'Free', features: ['20 minutes of video', '720p exports with watermark', 'Live clipping: 1 channel, 1 hour a month', 'Recordings up to 1 hour', '3 live Shorts a day'] };
+window.PRISM_FREE = { name: 'Free', features: ['20 minutes of video a month', '720p exports with watermark', 'Live clipping: 1 channel, 1 hour a month', 'Recordings up to 1 hour', '3 live Shorts a day'] };
 
 /** @type {Tier[]} */
 window.PRISM_TIERS = [
@@ -33,7 +33,7 @@ window.PRISM_TIERS = [
     description: 'For creators publishing every week.',
     features: ['450 minutes of video a month', '4K exports, no watermark', 'Live clipping: 2 channels at once, 100 hours a month', 'Recordings up to 24 hours', '100 live Shorts a day'],
     priceId: prismPrice('pri_01m7wxv7jvh2e830hj69y0merw', 'pri_01m7z8ybvx3b7d6k0nx0r2edb9'),
-    badge: 'Most popular',
+    badge: 'For weekly creators',
   },
   {
     name: 'Studio',

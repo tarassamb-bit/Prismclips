@@ -8,6 +8,7 @@ const ACTIVE = ['starting', 'recording', 'offline'];
 const STATE_TEXT = { starting: 'Starting…', recording: 'Recording', offline: 'Offline · waiting for the stream', stopped: 'Stopped', ended: 'Ended', error: 'Stopped' };
 let host = null, db = null, polling = null;
 let rows = [], clips = [], channels = [], selected = null, shownChannel = null, platform = 'twitch', typing = 0, fixed = null, goHome = null, goTo = null;
+let mountVersion = 0;
 // Where the pointer is over the graph (CSS pixels from its left), and what the last drawing mapped, for the hover readout.
 let hoverX = null, plotted = null;
 // The graph slides on smoothly between updates: it shows the time `lag` ms behind now, so new data arrives just as it's needed.
@@ -27,19 +28,32 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
 /** Stops what the recording screen runs in the background (updates, the graph, the typing prefix). */
-function unmount() { clearInterval(polling); cancelAnimationFrame(frame); clearTimeout(typing); host = null; }
+function unmount() { mountVersion++; clearInterval(polling); cancelAnimationFrame(frame); clearTimeout(typing); host = null; }
 
 /** Live's home, like Home for projects: a card to start a recording and the recordings still kept, each opening
  * the recording screen through `open(key)` (null for a new one; "name" for Twitch, "kick/name" for Kick). */
 export async function mountLiveHome(element, dbGetter, open) {
   unmount();
+  const version = mountVersion;
+  element.innerHTML = '<section class="dashboard"><p id="live-home-loading" role="status">Loading recordings…</p></section>';
+  const loading = element.querySelector('#live-home-loading');
+  const current = () => element.isConnected && version === mountVersion && loading?.isConnected;
   // Every recording still kept: the server deletes one a day after it stops.
-  const [sessionRows, clipRows, limits] = await Promise.all([
-    dbGetter().from('live_sessions').select('id,login,platform,state,created').order('created', { ascending: false }),
-    dbGetter().from('live_clips').select('session_id,at,short').order('at', { ascending: false }),
-    PLANS_ON ? dbGetter().rpc('my_live_limits') : { error: true },
-  ]);
-  if (!element.isConnected) return;
+  let sessionRows, clipRows, limits;
+  try {
+    [sessionRows, clipRows, limits] = await Promise.all([
+      dbGetter().from('live_sessions').select('id,login,platform,state,created').order('created', { ascending: false }),
+      dbGetter().from('live_clips').select('session_id,at,short').order('at', { ascending: false }),
+      PLANS_ON ? Promise.resolve(dbGetter().rpc('my_live_limits')).catch(() => ({ error: true })) : { error: true },
+    ]);
+    if (sessionRows.error || clipRows.error || !Array.isArray(sessionRows.data) || !Array.isArray(clipRows.data)) throw new Error('Recordings unavailable');
+  } catch {
+    if (!current()) return;
+    element.innerHTML = '<section class="dashboard"><div class="empty" role="alert"><strong>Couldn’t load your recordings</strong><span class="muted">Check your connection and try again.</span><button type="button" class="button ghost" id="live-retry">Try again</button></div></section>';
+    element.querySelector('#live-retry')?.addEventListener('click', () => void mountLiveHome(element, dbGetter, open));
+    return;
+  }
+  if (!current()) return;
   const all = sessionRows.data ?? [], ready = (clipRows.data ?? []).filter((c) => c.short?.state === 'ready');
   // One card per recording: a channel recorded again is a new card, like a new video.
   const key = (r) => r.id;

@@ -5,17 +5,25 @@ const { HttpError, send, fail, requireEnv, paddle, syncSubscription, PADDLE_API 
 const { recordPacks } = require('./billing');
 
 // Only Paddle's own servers may call this. Their addresses come from Paddle's /ips (it can change), re-read hourly.
-let ips = null, ipsAt = 0;
-async function paddleIps() {
-  if (!ips || Date.now() - ipsAt > 3600_000) {
-    const response = await fetch(`${PADDLE_API[process.env.PADDLE_ENV]}/ips`);
-    const body = await response.json().catch(() => null);
-    const list = body?.data?.ipv4_cidrs?.map((cidr) => cidr.replace(/\/32$/, ''));
-    if (!response.ok || !list?.length) { if (!ips) throw new HttpError(503, 'Couldn’t read Paddle’s addresses.'); }
-    else { ips = new Set(list); ipsAt = Date.now(); }
-  }
-  return ips;
+function addressCache({ fetcher = (...args) => fetch(...args), now = () => Date.now() } = {}) {
+  let ips = null, ipsAt = 0;
+  return async () => {
+    if (ips && now() - ipsAt <= 3600_000) return ips;
+    try {
+      const response = await fetcher(`${PADDLE_API[process.env.PADDLE_ENV]}/ips`, { signal: AbortSignal.timeout(8000) });
+      const body = await response.json();
+      const cidrs = body?.data?.ipv4_cidrs;
+      if (!response.ok || !Array.isArray(cidrs) || !cidrs.length || !cidrs.every((cidr) => typeof cidr === 'string' && cidr.length > 0)) throw new Error('Invalid address list');
+      ips = new Set(cidrs.map((cidr) => cidr.replace(/\/32$/, '')));
+      ipsAt = now();
+    } catch {
+      // A previously validated list remains restrictive during a temporary outage; signatures are always verified below.
+      if (!ips) throw new HttpError(503, 'Couldn’t read Paddle’s addresses.');
+    }
+    return ips;
+  };
 }
+const paddleIps = addressCache();
 
 // The signature covers the exact bytes Paddle sent. Vercel puts the body back on the stream
 // after its helpers read it, so reading it here always gets the raw bytes.
@@ -74,3 +82,4 @@ async function handler(req, res) {
 
 module.exports = handler;
 module.exports.verify = verify;
+module.exports.addressCache = addressCache;

@@ -67,11 +67,22 @@ const batches = (list, size) => Array.from({ length: Math.ceil(list.length / siz
 
 async function fetchCloud(db, table, userId) {
   const rows = [];
-  for (let from = 0; from < 10_000; from += 1000) {
+  let after = null;
+  while (true) {
     checkAccount(userId);
-    const { data, error } = await db.from(table).select('id, updated_at').eq('user_id', userId).order('id').range(from, from + 999);
+    let query = db.from(table).select('id, updated_at').eq('user_id', userId).order('id').limit(1000);
+    if (after !== null) query = query.gt('id', after);
+    const { data, error } = await query;
     checkAccount(userId);
     if (error) throw error;
+    if (!Array.isArray(data)) throw new Error('Cloud sync returned an incomplete project list. Your local items are safe; try Sync again.');
+    // Never interpret an incomplete or repeating page as remote deletions.
+    for (const row of data) {
+      if (typeof row?.id !== 'string' || (after !== null && row.id <= after)) {
+        throw new Error('Cloud sync returned an invalid project list. Your local items are safe; try Sync again.');
+      }
+      after = row.id;
+    }
     rows.push(...data);
     if (data.length < 1000) break;
   }

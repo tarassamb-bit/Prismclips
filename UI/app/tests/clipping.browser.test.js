@@ -91,6 +91,12 @@ export async function runClippingBrowserChecks() {
     await store.saveTranscript(id, mediaId, { ...transcript, end: 30 }, () => true);
     saved = await store.loadProject(id);
     check(saved.transcripts[mediaId].end === 60, 'Stale or shorter checkpoint overwrote saved progress');
+    await store.saveTranscript(id, mediaId, { ...transcript, end: 30, language: 'Spanish' }, () => true);
+    saved = await store.loadProject(id);
+    check(saved.transcripts[mediaId].end === 30 && saved.transcripts[mediaId].language === 'Spanish', 'New-language checkpoint did not replace old-language progress');
+    await store.saveTranscript(id, mediaId, { ...transcript, end: 20, language: 'spanish' }, () => true);
+    saved = await store.loadProject(id);
+    check(saved.transcripts[mediaId].end === 30, 'Shorter same-language checkpoint erased new-language progress');
     await Promise.all([store.addExportCount(id, 1), store.addExportCount(id, 2)]);
     saved = await store.loadProject(id);
     check(saved.exported === 3 && saved.updated, 'Export count/retention update failed');

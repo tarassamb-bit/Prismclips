@@ -27,7 +27,10 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
   let sessionUser = { id: 'user-1', email: 'creator@example.com' };
   const db = {
     auth: { getSession: async () => ({ data: { session: sessionUser ? { user: sessionUser } : null } }) },
-    from: () => ({ select: () => ({ in: () => ({ limit: () => { planCalls++; return Promise.resolve(planResult); } }) }) }),
+    from: () => ({ select: () => ({
+      in: () => ({ limit: () => { planCalls++; return Promise.resolve(planResult); } }),
+      order: () => ({ limit: () => ({ maybeSingle: async () => ({ data: null }) }) }),
+    }) }),
   };
   const window = {
     prismDb: db,
@@ -39,9 +42,9 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
       Checkout: { open: (options) => checkouts.push(options) },
     },
   };
-  const document = { getElementById: (id) => id === 'tiers' ? grid : status, createElement: () => new Element() };
+  const document = { documentElement: { dataset: {} }, getElementById: (id) => id === 'tiers' ? grid : status, createElement: () => new Element() };
   vm.runInNewContext(fs.readFileSync(`${__dirname}/pricing.js`, 'utf8'), {
-    window, document, location, console, setTimeout,
+    window, document, location, console, setTimeout, URLSearchParams, matchMedia: () => ({ matches: false }),
     fetch: async () => ({ ok: true, json: async () => ({ environment: 'sandbox', token: 'test_public' }) }),
   });
   await settle();
@@ -78,6 +81,75 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
   await settle();
   assert.equal(checkouts.length, 1, 'signing out in another tab must prevent a stale-user checkout');
   assert.equal(location.href, '/login?next=/pricing');
+
+  // Account and plan can change while the add-on dialog is open in this tab.
+  for (const change of ['account', 'plan']) {
+    const packGrid = new Element(), packStatus = new Element(), opened = [];
+    let selectedUser = { id: 'user-1', email: 'one@example.com' }, existingPlan = false, dialog;
+    const packDb = {
+      auth: { getSession: async () => ({ data: { session: { user: selectedUser } } }) },
+      from: () => ({ select: () => ({
+        in: () => ({ limit: async () => ({ data: existingPlan ? [{ id: 'existing' }] : [], error: null }) }),
+        order: () => ({ limit: () => ({ maybeSingle: async () => ({ data: null }) }) }),
+      }) }),
+    };
+    const packLocation = { href: '', search: '' };
+    const packDocument = {
+      documentElement: { dataset: { theme: 'dark' } },
+      getElementById: (id) => id === 'tiers' ? packGrid : packStatus,
+      body: { append: (node) => { dialog = node; } },
+      createElement: (tag) => {
+        const node = new Element();
+        if (tag === 'dialog') { node.showModal = () => {}; node.remove = () => {}; node.querySelector = () => ({ checked: false }); }
+        return node;
+      },
+    };
+    const packWindow = { ...window, prismDb: packDb, PRISM_PACK: { priceId: 'pack', minutes: 100 },
+      Paddle: { ...window.Paddle, Checkout: { open: (options) => opened.push(options) } } };
+    vm.runInNewContext(fs.readFileSync(`${__dirname}/pricing.js`, 'utf8'), {
+      window: packWindow, document: packDocument, location: packLocation, console, setTimeout, URLSearchParams,
+      fetch: async () => ({ ok: true, json: async () => ({ environment: 'sandbox', token: 'test_public' }) }),
+    });
+    await settle();
+    packGrid.children[0].children.at(-1).events.click();
+    await settle();
+    assert.ok(dialog, 'the add-on dialog is open');
+    if (change === 'account') selectedUser = { id: 'user-2', email: 'two@example.com' };
+    else existingPlan = true;
+    dialog.returnValue = 'go';
+    dialog.events.close();
+    await settle();
+    assert.equal(opened.length, 0, `${change} change must prevent an outdated checkout`);
+    if (change === 'account') assert.match(packStatus.textContent, /account changed/i);
+    else assert.equal(packLocation.href, '/app/settings/plans');
+  }
+
+  {
+    const packGrid = new Element(), packStatus = new Element(), opened = [];
+    let selectedUser = { id: 'user-1' }, finishPreview;
+    const packDb = {
+      auth: { getSession: async () => ({ data: { session: { user: selectedUser } } }) },
+      from: () => ({ select: () => ({
+        in: () => ({ limit: async () => ({ data: [], error: null }) }),
+        order: () => ({ limit: () => ({ maybeSingle: async () => ({ data: null }) }) }),
+      }) }),
+    };
+    const packWindow = { ...window, prismDb: packDb, PRISM_PACK: { priceId: 'pack', minutes: 100 }, Paddle: {
+      ...window.Paddle, PricePreview: () => new Promise((resolve) => { finishPreview = resolve; }),
+      Checkout: { open: (options) => opened.push(options) },
+    } };
+    vm.runInNewContext(fs.readFileSync(`${__dirname}/pricing.js`, 'utf8'), {
+      window: packWindow, document: { documentElement: { dataset: { theme: 'dark' } }, getElementById: (id) => id === 'tiers' ? packGrid : packStatus, createElement: () => new Element() },
+      location: { href: '', search: '?pack=minutes' }, console, setTimeout, URLSearchParams,
+      fetch: async () => ({ ok: true, json: async () => ({ environment: 'sandbox', token: 'test_public' }) }),
+    });
+    await settle();
+    selectedUser = { id: 'user-2' };
+    finishPreview({ data: { details: { lineItems: [] } } });
+    await settle();
+    assert.equal(opened.length, 0, 'pack checkout must not open for an account changed while prices load');
+    assert.match(packStatus.textContent, /account changed/i);
+  }
 
   const disabledGrid = new Element();
   const disabledStatus = new Element();

@@ -12,6 +12,15 @@ export const autoCount = (seconds) => Math.min(MAX_SHORTS, Math.max(1, Math.floo
 
 const truncate = (value, length) => (value.length > length ? value.slice(0, length) : value);
 
+/** Auto can reuse an existing transcript; an explicit language can only reuse one recorded in that language. */
+export function compatibleTranscript(cached, selectedLanguage) {
+  if (!cached) return null;
+  const chosen = typeof selectedLanguage === 'string' ? selectedLanguage.trim() : '';
+  if (!chosen || chosen.toLowerCase() === 'auto') return cached;
+  const recorded = typeof cached.language === 'string' ? cached.language.trim() : '';
+  return recorded && recorded.toLowerCase() === chosen.toLowerCase() ? cached : null;
+}
+
 /**
  * @param options { duration, count, region, customStart, customEnd, excluding, videoType, language, cachedTranscript, onTranscript, onMissed, progress, signal }
  *   language is a name ("Ukrainian") or 'auto'; Auto detects it once and saves it with the transcript.
@@ -22,7 +31,9 @@ export async function analyze(source, configuration_, options) {
   // Moments lost to failed requests: scoring or refining batches that failed after every retry and fallback.
   let missed = 0;
   const configuration = { ...configuration_, onMissed: (n) => { missed += n; } };
-  const { excluding = [], cachedTranscript = null, onTranscript = () => {}, progress = () => {}, signal } = options;
+  const { excluding = [], onTranscript = () => {}, progress = () => {}, signal } = options;
+  // Reusing a transcript in a different (or unknown) language ignores the person's explicit choice.
+  const cachedTranscript = compatibleTranscript(options.cachedTranscript, options.language);
   let videoType = options.videoType ?? 'general';
   const interval = regionInterval(options.region, source.duration, options.customStart, options.customEnd);
   if (excluding.some((e) => e.start <= interval.start && e.end >= interval.end)) throw new GeminiError('noDistinctClips');
@@ -109,9 +120,10 @@ export async function analyze(source, configuration_, options) {
     const timed = shot.words.length > 0 ? shot.words : shot.heard;
     const source_ = timed.length > 0 ? S.captionCues(timed, { start, end: start + duration }) : T.sentenceCaptionGroups(shot.referenceCues);
     const raw = clipCaptions(source_, start, duration);
-    const captions = dropRepeats(dropImpossibleRate(raw));
-    // Many lines removed as impossible or repeated: most likely sung lyrics or music, which the speech model garbles.
-    const garbled = raw.length > 0 && (raw.length - captions.length) / raw.length >= 0.2;
+    const plausible = dropImpossibleRate(raw);
+    const captions = dropRepeats(plausible);
+    // Many implausibly fast lines may be sung lyrics or music that the speech model garbled.
+    const garbled = raw.length > 0 && (raw.length - plausible.length) / raw.length >= 0.2;
     const words = timed.filter((w) => w.start >= start - 0.01 && w.start + w.duration <= start + duration + 0.01).map((w) => ({ ...w, start: w.start - start }));
     const cropKeyframes = candidate.fit
       ? [{ time: 0, position: 0.5, preserveWholeFrame: true }, { time: duration, position: 0.5, preserveWholeFrame: true }]
@@ -229,16 +241,19 @@ export function dropImpossibleRate(cues, maxWordsPerSecond = 5.5) {
   });
 }
 
-/** Speech models sometimes repeat a line they heard twice, or invent one: a line that repeats an earlier one within `window` seconds is dropped. */
-export function dropRepeats(cues, window = 20) {
+/** Remove duplicate entries for the same moment, while keeping phrases the speaker actually repeats later. */
+export function dropRepeats(cues) {
   const key = (text) => text.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
   const lastSeen = new Map();
   return cues.filter((cue) => {
     const text = key(cue.text);
     if (!text) return true;
     const previous = lastSeen.get(text);
-    lastSeen.set(text, cue.start);
-    return previous === undefined || cue.start - previous >= window;
+    const overlap = previous && Math.min(previous.start + previous.duration, cue.start + cue.duration) - Math.max(previous.start, cue.start);
+    const duplicate = previous && Number.isFinite(overlap) && cue.duration > 0 && previous.duration > 0
+      && Math.abs(cue.start - previous.start) <= 0.2 && overlap >= 0.8 * Math.min(previous.duration, cue.duration);
+    if (!duplicate) lastSeen.set(text, cue);
+    return !duplicate;
   });
 }
 
