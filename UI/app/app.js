@@ -591,16 +591,6 @@ async function removeAccount(user) {
   }
 }
 
-/** Name and username in a small dialog; saving updates the profile row behind it. */
-function editProfile() {
-  openDialog(`<form id="profile-form" class="stack"><h2>Edit profile</h2>
-    <label>Name <input name="name" maxlength="60" autocomplete="name"></label>
-    <label>Username <span class="at-input"><span>@</span><input name="username" maxlength="21" spellcheck="false" autocapitalize="none" placeholder="choose one"></span></label>
-    <p id="profile-status" class="muted small" role="status"></p>
-    <div class="row end"><button type="button" class="button ghost" data-action="close">Close</button><button class="button primary profile-save" disabled>Save</button></div></form>`);
-  fillProfile();
-}
-
 /** Emails a link to choose a new password; the link opens the reset form on the sign-in page. */
 async function changePassword() {
   const email = state.session?.user?.email;
@@ -1017,28 +1007,37 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
   } else {
     const initial = esc((email ?? '?')[0].toUpperCase());
     const plan = state.plan, paid = plan && plan.tier !== 'free';
-    const unlimited = u && u.allowance >= 99_999;
     const left = u ? Math.max(0, Math.floor(u.allowance - u.used)) : null;
-    const icon = (path, tone = '') => `<span class="row-icon ${tone}" aria-hidden="true"><svg viewBox="0 0 24 24">${path}</svg></span>`;
-    const chevron = '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>';
-    body = !email ? `<div class="set-list"><div class="list-row"><span class="avatar" aria-hidden="true">?</span><span class="row-text"><strong>Not signed in</strong><span>Sign in to save your projects and stats.</span></span></div></div>` : `
-      <div class="plan-bar">
-        <span class="row-text"><strong>${esc(plan?.name ?? 'Free')} plan</strong><span>${unlimited ? `Unlimited · ${Math.ceil(u.used)} min used this month` : u ? `${left} of ${Math.floor(u.allowance)} min left this month` : 'Usage is unavailable right now.'}</span></span>
-        ${u && !unlimited ? `<span class="plan-meter"><span style="width:${Math.min(100, u.used / u.allowance * 100)}%"></span></span>` : ''}
-        ${PLANS_ON ? `<button class="button plan-cta" data-action="settings-tab" data-tab="plan">${paid ? 'Manage plan' : 'Upgrade'}</button>` : ''}
+    const unlimited = u && u.allowance >= 99_999;
+    const dash = !email ? '' : `<div class="dash-grid">
+        <div class="dash-plan">
+          <span class="dash-eyebrow">${esc(plan?.name ?? 'Free')} plan</span>
+          ${unlimited ? `<b class="dash-big">Unlimited</b><span class="dash-sub">${Math.ceil(u.used)} minutes used this month</span>` : `<b class="dash-big">${left ?? '—'}<small> min left</small></b>
+          <div class="dash-meter"><div style="width:${u ? Math.min(100, u.used / u.allowance * 100) : 0}%"></div></div>
+          <span class="dash-sub">${u ? `${Math.ceil(u.used)} of ${Math.floor(u.allowance)} minutes used this month` : 'Usage is unavailable right now.'}</span>`}
+          <div class="dash-actions">${PLANS_ON ? `<button class="button dash-cta" data-action="settings-tab" data-tab="plan">${paid ? 'Manage plan' : 'Upgrade'}</button>` : ''}<button class="link dash-link" data-action="settings-tab" data-tab="usage">Usage details</button></div>
+        </div>
+        <div class="dash-stats">
+          <div class="dash-stat-row"><div><b id="stat-exports">—</b><span>Exports</span></div><div><b id="stat-shorts">—</b><span>Shorts made</span></div><div><b id="stat-minutes">—</b><span>Minutes of Shorts</span></div></div>
+          <p id="stats-note" class="muted small"></p>
+          <button class="link" data-action="settings-tab" data-tab="overview">Export history →</button>
+        </div>
       </div>
-      <div class="set-list">
-        <div class="list-row profile-row"><span class="who"><span class="avatar" aria-hidden="true">${initial}</span><span class="row-text"><strong>${esc(email)}</strong><span class="muted">Signed in</span></span></span>
-          <span class="row-actions"><button class="button ghost small-button" data-action="edit-profile">Edit profile</button><button class="button ghost small-button" data-action="signout">Sign out</button></span></div>
-      </div>
-      <div class="set-list">
-        <button class="list-row" data-action="settings-tab" data-tab="overview">${icon('<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>', 'sky')}<span class="row-text"><strong>Export history</strong><span>Your exports and stats</span></span>${chevron}</button>
-        <button class="list-row" data-action="settings-tab" data-tab="usage">${icon('<path d="M5 18a8 8 0 1 1 14 0M12 18l4-6"/>', 'sky')}<span class="row-text"><strong>Usage and cloud space</strong><span>Minutes and stored videos</span></span>${chevron}</button>
-        <button class="list-row" data-action="change-password">${icon('<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3"/>', 'sky')}<span class="row-text"><strong>Change password</strong><span id="password-note">We email you a link</span></span>${chevron}</button>
-        <div class="list-row">${icon('<path d="M7 18a5 5 0 0 1-.6-10A6 6 0 0 1 18 9a4.5 4.5 0 0 1-.5 9Z"/>', 'sky')}<span class="row-text"><strong>Cloud sync</strong><span id="sync-text">${esc(syncText(syncStatus()))}</span></span></div>
-      </div>
-      <div class="set-list">
-        <button class="list-row danger" data-action="delete-account">${icon('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>', 'coral')}<span class="row-text"><strong>Delete account</strong><span id="delete-account-note">Removes everything for good. We email you a code first.</span></span>${chevron}</button>
+      <h3 class="group-label">Account</h3>`;
+    body = !email ? `<div class="set-group"><div class="set-row"><span class="who"><span class="avatar" aria-hidden="true">?</span><span><strong>Not signed in</strong><span class="muted small">Sign in to save your projects and stats.</span></span></span></div></div>` : `${dash}
+      <form id="profile-form" class="set-group">
+        <div class="set-row"><span class="who"><span class="avatar" aria-hidden="true">${initial}</span><span><strong>${esc(email)}</strong><span class="muted small">Signed in</span></span></span>
+          <button type="button" class="button ghost" data-action="signout">Sign out</button></div>
+        <label class="set-row field-row"><span>Name</span><input name="name" maxlength="60" autocomplete="name"></label>
+        <label class="set-row field-row"><span>Username</span><span class="at-input"><span>@</span><input name="username" maxlength="21" spellcheck="false" autocapitalize="none" placeholder="choose one"></span>
+          <span id="profile-status" class="muted small" role="status"></span><button class="button primary profile-save" disabled>Save</button></label>
+        <div class="set-row"><span><strong>Password</strong><span id="password-note" class="muted small" role="status">We email you a link to choose a new one.</span></span>
+          <button type="button" class="button ghost" data-action="change-password">Change password</button></div>
+        <div class="set-row"><span><strong>Cloud sync</strong><span id="sync-text" class="muted small">${esc(syncText(syncStatus()))}</span></span></div>
+      </form>
+      <div class="set-group danger-zone">
+        <div class="set-row"><span><strong>Delete account</strong><span id="delete-account-note" class="muted small" role="alert">Removes your projects, Shorts, stats and cloud videos for good. We email you a code first.</span></span>
+          <button class="button ghost danger" data-action="delete-account">Delete account</button></div>
       </div>`;
   }
   // One page: the dashboard is Settings itself; usage, plans and export history open from its cards, with a way back.
@@ -1053,29 +1052,24 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
     $('#promo-status').textContent = error ? error.message : 'Promo code added. Your allowance is updated.';
     if (!error) { await refreshUsage(); showSettings('usage'); }
   });
-  if (state.session && tab === 'overview') fillAccountData(tab);
+  if (state.session && (tab === 'overview' || tab === 'account')) fillAccountData(tab);
   if (state.session && tab === 'account') fillProfile();
   if (tab === 'usage' && email) fillCloudVideo();
 }
 
 /** Name and username (profiles table): filled in, then saved on Save. Usernames are unique; the database has the last word. */
-/** The name and @username on the Settings profile row, when it is on screen. */
-function showWho(name, username) {
-  if (name && $('.who strong')) $('.who strong').textContent = name;
-  if (username && $('.who .muted')) $('.who .muted').textContent = `@${username} · ${state.session.user.email}`;
-}
-
 async function fillProfile() {
   const account = userId();
-  const { data, error } = await db().from('profiles').select('display_name, username').maybeSingle();
-  if (userId() !== account) return;
-  showWho(data?.display_name, data?.username);
   const form = $('#profile-form');
   if (!form) return;
+  const { data, error } = await db().from('profiles').select('display_name, username').maybeSingle();
+  if (!form.isConnected || userId() !== account) return;
   const status = $('#profile-status'), save = form.querySelector('.profile-save');
   if (error) { status.textContent = 'Your profile couldn’t load. Try again later.'; return; }
   form.elements.name.value = data?.display_name ?? '';
   form.elements.username.value = data?.username ?? '';
+  if (data?.display_name) $('.who strong').textContent = data.display_name;
+  if (data?.username) $('.who .muted').textContent = `@${data.username} · ${state.session.user.email}`;
   form.addEventListener('input', () => {
     const username = form.elements.username.value.trim().replace(/^@/, '').toLowerCase();
     if (form.elements.username.value !== username) form.elements.username.value = username;
@@ -1092,7 +1086,7 @@ async function fillProfile() {
     const { error: failed } = await db().from('profiles').update({ display_name, username }).eq('user_id', account);
     if (userId() !== account || !form.isConnected) return;
     status.textContent = !failed ? 'Saved.' : /duplicate|unique/i.test(failed.message) ? `@${username} is taken. Try another.` : 'Couldn’t save. Try again.';
-    if (!failed) showWho(display_name, username);
+    if (!failed) { $('.who strong').textContent = display_name; $('.who .muted').textContent = `@${username} · ${state.session.user.email}`; }
     else save.disabled = false;
   });
 }
@@ -2381,7 +2375,6 @@ document.addEventListener('click', async (event) => {
   }
   else if (action === 'delete-account') deleteAccount();
   else if (action === 'change-password') changePassword();
-  else if (action === 'edit-profile') editProfile();
   else if (action === 'theme') switchTheme(target.dataset.theme);
   else if (action === 'export-dialog') openExportDialog();
   else if (action === 'export-one') openExportDialog(state.selectedId);
