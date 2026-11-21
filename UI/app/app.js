@@ -2343,7 +2343,12 @@ document.addEventListener('click', async (event) => {
     tab?.close();
     if (note) { note.hidden = false; note.textContent = body?.error || 'Couldn’t open your billing page. Try again, or write to support@relioclips.com.'; }
   }
-  else if (action === 'signout') { const { error } = await db().auth.signOut(); if (error) showError('Couldn’t sign out', error.message); }
+  else if (action === 'signout') {
+    const { error } = await db().auth.signOut();
+    // A session already ended on the server (expired, or a password change) still signs out here.
+    if (error && /session missing|not found|invalid/i.test(error.message)) { await db().auth.signOut({ scope: 'local' }).catch(() => {}); setSession(null); renderGate(); }
+    else if (error) showError('Couldn’t sign out', error.message);
+  }
   else if (action === 'delete-account') deleteAccount();
   else if (action === 'change-password') changePassword();
   else if (action === 'theme') switchTheme(target.dataset.theme);
