@@ -602,7 +602,7 @@ details.insp-section:not([open]) { gap: 0; }
 }
 
 /* Settings: a slim blue plan bar, then compact lists whose rows have a colored icon and an arrow. */
-.settings-page { grid-template-columns: minmax(0, 1fr); max-width: 720px; }
+.settings-page { grid-template-columns: minmax(0, 1fr); max-width: none; }
 .settings-page .settings-content { gap: 14px; }
 .settings-back { justify-self: start; }
 .plan-bar { display: flex; align-items: center; gap: 16px; padding: 14px 16px 14px 20px; border-radius: 14px; background: var(--sky); color: #0e0f14; }
