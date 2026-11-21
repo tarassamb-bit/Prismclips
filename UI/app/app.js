@@ -10,7 +10,7 @@ import { stylePreview } from './engine/captions.js';
 import { mountPlayer, unmountPlayer } from './player.js';
 import * as store from './store.js';
 import { hintFor, TOUR_STEPS } from './tour.js';
-import { configureSync, requestSync, sync, syncStatus, onSyncStatus } from './sync.js';
+import { configureSync, requestSync, syncStatus, onSyncStatus } from './sync.js';
 import { uploadVideo, downloadVideo, removeVideos, removeAllVideos, cloudUsage, CloudVideoError } from './cloudvideo.js';
 import { mountLive, mountLiveHome } from './live/live.js';
 
