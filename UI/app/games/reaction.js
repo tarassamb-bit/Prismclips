@@ -8,13 +8,20 @@ export function start(root, { onEnd }) {
   const box = document.createElement('button');
   box.type = 'button';
   box.className = 'reaction-box';
-  const log = document.createElement('p');
-  log.className = 'muted small reaction-log';
+  const log = document.createElement('ol');
+  log.className = 'reaction-dots';
+  log.setAttribute('aria-label', 'Rounds');
   root.replaceChildren(box, log);
 
   let rounds, state, goAt, timer, started;
   const show = (text, mode) => { box.textContent = text; box.dataset.mode = mode; };
-  const report = () => { log.textContent = rounds.map((r, i) => `${i + 1}: ${r == null ? 'early' : `${Math.round(r)} ms`}`).join(' · '); };
+  // Five pills, one per round: its time, "early", or its number while still to come.
+  const report = () => log.replaceChildren(...Array.from({ length: ROUNDS }, (_, i) => {
+    const r = rounds[i], li = document.createElement('li');
+    li.className = i >= rounds.length ? '' : r == null ? 'early' : 'done';
+    li.textContent = i >= rounds.length ? String(i + 1) : r == null ? 'early' : `${Math.round(r)} ms`;
+    return li;
+  }));
   function begin() { rounds = []; started = performance.now(); report(); next(); }
   function next() {
     state = 'waiting';
@@ -40,6 +47,8 @@ export function start(root, { onEnd }) {
   box.addEventListener('pointerdown', tap);
   box.addEventListener('keydown', (event) => { if (event.code === 'Space' || event.key === 'Enter') tap(event); });
   state = 'idle';
+  rounds = [];
+  report();
   show('Tap to start. 5 rounds', 'idle');
   box.focus({ preventScroll: true });
   return () => clearTimeout(timer);
