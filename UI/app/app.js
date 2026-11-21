@@ -974,6 +974,8 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
       : plan?.sub?.next_billed_at ? `Renews on ${when(plan.sub.next_billed_at)}` : paid ? '' : 'No payment needed';
     const check = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>';
     const unlimited = u && u.allowance >= 99_999;
+    // Unlimited accounts see the plan's usual allowance, like a real account would.
+    const uv = unlimited && plan?.upload_minutes ? { used: u.used, allowance: plan.upload_minutes } : u;
     const icon = (path) => `<span class="row-icon sky" aria-hidden="true"><svg viewBox="0 0 24 24">${path}</svg></span>`;
     body = plan ? `<div class="dash-plan plan-hero"><div class="dash-main">
           <span class="dash-eyebrow">Your plan</span>
@@ -985,9 +987,9 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
         ${plan.features.length ? `<ul class="dash-includes" aria-label="Included in your plan">${plan.features.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}
       </div>
       <div class="plan-meters">
-        <div class="box meter-card">${icon('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3Z"/>')}<span class="muted small">Video minutes this month</span>
-          ${unlimited ? `<div class="big-number"><b>Unlimited</b><span>${Math.ceil(u.used)} min used</span></div>` : `<div class="big-number"><b>${u ? Math.ceil(u.used) : '—'}</b><span>${u ? `of ${Math.floor(u.allowance)} min used` : 'Unavailable'}</span></div>
-          <div class="meter ${u && u.used / u.allowance >= 0.85 ? 'warn' : ''}"><div style="width:${u ? Math.min(100, u.used / u.allowance * 100) : 0}%"></div></div>`}</div>
+        <div class="box meter-card">${icon('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3Z"/>')}<span class="muted small">Video minutes this month${unlimited ? ' · Unlimited account' : ''}</span>
+          <div class="big-number"><b>${uv ? Math.ceil(uv.used) : '—'}</b><span>${uv ? `of ${Math.floor(uv.allowance)} min used` : 'Unavailable'}</span></div>
+          <div class="meter ${uv && uv.used / uv.allowance >= 0.85 ? 'warn' : ''}"><div style="width:${uv ? Math.min(100, uv.used / uv.allowance * 100) : 0}%"></div></div></div>
         <div class="box meter-card">${icon('<circle cx="12" cy="12" r="3"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4"/>')}<span class="muted small">Live hours this month</span>
           <div class="big-number"><b>${live ? live.hours_used.toFixed(1) : '—'}</b><span>${live ? `of ${Math.round(live.hours_allowed)} h used` : 'Shown soon'}</span></div>
           <div class="meter ${live && live.hours_used / live.hours_allowed >= 0.85 ? 'warn' : ''}"><div style="width:${live ? Math.min(100, live.hours_used / Math.max(live.hours_allowed, 0.01) * 100) : 0}%"></div></div></div>
@@ -1015,14 +1017,16 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
   } else {
     const initial = esc((email ?? '?')[0].toUpperCase());
     const plan = state.plan, paid = plan && plan.tier !== 'free';
-    const left = u ? Math.max(0, Math.floor(u.allowance - u.used)) : null;
     const unlimited = u && u.allowance >= 99_999;
+    // Unlimited accounts see the plan's usual allowance, like a real account would.
+    const uv = unlimited && plan?.upload_minutes ? { used: u.used, allowance: plan.upload_minutes } : u;
+    const left = uv ? Math.max(0, Math.floor(uv.allowance - uv.used)) : null;
     const dash = !email ? '' : `<div class="dash-grid">
         <div class="dash-plan"><div class="dash-main">
-          <span class="dash-eyebrow">${esc(plan?.name ?? 'Free')} plan</span>
-          ${unlimited ? `<b class="dash-big">Unlimited</b><span class="dash-sub">${Math.ceil(u.used)} minutes used this month</span>` : `<b class="dash-big">${left ?? '—'}<small> min left</small></b>
-          <div class="dash-meter"><div style="width:${u ? Math.min(100, u.used / u.allowance * 100) : 0}%"></div></div>
-          <span class="dash-sub">${u ? `${Math.ceil(u.used)} of ${Math.floor(u.allowance)} minutes used this month` : 'Usage is unavailable right now.'}</span>`}
+          <span class="dash-eyebrow">${esc(plan?.name ?? 'Free')} plan${unlimited ? ' · Unlimited' : ''}</span>
+          <b class="dash-big">${left ?? '—'}<small> min left</small></b>
+          <div class="dash-meter"><div style="width:${uv ? Math.min(100, uv.used / uv.allowance * 100) : 0}%"></div></div>
+          <span class="dash-sub">${uv ? `${Math.ceil(uv.used)} of ${Math.floor(uv.allowance)} minutes used this month` : 'Usage is unavailable right now.'}</span>
           <div class="dash-actions">${PLANS_ON ? `<button class="button dash-cta" data-action="settings-tab" data-tab="plan">${paid ? 'Manage plan' : 'Upgrade'}</button>${unlimited ? '' : '<a class="button dash-buy" href="/pricing?pack=minutes" data-pack="minutes">Buy 100 minutes · €5</a>'}` : ''}<button class="link dash-link" data-action="settings-tab" data-tab="usage">Usage details</button></div></div>
           ${plan ? `<ul class="dash-includes" aria-label="Included in your plan">
             <li>${esc(plan.export === '4K' ? '4K' : plan.export)} exports</li>
