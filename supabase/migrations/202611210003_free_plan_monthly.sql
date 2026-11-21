@@ -17,3 +17,7 @@ returns double precision language sql stable security definer set search_path = 
 $$;
 
 update public.plan_limits set export = '4K' where tier in ('tier1', 'creator', 'studio');
+
+-- Only signed-in people read their usage; anon got the default allowance back.
+revoke execute on function public.my_usage() from public, anon;
+grant execute on function public.my_usage() to authenticated;
