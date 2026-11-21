@@ -974,8 +974,8 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
       : plan?.sub?.next_billed_at ? `Renews on ${when(plan.sub.next_billed_at)}` : paid ? '' : 'No payment needed';
     const check = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>';
     const unlimited = u && u.allowance >= 99_999;
-    // Unlimited accounts see the plan's usual allowance, like a real account would.
-    const uv = unlimited && plan?.upload_minutes ? { used: u.used, allowance: plan.upload_minutes } : u;
+    // Unlimited accounts see the same card as everyone, with their real allowance.
+    const uv = u;
     const icon = (path) => `<span class="row-icon sky" aria-hidden="true"><svg viewBox="0 0 24 24">${path}</svg></span>`;
     body = plan ? `<div class="dash-plan plan-hero"><div class="dash-main">
           <span class="dash-eyebrow">Your plan</span>
@@ -1018,8 +1018,8 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
     const initial = esc((email ?? '?')[0].toUpperCase());
     const plan = state.plan, paid = plan && plan.tier !== 'free';
     const unlimited = u && u.allowance >= 99_999;
-    // Unlimited accounts see the plan's usual allowance, like a real account would.
-    const uv = unlimited && plan?.upload_minutes ? { used: u.used, allowance: plan.upload_minutes } : u;
+    // Unlimited accounts see the same card as everyone, with their real allowance.
+    const uv = u;
     const left = uv ? Math.max(0, Math.floor(uv.allowance - uv.used)) : null;
     const dash = !email ? '' : `<div class="dash-grid">
         <div class="dash-plan"><div class="dash-main">
