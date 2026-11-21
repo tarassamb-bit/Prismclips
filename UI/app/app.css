@@ -630,3 +630,14 @@ details.insp-section:not([open]) { gap: 0; }
 .field-row #profile-status:empty { display: none; }
 #stats-note:empty { display: none; }
 .dash-stats #stats-note { margin: 0; }
+.dash-plan { display: flex; align-items: center; gap: 32px; }
+.dash-main { display: grid; gap: 10px; flex: 1; min-width: 0; }
+.dash-includes { display: grid; gap: 10px; margin: 0; padding: 18px 22px; list-style: none; border-radius: 14px; background: rgb(255 255 255 / .22); font-size: 14px; font-weight: 500; }
+.dash-includes li { display: flex; align-items: center; gap: 10px; }
+.dash-includes li::before { content: ''; flex: none; width: 18px; height: 18px; border-radius: 50%; background: #0e0f14 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233fa9f5' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 12 4 4 8-8'/%3E%3C/svg%3E") center / 12px no-repeat; }
+.dash-title { font-size: 15px; font-weight: 600; }
+.dash-stat-row > div { padding: 14px; border-radius: 12px; background: var(--surface2); gap: 6px; }
+.row-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; }
+.row-icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.row-icon.sky { background: color-mix(in srgb, var(--sky) 16%, transparent); color: var(--sky); }
+@media (max-width: 1100px) { .dash-plan { flex-direction: column; align-items: stretch; } }

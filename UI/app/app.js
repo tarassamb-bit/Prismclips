@@ -1010,15 +1010,26 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
     const left = u ? Math.max(0, Math.floor(u.allowance - u.used)) : null;
     const unlimited = u && u.allowance >= 99_999;
     const dash = !email ? '' : `<div class="dash-grid">
-        <div class="dash-plan">
+        <div class="dash-plan"><div class="dash-main">
           <span class="dash-eyebrow">${esc(plan?.name ?? 'Free')} plan</span>
           ${unlimited ? `<b class="dash-big">Unlimited</b><span class="dash-sub">${Math.ceil(u.used)} minutes used this month</span>` : `<b class="dash-big">${left ?? '—'}<small> min left</small></b>
           <div class="dash-meter"><div style="width:${u ? Math.min(100, u.used / u.allowance * 100) : 0}%"></div></div>
           <span class="dash-sub">${u ? `${Math.ceil(u.used)} of ${Math.floor(u.allowance)} minutes used this month` : 'Usage is unavailable right now.'}</span>`}
-          <div class="dash-actions">${PLANS_ON ? `<button class="button dash-cta" data-action="settings-tab" data-tab="plan">${paid ? 'Manage plan' : 'Upgrade'}</button>` : ''}<button class="link dash-link" data-action="settings-tab" data-tab="usage">Usage details</button></div>
+          <div class="dash-actions">${PLANS_ON ? `<button class="button dash-cta" data-action="settings-tab" data-tab="plan">${paid ? 'Manage plan' : 'Upgrade'}</button>` : ''}<button class="link dash-link" data-action="settings-tab" data-tab="usage">Usage details</button></div></div>
+          ${plan ? `<ul class="dash-includes" aria-label="Included in your plan">
+            <li>${esc(plan.export === '4K' ? '4K' : plan.export)} exports</li>
+            <li>${plan.watermark ? 'Relio watermark on exports' : 'No watermark'}</li>
+            <li>${plan.live_channels} Live channel${plan.live_channels === 1 ? '' : 's'} at once</li>
+            <li>${plan.live_hours} Live hours a month</li>
+          </ul>` : ''}
         </div>
         <div class="dash-stats">
-          <div class="dash-stat-row"><div><b id="stat-exports">—</b><span>Exports</span></div><div><b id="stat-shorts">—</b><span>Shorts made</span></div><div><b id="stat-minutes">—</b><span>Minutes of Shorts</span></div></div>
+          <strong class="dash-title">Your Shorts</strong>
+          <div class="dash-stat-row">
+            <div><span class="row-icon sky" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></span><b id="stat-exports">—</b><span>Exports</span></div>
+            <div><span class="row-icon sky" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 9l3 2-3 2Z"/></svg></span><b id="stat-shorts">—</b><span>Shorts made</span></div>
+            <div><span class="row-icon sky" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span><b id="stat-minutes">—</b><span>Minutes of Shorts</span></div>
+          </div>
           <p id="stats-note" class="muted small"></p>
           <button class="link" data-action="settings-tab" data-tab="overview">Export history →</button>
         </div>
