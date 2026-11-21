@@ -1008,16 +1008,18 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
     const initial = esc((email ?? '?')[0].toUpperCase());
     const plan = state.plan, paid = plan && plan.tier !== 'free';
     const left = u ? Math.max(0, Math.floor(u.allowance - u.used)) : null;
+    const unlimited = u && u.allowance >= 99_999;
     const dash = !email ? '' : `<div class="dash-grid">
         <div class="dash-plan">
           <span class="dash-eyebrow">${esc(plan?.name ?? 'Free')} plan</span>
-          <b class="dash-big">${left ?? '—'}<small> min left</small></b>
+          ${unlimited ? `<b class="dash-big">Unlimited</b><span class="dash-sub">${Math.ceil(u.used)} minutes used this month</span>` : `<b class="dash-big">${left ?? '—'}<small> min left</small></b>
           <div class="dash-meter"><div style="width:${u ? Math.min(100, u.used / u.allowance * 100) : 0}%"></div></div>
-          <span class="dash-sub">${u ? `${Math.ceil(u.used)} of ${Math.floor(u.allowance)} minutes used this month` : 'Usage is unavailable right now.'}</span>
+          <span class="dash-sub">${u ? `${Math.ceil(u.used)} of ${Math.floor(u.allowance)} minutes used this month` : 'Usage is unavailable right now.'}</span>`}
           <div class="dash-actions">${PLANS_ON ? `<button class="button dash-cta" data-action="settings-tab" data-tab="plan">${paid ? 'Manage plan' : 'Upgrade'}</button>` : ''}<button class="link dash-link" data-action="settings-tab" data-tab="usage">Usage details</button></div>
         </div>
         <div class="dash-stats">
           <div class="dash-stat-row"><div><b id="stat-exports">—</b><span>Exports</span></div><div><b id="stat-shorts">—</b><span>Shorts made</span></div><div><b id="stat-minutes">—</b><span>Minutes of Shorts</span></div></div>
+          <p id="stats-note" class="muted small"></p>
           <button class="link" data-action="settings-tab" data-tab="overview">Export history →</button>
         </div>
       </div>
@@ -1100,8 +1102,8 @@ async function fillAccountData(tab) {
     text('#stat-exports', count.format(totals.exports));
     text('#stat-shorts', count.format(totals.shorts));
     text('#stat-minutes', (totals.seconds / 60).toLocaleString(undefined, { maximumFractionDigits: 1 }));
-    text('#stats-note', totals.exports === 0 ? 'Your exported Shorts will appear here.'
-      : totals.exports > 50 ? 'Showing your latest 50 exports. The numbers above include your full history.' : '');
+    text('#stats-note', totals.exports === 0 ? (tab === 'account' ? 'No exports yet. Your numbers show up after your first export.' : 'Your exported Shorts will appear here.')
+      : tab !== 'account' && totals.exports > 50 ? 'Showing your latest 50 exports. The numbers above include your full history.' : '');
     const rows = $('#export-rows');
     if (rows) {
       const quality = { uhd: '4K', full: 'Full', compact: 'Compact', small: 'Small' };
