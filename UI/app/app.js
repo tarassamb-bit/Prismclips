@@ -1039,12 +1039,14 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
       <form id="profile-form" class="set-group">
         <div class="set-row"><span class="who"><span class="avatar" aria-hidden="true">${initial}</span><span><strong>${esc(email)}</strong><span class="muted small">Signed in</span></span></span>
           <button type="button" class="button ghost" data-action="signout">Sign out</button></div>
-        <label class="set-row field-row"><span>Name</span><input name="name" maxlength="60" autocomplete="name"></label>
-        <label class="set-row field-row"><span>Username</span><span class="at-input"><span>@</span><input name="username" maxlength="21" spellcheck="false" autocapitalize="none" placeholder="choose one"></span>
-          <span id="profile-status" class="muted small" role="status"></span><button class="button primary profile-save" disabled>Save</button></label>
+        <div class="set-row profile-fields-row">
+          <label><span>Name</span><input name="name" maxlength="60" autocomplete="name"></label>
+          <label><span>Username</span><span class="at-input"><span>@</span><input name="username" maxlength="21" spellcheck="false" autocapitalize="none" placeholder="choose one"></span></label>
+          <button class="button primary profile-save" disabled>Save</button>
+          <span id="profile-status" class="muted small" role="status"></span>
+        </div>
         <div class="set-row"><span><strong>Password</strong><span id="password-note" class="muted small" role="status">We email you a link to choose a new one.</span></span>
           <button type="button" class="button ghost" data-action="change-password">Change password</button></div>
-        <div class="set-row"><span><strong>Cloud sync</strong><span id="sync-text" class="muted small">${esc(syncText(syncStatus()))}</span></span></div>
       </form>
       <div class="set-group danger-zone">
         <div class="set-row"><span><strong>Delete account</strong><span id="delete-account-note" class="muted small" role="alert">Removes your projects, Shorts, stats and cloud videos for good. We email you a code first.</span></span>
