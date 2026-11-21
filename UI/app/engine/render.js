@@ -31,10 +31,15 @@ export function watermarkAt(time) {
 }
 
 export async function loadWatermark() {
-  markLogo ??= await fetch(new URL('../../icon-192.png', import.meta.url)).then((r) => r.blob()).then(createImageBitmap);
-  markFont ??= new FontFace('Relio Mark', `url(${new URL('../../fonts/SpaceGrotesk-Medium.woff2', import.meta.url)})`, { weight: '500' }).load()
-    .then((face) => (globalThis.document?.fonts ?? globalThis.fonts)?.add(face));
-  await markFont;
+  // A failed logo or font load must not fail the export: the badge then draws without the logo or in the fallback font.
+  try {
+    markLogo ??= await fetch(new URL('../../icon-192.png', import.meta.url)).then((r) => r.blob()).then(createImageBitmap);
+  } catch { markLogo = null; }
+  try {
+    markFont ??= new FontFace('Relio Mark', `url(${new URL('../../fonts/SpaceGrotesk-Medium.woff2', import.meta.url)})`, { weight: '500' }).load()
+      .then((face) => (globalThis.document?.fonts ?? globalThis.fonts)?.add(face));
+    await markFont;
+  } catch { markFont = null; }
 }
 
 /** The brand badge: dark, with a sky-to-sun-to-coral border and the logo; the name types out beside it. */
