@@ -688,3 +688,6 @@ details.insp-section:not([open]) { gap: 0; }
 .history-empty .button { margin-top: 8px; justify-self: center; }
 #stats-note:empty { display: none; }
 .history-empty[hidden], .history-table[hidden] { display: none; }
+.crumb { border: 0; padding: 0; background: none; font: inherit; color: var(--text2); cursor: pointer; }
+.crumb:hover { color: var(--text); text-decoration: underline; text-underline-offset: 4px; }
+.crumb-sep { margin: 0 10px; color: var(--text2); }

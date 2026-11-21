@@ -947,7 +947,7 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
     ['usage', 'Usage', used, '<path d="M5 18a8 8 0 1 1 14 0M12 18l4-6"/>', 'Minutes of video you can make Shorts from, and your space for videos in the cloud.'],
     ...(PLANS_ON ? [['plan', 'Plan', state.plan?.name ?? 'Plans and extra packs', '<path d="M3 7h18v12H3zM3 11h18M7 15h4"/>', 'Your plan, what it includes, and extra minutes or Live hours.']] : []),
   ];
-  const [, title, , , blurb] = NAV.find(([id]) => id === tab);
+  const [, title] = NAV.find(([id]) => id === tab);
   let body;
   if (tab === 'usage') {
     const percent = u ? Math.min(100, u.used / u.allowance * 100) : 0;
@@ -1061,9 +1061,10 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
       </div>`;
   }
   // One page: the dashboard is Settings itself; usage, plans and export history open from its cards, with a way back.
-  const back = tab === 'account' ? '' : '<button class="link settings-back" data-action="settings-tab" data-tab="account">← Settings</button>';
+  // Sub-pages show where they are in the title bar: Settings › Plan, with Settings leading back.
+  if (tab !== 'account') $('#screen-title').innerHTML = `<button class="crumb" data-action="settings-tab" data-tab="account">Settings</button><span class="crumb-sep" aria-hidden="true">›</span>${title}`;
   $('#app').innerHTML = `<section class="settings-layout settings-page">
-    <div class="settings-content">${back}${tab === 'account' ? '' : `<header class="set-head"><h2>${title}</h2><p class="muted">${blurb}</p></header>`}${body}</div></section>`;
+    <div class="settings-content">${body}</div></section>`;
   $('#promo-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const code = new FormData(event.currentTarget).get('code').trim();
