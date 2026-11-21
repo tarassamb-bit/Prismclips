@@ -868,7 +868,7 @@ function showLive(channel) {
     return mountLiveHome($('#app'), db, (key) => showLive(key));
   }
   setUrl(`/app/live/${channel ?? 'new'}`);
-  mountLive($('#app'), db, channel, () => showLive());
+  mountLive($('#app'), db, channel, { home: () => showLive(), open: (key) => showLive(key) });
 }
 
 async function showSettings(tab = state.settingsTab ?? 'account') {

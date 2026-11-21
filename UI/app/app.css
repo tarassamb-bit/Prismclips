@@ -517,7 +517,7 @@ details.insp-section:not([open]) { gap: 0; }
 .live-tab .dot.waiting { background: #ff9f0a; }
 .live-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 .live-title { display: inline-flex; align-items: center; gap: 10px; font-size: 22px; }
-.live-head #live-stop { margin-left: auto; }
+.live-head #live-stop, .live-head #live-stop[hidden] + #live-delete { margin-left: auto; }
 .live-pill { font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 6px; background: var(--surface2); color: var(--text2, inherit); letter-spacing: .02em; }
 .live-pill.on { background: #e91916; color: #fff; }
 .live-stage { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 12px; }
