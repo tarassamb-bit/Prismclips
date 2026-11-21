@@ -227,7 +227,7 @@ export async function render(source, segment, options) {
   } = await mediabunny();
   step('checking the video encoder');
   if (!(await canEncodeVideo(codec, { width, height, bitrate }).catch(() => false))) {
-    throw new ShortMakerError('cannotExport', codec === 'hevc' ? "This browser can't encode HEVC; choose 1080p · H.264." : 'This browser cannot encode H.264 video.');
+    throw new ShortMakerError('cannotExport', width > 1080 ? "This browser or computer can't encode 4K; choose 1080p · H.264." : codec === 'hevc' ? "This browser can't encode HEVC; choose 1080p · H.264." : 'This browser cannot encode H.264 video.');
   }
   const bars = await letterbox(source, segment.start, segment.duration);
   await loadWatermark();

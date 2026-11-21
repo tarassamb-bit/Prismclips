@@ -41,7 +41,7 @@ const state = {
 
 // MARK: Sign-in and usage
 
-// Plans: Free exports 720p with the watermark; a paid plan exports 1080p without it. While plans are off, or the plan
+// Plans: Free exports 720p with the watermark; a paid plan exports up to 4K without it. While plans are off, or the plan
 // couldn't be read, nobody is limited to 720p and the watermark stays.
 const paidPlan = () => PLANS_ON && !!state.plan && state.plan.tier !== 'free';
 const freePlan = () => PLANS_ON && state.plan?.tier === 'free';
@@ -1039,7 +1039,7 @@ async function fillAccountData(tab) {
       : totals.exports > 50 ? 'Showing your latest 50 exports. The numbers above include your full history.' : '');
     const rows = $('#export-rows');
     if (rows) {
-      const quality = { full: 'Full', compact: 'Compact', small: 'Small' };
+      const quality = { uhd: '4K', full: 'Full', compact: 'Compact', small: 'Small' };
       rows.innerHTML = totals.latest.map((row) => `<tr><td title="${esc(new Date(row.created_at).toLocaleString())}">${esc(new Date(row.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }))}</td>
         <td class="num">${count.format(row.short_count)}</td><td class="num">${lengthText(row.seconds)}</td><td>${esc(quality[row.quality] ?? row.quality)}</td></tr>`).join('');
     }
@@ -2075,13 +2075,13 @@ function openExportDialog(onlyId = null) {
       ${esc(s.suggestedTitle || `Short ${i + 1}`)} <span class="muted small">${clock(s.duration)}</span></label>`).join('');
   // shortcut: Safari reports HEVC encoding as hardware but runs it at ~4 frames/s (2.5 min per 20 s Short), so it isn't offered there; drop when Safari's HEVC gets fast.
   const safari = /Safari\//.test(navigator.userAgent) && !/Chrome|Chromium|Edg|CriOS|FxiOS/.test(navigator.userAgent);
-  const qualities = Object.entries(EXPORT_QUALITIES).filter(([k]) => !(safari && k === 'compact') && (!freePlan() || k === 'small')).map(([k, q]) => `<option value="${k}">${q.title} — ${q.detail}</option>`).join('');
+  const qualities = Object.entries(EXPORT_QUALITIES).filter(([k]) => !(safari && k === 'compact') && (!freePlan() || k === 'small') && (k !== 'uhd' || paidPlan())).map(([k, q]) => `<option value="${k}">${q.title} — ${q.detail}</option>`).join('');
   openDialog(`
     <form id="export-form" class="stack">
       <h2>Export Shorts</h2>
       ${list}
       <label>Quality <select name="quality">${qualities}</select></label>
-      <p class="muted small">Each Short downloads as an MP4.${freePlan() ? ' Free exports are 720p with the Relio watermark; <a href="/pricing">a plan</a> gives 1080p without it.' : ''}</p>
+      <p class="muted small">Each Short downloads as an MP4.${freePlan() ? ' Free exports are 720p with the Relio watermark; <a href="/pricing">a plan</a> gives 1080p or 4K without it.' : ''}</p>
       <p id="export-status" class="muted small" role="status"></p>
       <div class="row end">
         <button type="button" class="button ghost" data-action="close">Cancel</button>
@@ -2129,6 +2129,7 @@ async function exportShorts(ids, quality, folder = null) {
   const task = beginTask('Exporting…');
   // Free exports are 720p; the choice is checked here too, not only in the dialog.
   if (freePlan()) quality = 'small';
+  if (quality === 'uhd' && !paidPlan()) quality = 'full'; // 4K is for paid plans
   const settings = { ...exportSettings(quality), watermark: !paidPlan() };
   const seconds = [];
   let made = 0, failure = null, bookkeepingFailure = null;
