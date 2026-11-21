@@ -170,7 +170,7 @@
     }
 
     if (config.environment === 'sandbox') window.Paddle.Environment.set('sandbox');
-    const customer = (await db?.from('subscriptions').select('customer_id').order('event_at', { ascending: false }).limit(1).maybeSingle().catch(() => null))?.data?.customer_id;
+    const customer = (await Promise.resolve(db?.from('subscriptions').select('customer_id').order('event_at', { ascending: false }).limit(1).maybeSingle()).catch(() => null))?.data?.customer_id;
     // Paddle Retain knows the person by their Paddle customer ID (never our own ID or their email).
     window.Paddle.Initialize({ token: config.token, eventCallback: onCheckoutEvent, ...(customer && { pwCustomer: { id: customer } }) });
     paddle = window.Paddle;
