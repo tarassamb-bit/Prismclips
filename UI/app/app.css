@@ -600,3 +600,27 @@ details.insp-section:not([open]) { gap: 0; }
   .field-row > span:first-child { flex: none; }
   .field-row > input, .field-row > .at-input { max-width: none; }
 }
+
+/* Settings dashboard: a solid blue plan card and a stats card side by side, the account list under them. */
+.settings-page { grid-template-columns: minmax(0, 1fr); max-width: none; }
+.settings-back { justify-self: start; }
+.dash-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; }
+.dash-plan { display: grid; gap: 10px; align-content: start; padding: 24px; border-radius: 16px; background: var(--sky); color: #0e0f14; }
+.dash-eyebrow { font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.dash-big { font: 600 48px/1 var(--display); letter-spacing: -.03em; }
+.dash-big small { font-size: 18px; font-weight: 500; letter-spacing: 0; }
+.dash-meter { height: 10px; border-radius: 99px; background: rgb(14 15 20 / .18); overflow: hidden; }
+.dash-meter > div { height: 100%; border-radius: 99px; background: #0e0f14; }
+.dash-sub { font-size: 13px; }
+.dash-actions { display: flex; align-items: center; gap: 16px; margin-top: 4px; flex-wrap: wrap; }
+.dash-cta { background: #0e0f14; border-color: #0e0f14; color: #f6f3ec; font-weight: 500; }
+.dash-link { color: #0e0f14; text-decoration: underline; text-underline-offset: 3px; }
+.dash-stats { display: grid; gap: 16px; align-content: space-between; padding: 24px; border-radius: 16px; background: var(--surface1); border: 1px solid var(--border); }
+.dash-stats .link { justify-self: start; }
+.dash-stat-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.dash-stat-row > div { display: grid; gap: 2px; }
+.dash-stat-row b { font: 500 32px/1.1 var(--display); letter-spacing: -.02em; }
+.dash-stat-row span { color: var(--text2); font-size: 13px; }
+@media (max-width: 760px) { .dash-grid { grid-template-columns: 1fr; } }
+.field-row .profile-save { margin-left: auto; }
+.field-row #profile-status:empty { display: none; }

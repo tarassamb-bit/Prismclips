@@ -936,19 +936,17 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
   state.settingsTab = tab;
   setScreen('settings');
   setUrl(`/app/settings/${tab}`);
-  if (state.session && (tab === 'usage' || tab === 'plan')) await refreshUsage();
+  if (state.session && (tab === 'usage' || tab === 'plan' || tab === 'account')) await refreshUsage();
   if (userId() !== account || state.screen !== 'settings' || state.settingsTab !== tab) return;
   const u = state.usage;
   const email = state.session?.user?.email;
   const used = u ? `${Math.ceil(u.used)} of ${Math.floor(u.allowance)} min used` : 'Minutes used';
   const NAV = [
     ['account', 'Account', email ?? 'Sign in to track your stats', '<path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0"/>', 'Your profile, sign-in and sync.'],
-    ['overview', 'Overview', 'Stats and exports', '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>', 'What you have made with Relio, and your exports.'],
+    ['overview', 'Export history', 'Stats and exports', '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>', 'What you have made with Relio, and your exports.'],
     ['usage', 'Usage', used, '<path d="M5 18a8 8 0 1 1 14 0M12 18l4-6"/>', 'Minutes of video you can make Shorts from, and your space for videos in the cloud.'],
     ...(PLANS_ON ? [['plan', 'Plan', state.plan?.name ?? 'Plans and extra packs', '<path d="M3 7h18v12H3zM3 11h18M7 15h4"/>', 'Your plan, what it includes, and extra minutes or Live hours.']] : []),
   ];
-  const nav = NAV.map(([id, title, detail, icon]) => `<button class="settings-item" data-action="settings-tab" data-tab="${id}" ${tab === id ? 'aria-current="page"' : ''}>
-      <svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg><span><strong>${title}</strong><span class="muted small">${esc(detail)}</span></span></button>`).join('');
   const [, title, , , blurb] = NAV.find(([id]) => id === tab);
   let body;
   if (tab === 'usage') {
@@ -1008,35 +1006,42 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
       <p id="stats-note" class="muted small" role="status">Loading your export history…</p>`;
   } else {
     const initial = esc((email ?? '?')[0].toUpperCase());
-    body = !email ? `<div class="set-group"><div class="set-row"><span class="who"><span class="avatar" aria-hidden="true">?</span><span><strong>Not signed in</strong><span class="muted small">Sign in to save your projects and stats.</span></span></span></div></div>` : `
-      <div class="set-group">
-        <div class="set-row"><span class="who"><span class="avatar" aria-hidden="true">${initial}</span><span><strong>${esc(email)}</strong><span class="muted small">Signed in</span></span></span>
-          <button class="button ghost" data-action="signout">Sign out</button></div>
+    const plan = state.plan, paid = plan && plan.tier !== 'free';
+    const left = u ? Math.max(0, Math.floor(u.allowance - u.used)) : null;
+    const dash = !email ? '' : `<div class="dash-grid">
+        <div class="dash-plan">
+          <span class="dash-eyebrow">${esc(plan?.name ?? 'Free')} plan</span>
+          <b class="dash-big">${left ?? '—'}<small> min left</small></b>
+          <div class="dash-meter"><div style="width:${u ? Math.min(100, u.used / u.allowance * 100) : 0}%"></div></div>
+          <span class="dash-sub">${u ? `${Math.ceil(u.used)} of ${Math.floor(u.allowance)} minutes used this month` : 'Usage is unavailable right now.'}</span>
+          <div class="dash-actions">${PLANS_ON ? `<button class="button dash-cta" data-action="settings-tab" data-tab="plan">${paid ? 'Manage plan' : 'Upgrade'}</button>` : ''}<button class="link dash-link" data-action="settings-tab" data-tab="usage">Usage details</button></div>
+        </div>
+        <div class="dash-stats">
+          <div class="dash-stat-row"><div><b id="stat-exports">—</b><span>Exports</span></div><div><b id="stat-shorts">—</b><span>Shorts made</span></div><div><b id="stat-minutes">—</b><span>Minutes of Shorts</span></div></div>
+          <button class="link" data-action="settings-tab" data-tab="overview">Export history →</button>
+        </div>
       </div>
-      <h3 class="group-label">Profile</h3>
+      <h3 class="group-label">Account</h3>`;
+    body = !email ? `<div class="set-group"><div class="set-row"><span class="who"><span class="avatar" aria-hidden="true">?</span><span><strong>Not signed in</strong><span class="muted small">Sign in to save your projects and stats.</span></span></span></div></div>` : `${dash}
       <form id="profile-form" class="set-group">
+        <div class="set-row"><span class="who"><span class="avatar" aria-hidden="true">${initial}</span><span><strong>${esc(email)}</strong><span class="muted small">Signed in</span></span></span>
+          <button type="button" class="button ghost" data-action="signout">Sign out</button></div>
         <label class="set-row field-row"><span>Name</span><input name="name" maxlength="60" autocomplete="name"></label>
-        <label class="set-row field-row"><span>Username</span><span class="at-input"><span>@</span><input name="username" maxlength="21" spellcheck="false" autocapitalize="none" placeholder="choose one"></span></label>
-        <div class="set-row"><span id="profile-status" class="muted small" role="status"></span><button class="button primary" disabled>Save</button></div>
-      </form>
-      <h3 class="group-label">Security</h3>
-      <div class="set-group">
-        <div class="set-row"><span><strong>Email</strong><span class="muted small">${esc(email)}</span></span></div>
+        <label class="set-row field-row"><span>Username</span><span class="at-input"><span>@</span><input name="username" maxlength="21" spellcheck="false" autocapitalize="none" placeholder="choose one"></span>
+          <span id="profile-status" class="muted small" role="status"></span><button class="button primary profile-save" disabled>Save</button></label>
         <div class="set-row"><span><strong>Password</strong><span id="password-note" class="muted small" role="status">We email you a link to choose a new one.</span></span>
-          <button class="button ghost" data-action="change-password">Change password</button></div>
-      </div>
-      <h3 class="group-label">Sync</h3>
-      <div class="set-group">
+          <button type="button" class="button ghost" data-action="change-password">Change password</button></div>
         <div class="set-row"><span><strong>Cloud sync</strong><span id="sync-text" class="muted small">${esc(syncText(syncStatus()))}</span></span></div>
-      </div>
+      </form>
       <div class="set-group danger-zone">
         <div class="set-row"><span><strong>Delete account</strong><span id="delete-account-note" class="muted small" role="alert">Removes your projects, Shorts, stats and cloud videos for good. We email you a code first.</span></span>
           <button class="button ghost danger" data-action="delete-account">Delete account</button></div>
       </div>`;
   }
-  $('#app').innerHTML = `<section class="settings-layout">
-    <nav class="settings-nav" aria-label="Settings categories">${nav}</nav>
-    <div class="settings-content"><header class="set-head"><h2>${title}</h2><p class="muted">${blurb}</p></header>${body}</div></section>`;
+  // One page: the dashboard is Settings itself; usage, plans and export history open from its cards, with a way back.
+  const back = tab === 'account' ? '' : '<button class="link settings-back" data-action="settings-tab" data-tab="account">← Settings</button>';
+  $('#app').innerHTML = `<section class="settings-layout settings-page">
+    <div class="settings-content">${back}${tab === 'account' ? '' : `<header class="set-head"><h2>${title}</h2><p class="muted">${blurb}</p></header>`}${body}</div></section>`;
   $('#promo-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const code = new FormData(event.currentTarget).get('code').trim();
@@ -1045,7 +1050,7 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
     $('#promo-status').textContent = error ? error.message : 'Promo code added. Your allowance is updated.';
     if (!error) { await refreshUsage(); showSettings('usage'); }
   });
-  if (state.session && tab === 'overview') fillAccountData(tab);
+  if (state.session && (tab === 'overview' || tab === 'account')) fillAccountData(tab);
   if (state.session && tab === 'account') fillProfile();
   if (tab === 'usage' && email) fillCloudVideo();
 }
@@ -1057,7 +1062,7 @@ async function fillProfile() {
   if (!form) return;
   const { data, error } = await db().from('profiles').select('display_name, username').maybeSingle();
   if (!form.isConnected || userId() !== account) return;
-  const status = $('#profile-status'), save = form.querySelector('button');
+  const status = $('#profile-status'), save = form.querySelector('.profile-save');
   if (error) { status.textContent = 'Your profile couldn’t load. Try again later.'; return; }
   form.elements.name.value = data?.display_name ?? '';
   form.elements.username.value = data?.username ?? '';
