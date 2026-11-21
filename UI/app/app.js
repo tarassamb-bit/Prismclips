@@ -59,8 +59,8 @@ function accountToken(account = userId()) {
   };
 }
 
-// shortcut: plans and checkout show on localhost only (the Paddle sandbox experiment); show them everywhere when billing goes live.
-const PLANS_ON = ['localhost', '127.0.0.1'].includes(location.hostname);
+// Plans and checkout are live everywhere (Paddle sandbox on localhost, live on relioclips.com).
+const PLANS_ON = true;
 
 async function refreshUsage() {
   if (!state.session) return;
@@ -1568,7 +1568,7 @@ function reportGenerationError(error, retry) {
     if (cause.failure === 'noStrongClips' || cause.failure === 'noDistinctClips') return showError('No Shorts found', cause.message);
     if (cause.failure === 'musicVideo') return showError('This is a music video', cause.message);
     if (cause.failure === 'signIn' || cause.status === 401 || cause.status === 403) return showError('Check your sign-in', cause.message);
-    if (cause.failure === 'usageLimit') { track('limit_reached'); return showError('You’ve reached your beta limit', cause.message, 'limit'); }
+    if (cause.failure === 'usageLimit') { track('limit_reached'); return showError('You’ve used this month’s minutes', cause.message, 'limit'); }
     if (cause.failure === 'request' && [429, 500, 502, 503, 504, 546].includes(cause.status)) return showError('Relio AI is unavailable right now', cause.message, 'temporary', retry);
   }
   if (error instanceof ShortMakerError) return showError('Couldn’t make Shorts', error.message);

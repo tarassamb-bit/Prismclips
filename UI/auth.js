@@ -1,7 +1,7 @@
 // The full-screen sign-in and sign-up screen, shared by the website (/login, /signup) and the web app's gate.
 // Modes: signin, signup (name, unique username, email, password + confirm, terms, "I'm human" check), forgot (email a reset
 // link), reset (choose a new password from that link). Google sign-in on the first two. Uses the page's Supabase client and,
-// when loaded, beta.js (spots left, waitlist), turnstile.js and analytics.js.
+// when loaded, turnstile.js and analytics.js.
 window.prismAuth = (() => {
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const USERNAME = /^[a-z0-9_]{3,20}$/;
@@ -40,7 +40,7 @@ window.prismAuth = (() => {
         <button type="button" class="auth-eye" data-eye="${id}" aria-label="Show password" aria-pressed="false">${EYE}</button></div>`;
 
   function mount(root, { db, mode = 'signin', onSignedIn = () => {}, redirectTo = location.origin + '/app/' } = {}) {
-    let current = mode, human = null, beta = null;
+    let current = mode, human = null;
     const params = new URLSearchParams(location.search);
     // Google and the password-reset email come back here; a failure arrives in the address.
     const hash = new URLSearchParams(location.hash.slice(1));
@@ -50,7 +50,7 @@ window.prismAuth = (() => {
     function render(notice = '') {
       const titles = {
         signin: ['Welcome back', 'Sign in to keep making Shorts.'],
-        signup: ['Create your account', 'Free during the beta. No API key, no credit card.'],
+        signup: ['Create your account', 'Start free. No credit card.'],
         forgot: ['Reset your password', 'Enter your email and we’ll send you a link to choose a new one.'],
         reset: ['Choose a new password', 'Pick a password you don’t use anywhere else.'],
       };
@@ -68,7 +68,7 @@ window.prismAuth = (() => {
                 <li>Your projects follow you to any device</li>
               </ul>
             </div>
-            <p class="auth-fine">Beta · Made for creators</p>
+            <p class="auth-fine">Made for creators</p>
           </aside>
           <main class="auth-main">
             <div class="auth-panel">
@@ -216,7 +216,6 @@ window.prismAuth = (() => {
           }, 400);
         });
         human = window.prismTurnstile?.mount(root.querySelector('.auth-human')) ?? null;
-        beta = window.prismBeta?.attach(db, form, { note: 'auth-spots', field: 'auth-field', button: 'auth-submit' }) ?? null;
       }
 
       form.addEventListener('submit', async (event) => {
@@ -250,7 +249,6 @@ window.prismAuth = (() => {
             options: { emailRedirectTo: redirectTo, data: { name: field('name').value.trim(), username, ...(turnstile ? { turnstile } : {}) } },
           });
           if (error) {
-            if (await beta?.signUpFailed(error)) return say('');
             // A username taken between the check and the sign-up refuses the account; say so.
             if (/Database error|unexpected_failure/i.test(error.message)) {
               const { data: free } = await Promise.resolve(db.rpc('username_available', { p_username: username })).catch(() => ({}));
@@ -276,10 +274,6 @@ window.prismAuth = (() => {
     }
 
     render(returned ? friendly({ message: returned }) : '');
-    if (returned && /Database error/i.test(returned)) {
-      // A Google sign-up refused by the database is most likely the beta being full.
-      window.prismBeta?.spots(db).then((s) => { if (s?.left === 0) { current = 'signup'; render('The beta is full. Join the waitlist below.'); beta?.signUpFailed({ message: 'BETA_FULL' }); } });
-    }
     db.auth.onAuthStateChange((event) => { if (event === 'PASSWORD_RECOVERY' && current !== 'reset') { current = 'reset'; render(); } });
     return { show(next) { current = next; render(); } };
   }

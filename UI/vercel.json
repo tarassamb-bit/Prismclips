@@ -10,16 +10,6 @@
       "source": "/account",
       "destination": "/login",
       "permanent": true
-    },
-    {
-      "source": "/pricing",
-      "destination": "/app",
-      "permanent": false
-    },
-    {
-      "source": "/pricing.html",
-      "destination": "/app",
-      "permanent": false
     }
   ],
   "rewrites": [

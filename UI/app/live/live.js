@@ -161,7 +161,7 @@ function notice(text) {
 }
 
 // shortcut: plans and packs show on localhost only (the Paddle sandbox experiment), like the rest of the app.
-const PLANS_ON = ['localhost', '127.0.0.1'].includes(location.hostname);
+const PLANS_ON = true;
 let hoursAt = 0;
 
 /** "3.2 of 100 Live hours used this month", with a way to buy more; read every half minute. */

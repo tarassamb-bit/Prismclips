@@ -20,9 +20,6 @@
     return;
   }
 
-  // shortcut: Pricing shows only on localhost (sandbox checkout); drop this check when billing goes live on relioclips.com.
-  if (!['localhost', '127.0.0.1'].includes(location.hostname)) document.querySelectorAll('[data-billing]').forEach((link) => link.remove());
-
   document.querySelectorAll('#main-nav a, .header-actions a').forEach((link) => {
     const destination = new URL(link.href, location.href);
     // Vercel cleanUrls serves /pricing for pricing.html, so compare paths without the extension.
