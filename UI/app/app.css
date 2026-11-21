@@ -59,6 +59,7 @@ details.insp-section:not([open]) { gap: 0; }
 .button.primary { background: var(--sky); border-color: var(--sky); color: #0e0f14; font-weight: 500; }
 .button.ghost { background: transparent; }
 .button.danger { color: var(--coral); }
+.box.danger-zone { border-color: color-mix(in srgb, var(--coral) 45%, transparent); }
 .button:disabled { opacity: .5; cursor: default; }
 .link { background: none; border: 0; color: var(--accent); cursor: pointer; padding: 0; font-size: 13px; }
 .link.danger { color: var(--coral); }

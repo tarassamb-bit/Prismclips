@@ -258,8 +258,8 @@ test('account deletion cannot continue under a new account after video cleanup',
     removeAllVideos: () => gate.promise,
     db: () => ({ rpc: () => { rpcCalls++; } }), store: { deleteOwner: async () => deleted++ },
   });
-  vm.runInContext(section('async function deleteAccount(', '\nasync function deleteProjectNow('), context);
-  const work = context.deleteAccount();
+  vm.runInContext(section('async function removeAccount(', '\n/** Emails a link'), context);
+  const work = context.removeAccount(state.session.user);
   state.session = { user: { id: 'second' } };
   gate.resolve();
   await work;

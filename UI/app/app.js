@@ -522,10 +522,38 @@ async function changeProject(id, change) {
 
 /** Deletes a project for good in one step: here, in the cloud copy of the account, and its stored video (unless another project
  * uses the same video). Opening the ⋯ menu first is what guards against a slip. */
-/** Deletes the account for good: every cloud video first, then the account with all its rows, then this browser's copy. */
+/** Asks for a code sent to the account's email, then deletes the account. The database also refuses without a fresh code. */
 async function deleteAccount() {
   const user = state.session?.user;
-  if (!user || !confirm(`Are you sure you want to delete your account ${user.email}? Your projects, Shorts, stats and every video in the cloud are deleted for good. This can't be undone.`)) return;
+  if (!user?.email) return;
+  const say = (text) => { if ($('#delete-account-note')) $('#delete-account-note').textContent = text; };
+  say('Sending a code to your email…');
+  const { error } = await db().auth.signInWithOtp({ email: user.email, options: { shouldCreateUser: false } });
+  if (error) return say(`Couldn't send the code: ${error.message}`);
+  say('');
+  openDialog(`<form id="delete-form" class="stack"><h2>Delete your account?</h2>
+    <p>Your projects, Shorts, stats and every video in the cloud are deleted for good. This can't be undone.</p>
+    <p>We sent a code to <strong>${esc(user.email)}</strong>. Enter it to confirm.</p>
+    <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="Code from the email" aria-label="Code from the email">
+    <p id="delete-form-note" class="error small" role="alert"></p>
+    <div class="row end"><button type="button" class="button ghost" data-action="close">Cancel</button><button class="button ghost danger">Delete for good</button></div></form>`);
+  const form = $('#delete-form');
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const token = form.elements.code.value.replace(/\D/g, '');
+    const note = $('#delete-form-note');
+    if (token.length < 6) { note.textContent = 'Enter the code from the email.'; return; }
+    form.querySelector('button.danger').disabled = true;
+    note.textContent = 'Checking…';
+    const { error: wrong } = await db().auth.verifyOtp({ email: user.email, token, type: 'email' });
+    if (wrong) { form.querySelector('button.danger').disabled = false; note.textContent = 'That code is wrong or has expired. Check the newest email, or cancel and try again.'; return; }
+    closeDialog();
+    await removeAccount(user);
+  });
+}
+
+/** Deletes the account for good: every cloud video first, then the account with all its rows, then this browser's copy. */
+async function removeAccount(user) {
   const note = (text) => { if (userId() === user.id && $('#delete-account-note')) $('#delete-account-note').textContent = text; };
   const token = accountToken(user.id);
   note('Deleting…');
@@ -549,6 +577,16 @@ async function deleteAccount() {
     if (userId() === user.id) setSession(null);
     renderGate();
   }
+}
+
+/** Emails a link to choose a new password; the link opens the reset form on the sign-in page. */
+async function changePassword() {
+  const email = state.session?.user?.email;
+  const note = $('#password-note');
+  if (!email || !note) return;
+  note.textContent = 'Sending…';
+  const { error } = await db().auth.resetPasswordForEmail(email, { redirectTo: location.origin + '/login?mode=reset' });
+  note.textContent = error ? `Couldn't send the email: ${error.message}` : `We sent a link to ${email}. Open it to choose a new password.`;
 }
 
 async function deleteProjectNow(id) {
@@ -960,7 +998,7 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
     body = `<div class="box">
         <div class="who"><span class="avatar" aria-hidden="true">${esc((email ?? '?')[0].toUpperCase())}</span><div><strong>${email ? esc(email) : 'Not signed in'}</strong><span class="muted small">${email ? 'Signed in' : 'Sign in to track your stats'}</span></div></div>
         <p class="muted small">Your projects, Shorts and videos are saved to your account, and each export adds its date, number of Shorts, length and quality to your stats under Overview.</p>
-        ${email ? '<div class="row"><button class="button ghost" data-action="signout">Sign out</button><button class="button ghost danger" data-action="delete-account">Delete account</button></div><p id="delete-account-note" class="error small" role="alert"></p>' : ''}
+        ${email ? '<div class="row"><button class="button ghost" data-action="signout">Sign out</button></div>' : ''}
       </div>
       ${email ? `<form id="profile-form" class="box stack">
         <strong>Profile</strong>
@@ -971,7 +1009,13 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
         <div class="row"><button class="button primary" disabled>Save</button><span id="profile-status" class="muted small" role="status"></span></div>
       </form>` : ''}
       ${email ? `<div class="box"><strong>Cloud sync</strong><p id="sync-text">${esc(syncText(syncStatus()))}</p>
-        <p class="muted small">Your projects, folders, Shorts and edits sync by themselves to every device you sign in on. Their videos are kept in the cloud too: see Usage.</p></div>` : ''}`;
+        <p class="muted small">Your projects, folders, Shorts and edits sync by themselves to every device you sign in on. Their videos are kept in the cloud too: see Usage.</p></div>` : ''}
+      ${email ? `<div class="box"><strong>Password</strong>
+        <p class="muted small">We email you a link to choose a new password, so only someone with access to your inbox can change it.</p>
+        <div class="row"><button class="button ghost" data-action="change-password">Change password</button></div><p id="password-note" class="muted small" role="status"></p></div>
+      <div class="box danger-zone"><strong>Danger zone</strong>
+        <p class="muted small">Deleting your account removes your projects, Shorts, stats and every video in the cloud for good. We email you a code to confirm.</p>
+        <div class="row"><button class="button ghost danger" data-action="delete-account">Delete account</button></div><p id="delete-account-note" class="error small" role="alert"></p></div>` : ''}`;
   }
   $('#app').innerHTML = `<section class="settings-layout">
     <nav class="settings-nav" aria-label="Settings categories">${nav}</nav>
@@ -2301,6 +2345,7 @@ document.addEventListener('click', async (event) => {
   }
   else if (action === 'signout') { const { error } = await db().auth.signOut(); if (error) showError('Couldn’t sign out', error.message); }
   else if (action === 'delete-account') deleteAccount();
+  else if (action === 'change-password') changePassword();
   else if (action === 'theme') switchTheme(target.dataset.theme);
   else if (action === 'export-dialog') openExportDialog();
   else if (action === 'export-one') openExportDialog(state.selectedId);
