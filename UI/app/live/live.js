@@ -29,14 +29,14 @@ const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', min
 /** Stops what the recording screen runs in the background (updates, the graph, the typing prefix). */
 function unmount() { clearInterval(polling); cancelAnimationFrame(frame); clearTimeout(typing); host = null; }
 
-/** Live's home, like Home for projects: a card to start a recording and the recordings of the last two days, each opening
+/** Live's home, like Home for projects: a card to start a recording and the recordings still kept, each opening
  * the recording screen through `open(key)` (null for a new one; "name" for Twitch, "kick/name" for Kick). */
 export async function mountLiveHome(element, dbGetter, open) {
   unmount();
-  const since = new Date(Date.now() - 2 * 86400_000).toISOString();
+  // Every recording still kept: the server deletes one a day after it stops.
   const [sessionRows, clipRows, limits] = await Promise.all([
-    dbGetter().from('live_sessions').select('id,login,platform,state,created').gte('created', since).order('created', { ascending: false }),
-    dbGetter().from('live_clips').select('session_id,at,short').gte('created', since).order('at', { ascending: false }),
+    dbGetter().from('live_sessions').select('id,login,platform,state,created').order('created', { ascending: false }),
+    dbGetter().from('live_clips').select('session_id,at,short').order('at', { ascending: false }),
     PLANS_ON ? dbGetter().rpc('my_live_limits') : { error: true },
   ]);
   if (!element.isConnected) return;
@@ -67,7 +67,7 @@ export async function mountLiveHome(element, dbGetter, open) {
       <span class="start-arrow" aria-hidden="true">→</span></button>
     <div class="row between"><h2>Recordings</h2>${hours ? `<a class="muted small live-home-hours" href="/app/settings/plan">${hours.hours_used.toFixed(1)} of ${Math.round(hours.hours_allowed)} Live hours used this month</a>` : ''}</div>
     ${cards.length ? `<div class="grid">${cards.map(card).join('')}</div>`
-      : '<div class="empty"><strong>Your recordings will appear here</strong><span class="muted">Start a live recording, and its Shorts show up here for two days.</span></div>'}
+      : '<div class="empty"><strong>Your recordings will appear here</strong><span class="muted">Start a live recording, and its Shorts show up here. A recording is deleted a day after it stops.</span></div>'}
   </section>`;
   for (const button of element.querySelectorAll('[data-live-open]')) button.addEventListener('click', () => open(button.dataset.liveOpen || null));
 }
@@ -199,14 +199,13 @@ async function start(text) {
   return true;
 }
 
-/** Recordings of the last two days and their clips; the graph only for the channel on screen. */
+/** The recordings still kept and their clips; the graph only for the channel on screen. */
 async function refresh() {
   const client = db?.();
   if (!client) return;
-  const since = new Date(Date.now() - 2 * 86400_000).toISOString();
   const [sessionRows, clipRows] = await Promise.all([
-    client.from('live_sessions').select('id,login,platform,state,detail,buffered,chat,created').gte('created', since).order('created', { ascending: false }),
-    client.from('live_clips').select('id,session_id,at,why,duration,short,media_id').gte('created', since).order('at', { ascending: false }),
+    client.from('live_sessions').select('id,login,platform,state,detail,buffered,chat,created').order('created', { ascending: false }),
+    client.from('live_clips').select('id,session_id,at,why,duration,short,media_id').order('at', { ascending: false }),
   ]);
   if (sessionRows.error || clipRows.error) return;
   // Everything new is gathered first and swapped in at once: the graph is never drawn from a list that has no graph yet.
@@ -283,7 +282,7 @@ function render() {
   const current = channel?.row;
   if (!current && fixed) {
     shownChannel = null;
-    setHtml(view, '<div class="empty"><strong>This recording is gone</strong><span class="muted">Recordings and their Shorts are kept for two days.</span></div>');
+    setHtml(view, '<div class="empty"><strong>This recording is gone</strong><span class="muted">A recording and its Shorts are deleted a day after it stops.</span></div>');
     return;
   }
   if (!current) {
@@ -340,7 +339,7 @@ function render() {
   // Only finished Shorts show: one being made appears once it's ready.
   const own = clips.filter((c) => channel.ids.has(c.session_id) && c.short?.state === 'ready');
   const ready = own.filter((c) => c.short.state === 'ready');
-  view.querySelector('#live-count').textContent = ready.length ? `${ready.length} ready · kept for 2 days` : '';
+  view.querySelector('#live-count').textContent = ready.length ? `${ready.length} ready · ${ACTIVE.includes(current.state) ? 'kept until a day after the recording stops' : 'deleted a day after the recording stopped'}` : '';
   const problem = current.detail ? `<p class="error">${esc(current.detail)}</p>` : '';
   const list = view.querySelector('#live-clips');
   const changed = setHtml(list, problem + (own.length === 0

@@ -24,7 +24,7 @@ const KEY = process.env.SUPABASE_SECRET_KEY;
 const CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
 const KEEP = 15 * 60, BEFORE = 60, AFTER = 30;
 const MAX_STREAMS = Number(process.env.MAX_STREAMS) || 5;
-const OFFLINE_GIVE_UP = 30 * 60 * 1000, CLIP_DAYS = 2;
+const OFFLINE_GIVE_UP = 30 * 60 * 1000, CLIP_DAYS = 2, STOPPED_DAYS = 1;
 const DATA = path.join(tmpdir(), 'relio-live');
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const log = (...parts) => console.log(new Date().toISOString(), ...parts);
@@ -348,6 +348,13 @@ async function tick() {
 
 /** Live clips are a starting point, not storage: after two days they and their videos go. */
 async function cleanup() {
+  // A recording is deleted a day after it stopped, with its Shorts (their rows cascade; the files go below as orphans).
+  // `updated` is the watcher's last write, which comes every few seconds while it records: about when it stopped.
+  const done = await db(`live_sessions?state=in.(stopped,ended,error)&updated=lt.${new Date(Date.now() - STOPPED_DAYS * 86400_000).toISOString()}&select=id,login&limit=200`, { headers: { Prefer: '' } });
+  if (done.length) {
+    await db(`live_sessions?id=in.(${done.map((r) => r.id).join(',')})`, { method: 'DELETE' });
+    log('cleanup', done.length, 'stopped recordings');
+  }
   const old = await db(`live_clips?created=lt.${new Date(Date.now() - CLIP_DAYS * 86400_000).toISOString()}&select=id,user_id,media_id,short&limit=200`, { headers: { Prefer: '' } });
   for (const clip of old) {
     if (clip.short?.id) await removeShort(clip.short.id);
