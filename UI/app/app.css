@@ -653,3 +653,6 @@ details.insp-section:not([open]) { gap: 0; }
 .profile-fields-row #profile-status:empty { display: none; }
 @media (max-width: 640px) { .profile-fields-row { grid-template-columns: 1fr; } }
 .profile-fields-row .profile-save { height: 41px; }
+.set-group.danger-zone .set-row + .set-row { border-top: 1px solid color-mix(in srgb, #d64532 25%, transparent); }
+.set-group.danger-zone .danger-outline { border-color: #d64532; color: #d64532; background: transparent; font-weight: 600; }
+.set-group.danger-zone .danger-outline:hover { background: color-mix(in srgb, #d64532 10%, transparent); }
