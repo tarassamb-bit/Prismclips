@@ -34,6 +34,7 @@ function harness(overrides = {}) {
       loadProject: async () => structuredClone(state.project), saveProject: async () => {},
     },
     showError: (...args) => calls.errors.push(args), openDialog: (html) => calls.dialogs.push(html),
+    freePlan: () => false, paidPlan: () => true, location: { hostname: 'localhost' },
     showGames() {}, closeGames() {}, leaveGames() {}, refreshUsage() {},
     reportGenerationError: (...args) => calls.errors.push(args),
     db: () => ({ rpc: async () => ({ data: true }) }),
@@ -238,7 +239,7 @@ test('an account change stops work and clears the previous account editor withou
 test('background credentials reject an account change during session lookup', async () => {
   const gate = deferred();
   let account = 'first';
-  const context = vm.createContext({ userId: () => account, db: () => ({ auth: { getSession: () => gate.promise } }), DOMException });
+  const context = vm.createContext({ userId: () => account, db: () => ({ auth: { getSession: () => gate.promise } }), DOMException, location: { hostname: 'localhost' } });
   vm.runInContext(section('function accountToken(', '\nasync function refreshUsage('), context);
   const token = context.accountToken();
   const lookup = token();
@@ -257,8 +258,8 @@ test('account deletion cannot continue under a new account after video cleanup',
     removeAllVideos: () => gate.promise,
     db: () => ({ rpc: () => { rpcCalls++; } }), store: { deleteOwner: async () => deleted++ },
   });
-  vm.runInContext(section('async function deleteAccount(', '\nasync function deleteProjectNow('), context);
-  const work = context.deleteAccount();
+  vm.runInContext(section('async function removeAccount(', '\n/** Emails a link'), context);
+  const work = context.removeAccount(state.session.user);
   state.session = { user: { id: 'second' } };
   gate.resolve();
   await work;
@@ -355,14 +356,14 @@ test('the renderer passes only selected PCM frames to the audio encoder', async 
     VideoSampleSink: class { async *samples() { yield { timestamp: 0, draw() {}, close() {} }; } },
     AudioSampleSink: class { async *samples() { yield audioSample; } },
   };
-  const code = read('UI/app/engine/render.js').replace(/^import .*;\n/gm, '').replace(/export /g, '');
+  const code = read('UI/app/engine/render.js').replace(/^import .*;\n/gm, '').replace(/export /g, '').replaceAll('import.meta.url', "'file:///render.js'");
   const ctx = { fillRect() {}, setTransform() {}, save() {}, beginPath() {}, rect() {}, clip() {}, restore() {} };
-  const context = vm.createContext({
+  const context = vm.createContext({ navigator: { userAgent: "" },
     mediabunny: async () => lib, letterbox: async () => ({}), eased: (x) => x, elements: () => [], drawCaptions() {},
     OffscreenCanvas: class { getContext() { return ctx; } }, Blob, EXPORT_QUALITIES: {}, ShortMakerError: class extends Error {}, URL,
   });
   vm.runInContext(code, context);
-  await context.render({ duration: 1, width: 640, height: 360, video: {}, audio: {} }, { start: .025, duration: .1, captions: [] }, {});
+  await context.render({ duration: 1, width: 640, height: 360, video: {}, audio: {} }, { start: .025, duration: .1, captions: [] }, { watermark: false });
   assert.equal(captured.length, 1);
   assert.equal(captured[0].at, 0);
   assert.deepEqual(captured[0].data, Array.from({ length: 100 }, (_, i) => 25 + i));
@@ -384,15 +385,15 @@ for (const phase of ['last frame', 'finalize']) test(`muted render rejects cance
     CanvasSource: class { async add() {} close() {} },
     VideoSampleSink: class { async *samples() { yield sample; } },
   };
-  const code = read('UI/app/engine/render.js').replace(/^import .*;\n/gm, '').replace(/export /g, '');
-  const context = vm.createContext({
+  const code = read('UI/app/engine/render.js').replace(/^import .*;\n/gm, '').replace(/export /g, '').replaceAll('import.meta.url', "'file:///render.js'");
+  const context = vm.createContext({ navigator: { userAgent: '' },
     mediabunny: async () => lib, letterbox: async () => ({}), eased: (x) => x, elements: () => [], drawCaptions() {},
     OffscreenCanvas: class { getContext() { return canvasContext; } }, Blob, EXPORT_QUALITIES: {},
     ShortMakerError: class extends Error {}, URL, console,
   });
   vm.runInContext(code, context);
   await assert.rejects(context.render(source, { start: 0, duration: .1, captions: [], isMuted: true }, {
-    signal: controller.signal,
+    watermark: false, signal: controller.signal,
     progress: (p) => { if (phase === 'last frame' && p === 1) controller.abort(); },
   }), { name: 'AbortError' });
 });

@@ -25,6 +25,7 @@
   <link rel="preload" href="fonts/SpaceGrotesk-Medium.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="styles.css">
   <script src="site.js" defer></script>
+  <script src="/bug-report.js" defer></script>
   <!-- Vercel Web Analytics and Speed Insights: cookieless page views and load times. -->
   <script src="/analytics.js" defer></script>
   <script defer src="/_vercel/insights/script.js"></script>
@@ -54,6 +55,8 @@
         <a href="/features">Features</a>
         <a href="/how-it-works">How it works</a>
         
+        <a href="/pricing" data-billing>Pricing</a>
+        
         <a href="/faq">FAQs</a>
         <a href="/changelog">Changelog</a>
       </nav>
@@ -82,7 +85,7 @@
   <footer class="site-footer">
     <div class="container footer-main">
       <div class="footer-brand"><a class="brand" href="/" aria-label="Relio Clips home"><img src="icon.png" width="28" height="28" alt=""><span>Relio Clips<span class="brand-dot">.</span></span></a><p>One in. Many out.</p></div>
-      <nav aria-label="Footer navigation"><a href="/download">Download</a><a href="/about">About</a><a href="/login">Your account</a><a href="/faq">Help & FAQs</a><a href="https://github.com/tarassamb-bit/Prismclips/issues">Feedback ↗</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a></nav>
+      <nav aria-label="Footer navigation"><a href="/download">Download</a><a href="/about">About</a><a href="/login">Your account</a><a href="/faq">Help & FAQs</a><a href="#feedback" data-bug-report="feedback">Send feedback</a><a href="#report-bug" data-bug-report>Report a bug</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/refund">Refunds</a><a href="mailto:support@relioclips.com">Contact</a></nav>
     </div>
     <div class="container footer-bottom"><span>Built for creators. Open to everyone.</span><span>© 2026 Relio Clips <span class="separator">/</span> Relio beta</span></div>
   </footer>

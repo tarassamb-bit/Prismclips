@@ -4,6 +4,28 @@
 //   POST ?action=portal                      link to the Paddle billing portal for their subscriptions
 const { ACTIVE, HttpError, send, fail, requireEnv, paddle, supabase, getUser, syncSubscription } = require('./_lib');
 
+// The one-time packs (Paddle sandbox and live prices): 100 extra video minutes, or 10 extra Live hours, for the month they're bought.
+const MINUTES = { table: 'minute_packs', field: 'minutes', amount: 100 }, HOURS = { table: 'live_packs', field: 'hours', amount: 10 };
+const PACKS = {
+  pri_01m7wykejd7qj2jm895kpb8cyy: MINUTES, pri_01m7z8ycnqttzw183g03j59jre: MINUTES,
+  pri_01m7x801j9rtht27jw31r9vavh: HOURS, pri_01m7z8yd2m4w7cv2nasnt49grn: HOURS,
+};
+
+/** Saves the packs of a paid transaction to the account, once per transaction. */
+async function recordPacks(transaction, userId) {
+  if (!['paid', 'completed'].includes(transaction.status)) return;
+  for (const table of ['minute_packs', 'live_packs']) {
+    const kinds = (transaction.items ?? []).map((item) => ({ pack: PACKS[item.price?.id], quantity: item.quantity ?? 1 })).filter((x) => x.pack?.table === table);
+    if (!kinds.length) continue;
+    const field = kinds[0].pack.field, total = kinds.reduce((sum, x) => sum + x.pack.amount * x.quantity, 0);
+    const { response, text } = await supabase(`${table}?on_conflict=transaction_id`, {
+      method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
+      body: JSON.stringify({ transaction_id: transaction.id, user_id: userId, [field]: total }),
+    });
+    if (!response.ok) throw new HttpError(502, `Supabase returned ${response.status}: ${text}`);
+  }
+}
+
 async function userSubscriptions(userId, filter = '') {
   const { response, body } = await supabase(
     `subscriptions?user_id=eq.${userId}${filter}&select=id,customer_id&order=event_at.desc&limit=20`,
@@ -25,7 +47,10 @@ module.exports = async (req, res) => {
         if (!/^txn_[a-z0-9]+$/.test(transactionId)) throw new HttpError(400, 'Invalid transaction ID.');
         const transaction = await paddle(`/transactions/${transactionId}`);
         if (transaction.custom_data?.supabase_user_id !== user.id) throw new HttpError(403, 'This purchase belongs to another account.');
-        // Paddle attaches the subscription a moment after payment; the browser asks again.
+        await recordPacks(transaction, user.id);
+        // A pack on its own is done here; for a plan, Paddle attaches the subscription a moment after payment and the browser asks again.
+        const forPlan = (transaction.items ?? []).some((item) => item.price?.billing_cycle);
+        if (!forPlan) return send(res, 200, { result: 'pack' });
         if (!transaction.subscription_id) return send(res, 202, { pending: true });
         return send(res, 200, { result: await syncSubscription(transaction.subscription_id) });
       }
@@ -55,3 +80,4 @@ module.exports = async (req, res) => {
     fail(res, error);
   }
 };
+module.exports.recordPacks = recordPacks;

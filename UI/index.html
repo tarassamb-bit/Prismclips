@@ -6,12 +6,12 @@
   <meta name="theme-color" content="#0E0F14" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
   <title>Relio Clips — Long video. Short-form magic.</title>
-  <meta name="description" content="Turn long videos into ready-to-post shorts with captions. Free beta, runs in your browser.">
+  <meta name="description" content="Turn long videos into short clips with captions. Review, edit, and export in your browser. Free to start.">
   <link rel="canonical" href="https://relioclips.com/">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Relio Clips">
   <meta property="og:title" content="Relio Clips — Long video. Short-form magic.">
-  <meta property="og:description" content="Turn long videos into ready-to-post shorts with captions. Free beta, runs in your browser.">
+  <meta property="og:description" content="Turn long videos into short clips with captions. Review, edit, and export in your browser. Free to start.">
   <meta property="og:url" content="https://relioclips.com/">
   <meta property="og:image" content="https://relioclips.com/og-image.png">
   <meta property="og:image:width" content="1200">
@@ -24,6 +24,7 @@
   <link rel="preload" href="fonts/SpaceGrotesk-Medium.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="styles.css">
   <script src="site.js" defer></script>
+  <script src="/bug-report.js" defer></script>
   <script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "Organization", "@id": "https://relioclips.com/#org", "name": "Relio Clips", "url": "https://relioclips.com/", "logo": "https://relioclips.com/icon-512.png"}, {"@type": "SoftwareApplication", "name": "Relio Clips", "url": "https://relioclips.com/", "description": "Turns long videos into vertical Shorts with captions, in your browser. AI finds the moments; you make the final cut. Desktop apps are also available.", "operatingSystem": "Web, Windows, macOS, Linux", "applicationCategory": "MultimediaApplication", "publisher": {"@id": "https://relioclips.com/#org"}, "image": "https://relioclips.com/og-image.png"}]}</script>
   <!-- Vercel Web Analytics and Speed Insights: cookieless page views and load times. -->
   <script src="/analytics.js" defer></script>
@@ -54,6 +55,8 @@
         <a href="/features">Features</a>
         <a href="/how-it-works">How it works</a>
         
+        <a href="/pricing" data-billing>Pricing</a>
+        
         <a href="/faq">FAQs</a>
         <a href="/changelog">Changelog</a>
       </nav>
@@ -68,11 +71,11 @@
 
     <section class="home-hero container" aria-labelledby="hero-title">
       <div class="home-hero-copy">
-        <a class="release-note" href="/changelog"><span class="live-dot"></span> A fresh perspective on short-form <span class="release-tag">BETA</span><svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+        <a class="release-note" href="/changelog"><span class="live-dot"></span> A fresh perspective on short-form<svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a>
         <h1 id="hero-title">Long video.<br><span>Short-form<br>magic.</span></h1>
         <p class="hero-description">Your next great Short is already in your video. Relio finds the moments, frames the story, and adds the captions. You make the final cut.</p>
         <div class="hero-actions"><a class="button button-primary" href="/signup" data-cta>Try it free <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a><a class="button button-ghost" href="/how-it-works">See how it works <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a></div>
-        <p class="hero-footnote">Free beta <span>·</span> Runs in your browser, nothing to install <span>·</span> Mac app also available</p>
+        <p class="hero-footnote">Free to start <span>·</span> Runs in your browser, nothing to install <span>·</span> Mac app also available</p>
       </div>
       <div class="home-hero-visual">
         <div class="preview-label"><span class="live-dot"></span> THE GOOD PART STARTS HERE <span>01 / RELIO EDITOR</span></div>
@@ -91,19 +94,19 @@
     <section class="container feature-benefits" aria-labelledby="steps-title">
       <div class="section-heading"><h2 id="steps-title">One video in.<br><span class="muted-heading">Shorts out.</span></h2><a class="text-link" href="/how-it-works">See the workflow <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a></div>
       <div class="card-grid">
-        <article class="info-card"><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg><h3>Find the moments</h3><p>Relio reads the whole video and picks clips with a hook, the context and a payoff, cut on whole sentences.</p></article>
-        <article class="info-card"><svg class="icon" aria-hidden="true"><use href="#i-frame"/></svg><h3>Frame the speaker</h3><p>Each Short is cropped to 9:16 and follows whoever is talking. Screens and gameplay stay whole.</p></article>
-        <article class="info-card"><svg class="icon" aria-hidden="true"><use href="#i-captions"/></svg><h3>Caption every word</h3><p>Word-timed captions in seven styles. Review, edit, then export 1080 × 1920 MP4s.</p></article>
+        <article class="info-card"><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg><h3>Find the moments</h3><p>Relio looks across your chosen range for clips with a hook, context and a payoff. Review the suggestions and fine-tune the cuts.</p></article>
+        <article class="info-card"><svg class="icon" aria-hidden="true"><use href="#i-frame"/></svg><h3>Frame the story</h3><p>Choose a tracked vertical crop, fit the whole frame, or use a split layout. Review and adjust the framing before export.</p></article>
+        <article class="info-card"><svg class="icon" aria-hidden="true"><use href="#i-captions"/></svg><h3>Make captions yours</h3><p>Choose from seven caption styles, review the timing and text, then export vertical MP4s.</p></article>
       </div>
     </section>
-    <aside class="page-next container"><div><p class="eyebrow">FREE DURING THE BETA</p><h2>Make your first Short in your browser.</h2></div><a class="button button-primary" href="/signup" data-cta>Try it free <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a></aside>
+    <aside class="page-next container"><div><p class="eyebrow">FREE TO START</p><h2>Make your first Short in your browser.</h2></div><a class="button button-primary" href="/signup" data-cta>Try it free <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a></aside>
   </main>
   <footer class="site-footer">
     <div class="container footer-main">
       <div class="footer-brand"><a class="brand" href="/" aria-label="Relio Clips home"><img src="icon.png" width="28" height="28" alt=""><span>Relio Clips<span class="brand-dot">.</span></span></a><p>One in. Many out.</p></div>
-      <nav aria-label="Footer navigation"><a href="/download">Download</a><a href="/about">About</a><a href="/login">Your account</a><a href="/faq">Help & FAQs</a><a href="https://github.com/tarassamb-bit/Prismclips/issues">Feedback ↗</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a></nav>
+      <nav aria-label="Footer navigation"><a href="/download">Download</a><a href="/about">About</a><a href="/login">Your account</a><a href="/faq">Help & FAQs</a><a href="#feedback" data-bug-report="feedback">Send feedback</a><a href="#report-bug" data-bug-report>Report a bug</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/refund">Refunds</a><a href="mailto:support@relioclips.com">Contact</a></nav>
     </div>
-    <div class="container footer-bottom"><span>Built for creators. Open to everyone.</span><span>© 2026 Relio Clips <span class="separator">/</span> Relio beta</span></div>
+    <div class="container footer-bottom"><span>Built for creators. Open to everyone.</span><span>© 2026 Relio Clips <span class="separator">/</span> Relio Clips</span></div>
   </footer>
 </body>
 </html>

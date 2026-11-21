@@ -13,3 +13,5 @@ UI/updates/
 .env
 .env.*
 !.env.example
+.agent37.env
+.paddle.env

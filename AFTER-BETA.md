@@ -5,9 +5,7 @@ and who found it. Tick them off (`- [x]`) when fixed.
 
 ## Web app: Create Shorts screen
 
-- [ ] **"How many" is confusing** (Auto is now the default, 2026-11-05; the picker redesign is still open) (owner, 2026-11-04). The − Auto + stepper doesn't make clear that Auto is a choice, and it
-  jumps to 4 every time a video is chosen. Make it a picker you click (like "Approx. length"), with **Auto** as a visible
-  option, and keep Auto unless the person changes it.
+- [x] **"How many" is confusing** (owner, 2026-11-04). Replaced the stepper with a picker that shows **Auto** and the available counts; Auto remains selected until the person changes it.
 - [x] **"Approx. length" starts at 45 seconds** (owner, 2026-11-04). It should start at **Auto**, like the rest of the
   settings.
 
@@ -22,7 +20,7 @@ and who found it. Tick them off (`- [x]`) when fixed.
 - [ ] **Safari can't export HEVC** fast (≈4 frames/s), so the option is hidden in Safari.
 - [ ] **Caption timing is approximate**, weaker with music under the voice. A speech-to-text service with word timestamps
   would fix it (costs a little per hour of audio).
-- [ ] **Prism AI can be slow at busy times.** Supabase's free plan stops a request after 150 s; Mimo 2.6 stays.
+- [x] **Prism AI can be slow at busy times.** The web app's AI runs on Vercel (300 s, `api/gemini.js`), not Supabase's 150 s; slowest real answer 95 s (checked 2026-11-21). Vercel Pro is needed once payments are live (Hobby is non-commercial).
 - [ ] **Sign-up emails** come from "Supabase Auth" with Supabase's plain text, and its built-in sender only sends a few per
   hour. Supabase only lets you edit the email text with your own sender (custom SMTP). Fix: a free sender such as Brevo
   (single verified sender, no domain needed) or an own domain + Resend, then paste the branded templates from

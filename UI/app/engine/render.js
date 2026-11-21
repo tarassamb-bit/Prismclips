@@ -31,10 +31,15 @@ export function watermarkAt(time) {
 }
 
 export async function loadWatermark() {
-  markLogo ??= await fetch(new URL('../../icon-192.png', import.meta.url)).then((r) => r.blob()).then(createImageBitmap);
-  markFont ??= new FontFace('Relio Mark', `url(${new URL('../../fonts/SpaceGrotesk-Medium.woff2', import.meta.url)})`, { weight: '500' }).load()
-    .then((face) => (globalThis.document?.fonts ?? globalThis.fonts)?.add(face));
-  await markFont;
+  // A failed logo or font load must not fail the export: the badge then draws without the logo or in the fallback font.
+  try {
+    markLogo ??= await fetch(new URL('../../icon-192.png', import.meta.url)).then((r) => r.blob()).then(createImageBitmap);
+  } catch { markLogo = null; }
+  try {
+    markFont ??= new FontFace('Relio Mark', `url(${new URL('../../fonts/SpaceGrotesk-Medium.woff2', import.meta.url)})`, { weight: '500' }).load()
+      .then((face) => (globalThis.document?.fonts ?? globalThis.fonts)?.add(face));
+    await markFont;
+  } catch { markFont = null; }
 }
 
 /** The brand badge: dark, with a sky-to-sun-to-coral border and the logo; the name types out beside it. */
@@ -188,6 +193,9 @@ function drawSoftBackground(ctx, sample, sourceWidth, sourceHeight) {
 /** Draws one frame into the 1080×1920 context (already scaled to the output size). `sample` has draw(ctx, x, y, w, h): a decoded
  * frame when exporting, a video element in the live player. */
 export function drawFrame(ctx, sample, segment, sourceWidth, sourceHeight, time, bars) {
+  // A vertical crop enlarges the picture about 2×; the default "low" smoothing makes that visibly soft.
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, 1080, 1920);
   for (const op of layoutAt(segment, time, sourceWidth, sourceHeight, bars)) {
@@ -214,7 +222,7 @@ export function drawFrame(ctx, sample, segment, sourceWidth, sourceHeight, time,
  * The video's audio is kept unless the Short is muted.
  */
 export async function render(source, segment, options) {
-  const { width = 1080, height = 1920, codec = 'avc', bitrate = 12e6, metadata = {}, progress = () => {}, step = () => {}, signal } = options;
+  const { width = 1080, height = 1920, codec = 'avc', bitrate = 12e6, metadata = {}, progress = () => {}, step = () => {}, signal, watermark = true } = options;
   signal?.throwIfAborted();
   if (![segment.start, segment.duration].every(Number.isFinite) || segment.start < 0 || segment.duration <= 0 || segment.start + segment.duration > source.duration + 0.05) {
     throw new ShortMakerError('invalidRange');
@@ -224,7 +232,7 @@ export async function render(source, segment, options) {
   } = await mediabunny();
   step('checking the video encoder');
   if (!(await canEncodeVideo(codec, { width, height, bitrate }).catch(() => false))) {
-    throw new ShortMakerError('cannotExport', codec === 'hevc' ? "This browser can't encode HEVC; choose 1080p · H.264." : 'This browser cannot encode H.264 video.');
+    throw new ShortMakerError('cannotExport', width > 1080 ? "This browser or computer can't encode 4K; choose 1080p." : codec === 'hevc' ? "This browser can't make the smaller file; choose 1080p." : 'This browser can\'t export video. Try a current Chrome, Edge or Safari.');
   }
   const bars = await letterbox(source, segment.start, segment.duration);
   await loadWatermark();
@@ -236,7 +244,9 @@ export async function render(source, segment, options) {
   const output = new Output({ format: new Mp4OutputFormat({ fastStart: 'in-memory' }), target: new BufferTarget() });
   if (metadata.title || metadata.description) output.setMetadataTags({ title: metadata.title || undefined, description: metadata.description || undefined });
   // Safari's encoder in the default "quality" mode takes a few frames and then never answers; "realtime" encodes every frame.
-  const videoSource = new CanvasSource(canvas, { codec, bitrate, keyFrameInterval: 2, latencyMode: 'realtime' });
+  // Other browsers keep "quality": realtime gives up picture quality for speed.
+  const safari = /Safari\//.test(navigator.userAgent) && !/Chrome|Chromium|CriOS|Edg|Android/.test(navigator.userAgent);
+  const videoSource = new CanvasSource(canvas, { codec, bitrate, keyFrameInterval: 2, ...(safari ? { latencyMode: 'realtime' } : {}) });
   output.addVideoTrack(videoSource, { frameRate: FPS });
   const keepAudio = segment.isMuted !== true && source.audio;
   const audioSource = keepAudio ? new AudioSampleSource({ codec: 'aac', bitrate: 160_000 }) : null;
@@ -250,7 +260,7 @@ export async function render(source, segment, options) {
     ctx.setTransform(width / 1080, 0, 0, height / 1920, 0, 0);
     drawFrame(ctx, sample, segment, source.width, source.height, time, bars);
     drawCaptions(ctx, layers, time);
-    drawWatermark(ctx, time);
+    if (watermark) drawWatermark(ctx, time);
     await videoSource.add(time, 1 / FPS);
     cancelled();
     progress(Math.min(1, (index + 1) / count));

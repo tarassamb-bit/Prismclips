@@ -22,6 +22,11 @@ function set(state, message = '') {
 export function configureSync(options) {
   ctx = options;
   store.onSave(() => requestSync());
+  // Changes made on other devices arrive by themselves: when this tab comes back into view or online, and every minute while it's open.
+  if (typeof document === 'undefined') return;
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') requestSync(0); });
+  addEventListener('online', () => requestSync(0));
+  setInterval(() => { if (document.visibilityState === 'visible') requestSync(0); }, 60_000);
 }
 
 let timer = 0, running = false, again = false;
@@ -62,11 +67,22 @@ const batches = (list, size) => Array.from({ length: Math.ceil(list.length / siz
 
 async function fetchCloud(db, table, userId) {
   const rows = [];
-  for (let from = 0; from < 10_000; from += 1000) {
+  let after = null;
+  while (true) {
     checkAccount(userId);
-    const { data, error } = await db.from(table).select('id, updated_at').eq('user_id', userId).order('id').range(from, from + 999);
+    let query = db.from(table).select('id, updated_at').eq('user_id', userId).order('id').limit(1000);
+    if (after !== null) query = query.gt('id', after);
+    const { data, error } = await query;
     checkAccount(userId);
     if (error) throw error;
+    if (!Array.isArray(data)) throw new Error('Cloud sync returned an incomplete project list. Your local items are safe; try Sync again.');
+    // Never interpret an incomplete or repeating page as remote deletions.
+    for (const row of data) {
+      if (typeof row?.id !== 'string' || (after !== null && row.id <= after)) {
+        throw new Error('Cloud sync returned an invalid project list. Your local items are safe; try Sync again.');
+      }
+      after = row.id;
+    }
     rows.push(...data);
     if (data.length < 1000) break;
   }

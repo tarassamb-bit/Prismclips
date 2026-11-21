@@ -34,8 +34,14 @@ export function windows(cues, interval, seconds = 90, overlap = 30) {
 export function speechCoverage(cues, interval) {
   const length = interval.end - interval.start;
   if (!(length > 0)) return 0;
-  const spoken = cues.filter(finite).reduce((sum, c) => sum + Math.max(0, Math.min(end(c), interval.end) - Math.max(c.start, interval.start)), 0);
-  return Math.min(1, spoken / length);
+  const spans = cues.filter(finite).map((c) => ({ start: Math.max(c.start, interval.start), end: Math.min(end(c), interval.end) }))
+    .filter((span) => span.end > span.start).sort((a, b) => a.start - b.start);
+  let spoken = 0, coveredUntil = interval.start;
+  for (const span of spans) {
+    spoken += Math.max(0, span.end - Math.max(span.start, coveredUntil));
+    coveredUntil = Math.max(coveredUntil, span.end);
+  }
+  return spoken / length;
 }
 
 /** Overlapping windows on the clock, for videos with little speech: every part is judged, with whatever words fall inside. */
@@ -49,6 +55,26 @@ export function timeWindows(cues, interval, seconds = 90, overlap = 30) {
     if (finish >= interval.end) break;
   }
   return result;
+}
+
+/** Preserve sentence-aligned windows, but also score long gaps where visual action may occur without speech. */
+export function completeWindows(cues, interval, seconds = 90, overlap = 30) {
+  const aligned = windows(cues, interval, seconds, overlap);
+  const extra = [];
+  let coveredUntil = interval.start;
+  const addGap = (start, finish) => {
+    // Skip short pauses to avoid making extra AI requests for routine breaks in speech.
+    if (finish - start < 15) return;
+    const pad = Math.min(5, Math.max(0, overlap) / 2);
+    const gap = { start: Math.max(interval.start, start - pad), end: Math.min(interval.end, finish + pad) };
+    extra.push(...timeWindows(cues, gap, seconds, overlap));
+  };
+  for (const window of aligned) {
+    addGap(coveredUntil, window.start);
+    coveredUntil = Math.max(coveredUntil, window.end);
+  }
+  addGap(coveredUntil, interval.end);
+  return [...aligned, ...extra].sort((a, b) => a.start - b.start || a.end - b.end);
 }
 
 /** Near-equal batches avoid judging a trailing singleton on its own. */
@@ -68,7 +94,7 @@ export function batches(values, size = 4) {
 
 export const tokens = (value) => value.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
 
-/** A second transcription must retain the source's opening, payoff and most words. */
+/** A second transcription must retain the source's opening and payoff without adding substantial extra speech. */
 export function alignmentIsReliable(words, reference) {
   const expected = reference.flatMap((r) => tokens(r.text));
   const actual = words.flatMap((w) => tokens(w.text));
@@ -85,7 +111,8 @@ export function alignmentIsReliable(words, reference) {
       current[index + 1] = token === actual[index] ? previous[index] + 1 : Math.max(previous[index + 1], current[index]);
     previous = current;
   }
-  if (previous.at(-1) / expected.length < 0.95) return false;
+  const matched = previous.at(-1);
+  if (matched / expected.length < 0.95 || actual.length - matched > Math.max(1, Math.floor(expected.length * 0.1))) return false;
   for (const cue of reference) {
     const cueTokens = tokens(cue.text);
     if (cueTokens.length === 0) continue;

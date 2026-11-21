@@ -10,8 +10,9 @@ import { stylePreview } from './engine/captions.js';
 import { mountPlayer, unmountPlayer } from './player.js';
 import * as store from './store.js';
 import { hintFor, TOUR_STEPS } from './tour.js';
-import { configureSync, requestSync, sync, syncStatus, onSyncStatus } from './sync.js';
+import { configureSync, requestSync, syncStatus, onSyncStatus } from './sync.js';
 import { uploadVideo, downloadVideo, removeVideos, removeAllVideos, cloudUsage, CloudVideoError } from './cloudvideo.js';
+import { mountLive, mountLiveHome } from './live/live.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -40,6 +41,11 @@ const state = {
 
 // MARK: Sign-in and usage
 
+// Plans: Free exports 720p with the watermark; a paid plan exports up to 4K without it. While plans are off, or the plan
+// couldn't be read, nobody is limited to 720p and the watermark stays.
+const paidPlan = () => PLANS_ON && !!state.plan && state.plan.tier !== 'free';
+const freePlan = () => PLANS_ON && state.plan?.tier === 'free';
+
 async function accessToken() {
   return (await db()?.auth.getSession())?.data.session?.access_token ?? null;
 }
@@ -53,12 +59,26 @@ function accountToken(account = userId()) {
   };
 }
 
+// Plans and checkout are live everywhere (Paddle sandbox on localhost, live on relioclips.com).
+const PLANS_ON = true;
+
 async function refreshUsage() {
   if (!state.session) return;
   const account = userId();
-  const { data, error } = await db().rpc('my_usage');
+  const [{ data, error }, plan, live, subs] = await Promise.all([db().rpc('my_usage'), PLANS_ON ? db().rpc('my_plan') : { error: true },
+    PLANS_ON ? db().rpc('my_live_limits') : { error: true },
+    PLANS_ON ? db().from('subscriptions').select('price_id, status, next_billed_at, scheduled_change').in('status', ['active', 'trialing', 'past_due']) : { error: true }]);
   if (userId() !== account) return;
   state.usage = !error && data?.[0] ? { used: data[0].used, allowance: data[0].allowance } : null;
+  // The plan and its limits (Free without a paid plan). The subscription itself gives the name and renewal date, so the
+  // plan still shows where the database doesn't know plans yet (limits then come from the pricing page's list).
+  const tiers = window.PRISM_TIERS ?? [];
+  const sub = !subs.error ? (subs.data ?? []).map((s) => ({ ...s, tier: tiers.find((t) => t.priceId === s.price_id) }))
+    .filter((s) => s.tier).sort((a, b) => tiers.indexOf(b.tier) - tiers.indexOf(a.tier))[0] : null;
+  const limits = !plan.error && plan.data?.[0] ? plan.data[0] : null;
+  const known = limits ?? (sub ? { name: sub.tier.name, tier: 'paid' } : !subs.error ? { name: 'Free', tier: 'free' } : null);
+  state.plan = known && { ...known, sub, features: (known.tier === 'free' ? window.PRISM_FREE : tiers.find((t) => t.name === known.name))?.features ?? [] };
+  state.live = !live.error && live.data?.[0] ? live.data[0] : null;
   renderUsage();
 }
 
@@ -102,6 +122,7 @@ async function route() {
       if (state.create?.project) { state.create.step = step; setScreen('create'); renderCreate(); }
       else startCreate();
     } else if (first === 'settings') await showSettings(second);
+    else if (first === 'live') showLive(second === 'new' ? null : second === 'kick' && third ? `kick/${third}` : second);
     else if (first === 'games') { if (state.task?.project) await showGames(); else await showHome(); }
     else if (first === 'folder' && second) {
       const folder = (await store.listFolders()).filter(isMine).find((f) => f.id.startsWith(idOf(second)));
@@ -114,6 +135,13 @@ async function route() {
   // The address as the screen itself spells it (a short link or an old name becomes the proper one).
   if (state.path && location.pathname !== state.path) history.replaceState(null, '', state.path);
 }
+// A pack bought in the app (checkout.js): show the new minutes or Live hours where the person is.
+window.addEventListener('prism:purchased', async () => {
+  await refreshUsage();
+  if (state.screen === 'settings') showSettings(state.settingsTab);
+  else if (state.screen === 'live') showLive(state.liveView);
+});
+
 window.addEventListener('popstate', async () => {
   // The browser's Back button leaves the screen too: stay put unless the person stops the task.
   if (state.task && !(await confirmStop())) return history.pushState(null, '', state.path);
@@ -122,7 +150,17 @@ window.addEventListener('popstate', async () => {
 
 // MARK: Boot and the app shell (sidebar, title bar and sign-in card, as in the macOS app)
 
-const SCREEN_TITLES = { home: 'Home', create: 'Create Shorts', settings: 'Settings', games: 'Play while you wait' };
+const SCREEN_TITLES = { home: 'Home', create: 'Create Shorts', live: 'Live clipping', settings: 'Settings', games: 'Play while you wait' };
+
+/** A login saved in this browser can outlive its session on the server (a password change ends every session): ask the
+ * server, and if it says the session is gone, sign out here. Offline or a server error keeps the login. */
+async function checkSessionAlive() {
+  if (!state.session) return;
+  const { error } = await db().auth.getUser().catch((e) => ({ error: e }));
+  if (error && (error.status === 401 || error.status === 403 || /session missing|session_not_found|sub claim/i.test(error.message ?? ''))) {
+    await db().auth.signOut({ scope: 'local' }).catch(() => {});
+  }
+}
 
 /** Account changes can arrive from another tab while an editor or AI request is open. */
 function setSession(session) {
@@ -176,6 +214,8 @@ async function boot() {
     return renderGate('Sign-in is unavailable right now. Check your connection and reload.');
   }
   state.session = (await db().auth.getSession()).data.session;
+  checkSessionAlive();
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkSessionAlive(); });
   db().auth.onAuthStateChange((_event, session) => {
     const changedAccount = setSession(session);
     renderGate();
@@ -204,7 +244,8 @@ function setScreen(screen) {
   // The editor keeps only what editing needs, so the theme switch lives on the other screens.
   $('.theme-toggle').hidden = screen === 'editor';
   for (const button of document.querySelectorAll('.side-button')) {
-    button.classList.toggle('selected', button.dataset.screen === screen);
+    // Making Shorts starts from Home (Start creating), so Home stays lit while doing it.
+    button.classList.toggle('selected', button.dataset.screen === (screen === 'create' ? 'home' : screen));
   }
 }
 
@@ -289,7 +330,6 @@ async function expireUntouched() {
 // First sign-in: a welcome, then a guided tour through the first project. Hints point at the real buttons, one at a time,
 // and follow the person's own steps: Start creating, the video, the settings, the wait, the first Shorts and Export. The
 // early hints come from where the person is; only the last ones need a saved stage ('on' -> 'edit' -> 'export' -> 'done').
-// Settings › Account › Show tutorial starts it again.
 const tourKey = () => `relio.tour.${userId()}`;
 const tourStage = () => { try { return localStorage.getItem(tourKey()); } catch { return null; } };
 function setTourStage(stage) { try { localStorage.setItem(tourKey(), stage); } catch { /* storage blocked: the tour ends with this page */ } tourHint(); }
@@ -361,7 +401,6 @@ function tourHint() {
 new MutationObserver(tourHint).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] });
 addEventListener('resize', tourHint);
 addEventListener('scroll', tourHint, true);
-function showTutorial() { setTourStage('on'); showHome(); }
 
 const retentionKey = () => `relio.retention-notice.${userId()}`;
 function firstRunNotice() {
@@ -495,10 +534,38 @@ async function changeProject(id, change) {
 
 /** Deletes a project for good in one step: here, in the cloud copy of the account, and its stored video (unless another project
  * uses the same video). Opening the ⋯ menu first is what guards against a slip. */
-/** Deletes the account for good: every cloud video first, then the account with all its rows, then this browser's copy. */
+/** Asks for a code sent to the account's email, then deletes the account. The database also refuses without a fresh code. */
 async function deleteAccount() {
   const user = state.session?.user;
-  if (!user || !confirm(`Are you sure you want to delete your account ${user.email}? Your projects, Shorts, stats and every video in the cloud are deleted for good. This can't be undone.`)) return;
+  if (!user?.email) return;
+  const say = (text) => { if ($('#delete-account-note')) $('#delete-account-note').textContent = text; };
+  say('Sending a code to your email…');
+  const { error } = await db().auth.signInWithOtp({ email: user.email, options: { shouldCreateUser: false } });
+  if (error) return say(`Couldn't send the code: ${error.message}`);
+  say('');
+  openDialog(`<form id="delete-form" class="stack"><h2>Delete your account?</h2>
+    <p>Your projects, Shorts, stats and every video in the cloud are deleted for good. This can't be undone.</p>
+    <p>We sent a code to <strong>${esc(user.email)}</strong>. Enter it to confirm.</p>
+    <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="Code from the email" aria-label="Code from the email">
+    <p id="delete-form-note" class="error small" role="alert"></p>
+    <div class="row end"><button type="button" class="button ghost" data-action="close">Cancel</button><button class="button ghost danger">Delete for good</button></div></form>`);
+  const form = $('#delete-form');
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const token = form.elements.code.value.replace(/\D/g, '');
+    const note = $('#delete-form-note');
+    if (token.length < 6) { note.textContent = 'Enter the code from the email.'; return; }
+    form.querySelector('button.danger').disabled = true;
+    note.textContent = 'Checking…';
+    const { error: wrong } = await db().auth.verifyOtp({ email: user.email, token, type: 'email' });
+    if (wrong) { form.querySelector('button.danger').disabled = false; note.textContent = 'That code is wrong or has expired. Check the newest email, or cancel and try again.'; return; }
+    closeDialog();
+    await removeAccount(user);
+  });
+}
+
+/** Deletes the account for good: every cloud video first, then the account with all its rows, then this browser's copy. */
+async function removeAccount(user) {
   const note = (text) => { if (userId() === user.id && $('#delete-account-note')) $('#delete-account-note').textContent = text; };
   const token = accountToken(user.id);
   note('Deleting…');
@@ -522,6 +589,16 @@ async function deleteAccount() {
     if (userId() === user.id) setSession(null);
     renderGate();
   }
+}
+
+/** Emails a link to choose a new password; the link opens the reset form on the sign-in page. */
+async function changePassword() {
+  const email = state.session?.user?.email;
+  const note = $('#password-note');
+  if (!email || !note) return;
+  note.textContent = 'Sending…';
+  const { error } = await db().auth.resetPasswordForEmail(email, { redirectTo: location.origin + '/login?mode=reset' });
+  note.textContent = error ? `Couldn't send the email: ${error.message}` : `We sent a link to ${email}. Open it to choose a new password.`;
 }
 
 async function deleteProjectNow(id) {
@@ -679,18 +756,20 @@ document.addEventListener('drop', (event) => {
   if (file && dropAllowed()) startCreate({ file });
 });
 
-// MARK: Create Shorts (five steps: video, settings, captions, content type, then the run)
+// MARK: Create Shorts (four setup steps, followed by analysis)
 
 // Names as Relio AI is told them; Auto detects the language once per video.
 const LANGUAGES = ['auto', 'English', 'Ukrainian', 'Polish', 'German', 'French', 'Spanish', 'Italian', 'Portuguese', 'Dutch', 'Czech',
   'Lithuanian', 'Latvian', 'Estonian', 'Romanian', 'Turkish', 'Russian', 'Arabic', 'Hindi', 'Japanese', 'Korean', 'Chinese'];
 const LENGTHS = [[0, 'Auto'], [15, '15 seconds'], [30, '30 seconds'], [45, '45 seconds'], [60, '60 seconds'], [90, '90 seconds']];
+// Round down rather than up: the initial custom end must never exceed the source duration.
+const defaultCustomEnd = (seconds) => { const end = Math.floor(seconds / 60 * 1000) / 1000; return end > 0 ? (end * 60 <= seconds ? end : end - 0.001) : seconds / 60 * (1 - Number.EPSILON); };
 
 function startCreate({ project = null, media = null, file = null } = {}) {
   setScreen('create');
   state.create = {
     step: media ? 2 : 1, project, media, count: 0, duration: 0, region: 'entireVideo', customStart: 0, language: 'auto',
-    customEnd: media ? Math.round(media.duration / 6) / 10 : 0, style: 'auto', videoType: 'auto', busy: false, error: '',
+    customEnd: media ? defaultCustomEnd(media.duration) : 0, style: 'auto', videoType: 'auto', busy: false, error: '',
   };
   if (file) chooseVideo(file);
   else renderCreate();
@@ -712,7 +791,7 @@ async function chooseVideo(file) {
     const media = await importMedia(project, file, isCurrent);
     if (!isCurrent()) return;
     await store.saveProject(project);
-    Object.assign(c, { project, media, customEnd: Math.round(media.duration / 6) / 10, step: 2 });
+    Object.assign(c, { project, media, customEnd: defaultCustomEnd(media.duration), step: 2 });
   } catch (error) {
     c.error = error.message || 'That file is not a video this browser can read.';
   }
@@ -724,19 +803,28 @@ async function chooseVideo(file) {
 function rangeProblem(c) {
   if (c.region !== 'custom') return null;
   const total = c.media.duration / 60;
-  return c.customStart >= 0 && c.customEnd > c.customStart && c.customEnd <= total + 0.01 ? null : `Choose a range inside the video: from 0 to ${total.toFixed(2)} minutes, with the end after the start.`;
+  return Number.isFinite(c.customStart) && Number.isFinite(c.customEnd) && c.customStart >= 0 && c.customEnd > c.customStart && c.customEnd <= total ? null : `Choose a range inside the video: from 0 to ${defaultCustomEnd(c.media.duration)} minutes, with the end after the start.`;
+}
+
+/** Warn before setup when the first analysis of this video may exceed the last known allowance. */
+function firstAnalysisNotice(duration, usage) {
+  if (!Number.isFinite(duration) || duration <= 0 || !usage || !Number.isFinite(usage.used) || !Number.isFinite(usage.allowance)) return null;
+  const left = Math.max(0, usage.allowance - usage.used);
+  if (duration / 60 <= left) return null;
+  return `Your last usage check showed about ${Math.floor(left * 100) / 100} min remaining. A first analysis of this ${clock(duration)} video uses its full length, even for a shorter range. If you have analyzed it before, the charge may differ. Usage is checked again before analysis.`;
 }
 
 function renderCreate() {
   const c = state.create;
   setUrl(`/app/create/${CREATE_STEPS[c.step - 1]}`);
-  const eyebrow = (n, label) => `<p class="eyebrow">Step ${n} of 5 · ${label}</p>`;
+  const eyebrow = (n, label) => `<p class="eyebrow">Step ${n} of ${CREATE_STEPS.length} · ${label}</p>`;
   const back = `<button class="link back" data-action="home">← Back to Home</button>`;
   let html;
   if (c.step === 1) {
     html = `${eyebrow(1, 'Choose video')}<h2 class="big">Choose a video</h2>
       <p class="muted">Relio keeps the video in this browser and saves it to your account, so the project opens on any device you sign in on. Relio AI reads its audio and some frames.</p>
-      <label class="drop-card ${c.busy ? 'busy' : ''}"><input id="pick" type="file" accept="video/*" hidden ${c.busy ? 'disabled' : ''}>
+      <p class="muted small">The first analysis counts the full video duration toward your monthly minutes, even if you choose a shorter range. A later analysis may use extra minutes; we’ll show the charge before you start.</p>
+      <label class="drop-card ${c.busy ? 'busy' : ''}"><input id="pick" class="file-input" type="file" accept="video/*" aria-label="Choose a video" ${c.busy ? 'disabled' : ''}>
         <span class="drop-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 16V4m-5 5 5-5 5 5M5 20h14"/></svg></span>
         <strong>${c.busy ? 'Reading the video…' : 'Drop a video here'}</strong>
         ${c.busy ? '' : '<span class="muted small">or</span><span class="button primary">Choose a video</span>'}</label>
@@ -744,53 +832,54 @@ function renderCreate() {
   } else if (c.step === 2) {
     const m = c.media;
     const problem = rangeProblem(c);
+    const usageNotice = firstAnalysisNotice(m.duration, state.usage);
     const where = { entireVideo: 'the entire video', firstHalf: 'the first half', lastHalf: 'the last half', custom: 'the chosen range' }[c.region];
-    const many = c.count > 0 ? `up to ${c.count} distinct moments` : 'as many distinct moments as are strong (about one per minute)';
+    const many = c.count > 0 ? `up to ${c.count} distinct moments` : `up to about one distinct moment per minute (maximum ${Shorts.MAX_SHORTS})`;
     const long = c.duration > 0 ? `of about ${c.duration} seconds` : 'as long as each story needs';
     html = `${eyebrow(2, 'Set up Shorts')}<h2 class="big">Choose your Short settings</h2><p class="muted">Your video is ready. Choose how to turn it into Shorts.</p>
       <div class="panel"><p class="file-line"><span class="tick">✓</span> ${esc(m.name)}</p>
         <p class="muted">Video duration: ${clock(m.duration)} · ${(m.duration / 60).toFixed(2)} minutes</p>
+        ${usageNotice ? `<p class="notice small" role="status">${esc(usageNotice)} ${PLANS_ON ? '<a href="/pricing">See plans or buy minutes</a>.' : ''}</p>` : ''}
         <button class="button ghost" data-create="different">Choose a different video</button></div>
       <div class="panel"><p class="muted small">Shorts settings</p>
         <div class="settings-row">
-          <div><span class="muted small">How many</span>
-            <span class="stepper"><button class="button ghost" data-create="less" aria-label="Fewer Shorts">−</button><strong>${c.count > 0 ? `${c.count} ${c.count === 1 ? 'Short' : 'Shorts'}` : 'Auto'}</strong><button class="button ghost" data-create="more" aria-label="More Shorts">+</button></span></div>
+          <label>How many <select id="short-count"><option value="0" ${c.count === 0 ? 'selected' : ''}>Auto</option>${Array.from({ length: Shorts.MAX_SHORTS }, (_, i) => i + 1).map((n) => `<option value="${n}" ${n === c.count ? 'selected' : ''}>${n} ${n === 1 ? 'Short' : 'Shorts'}</option>`).join('')}</select></label>
           <label>Approx. length <select id="length">${LENGTHS.map(([v, t]) => `<option value="${v}" ${v === c.duration ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
           <label>Language <select id="language">${LANGUAGES.map((l) => `<option value="${l}" ${l === c.language ? 'selected' : ''}>${l === 'auto' ? 'Auto' : l}</option>`).join('')}</select></label>
           <label>Take clips from <select id="region">${Object.entries(REGION_TITLES).map(([k, t]) => `<option value="${k}" ${k === c.region ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
         </div>
-        ${c.region === 'custom' ? `<div class="settings-row"><label>Start (minutes) <input id="from" type="number" min="0" step="0.1" value="${c.customStart}"></label>
-          <label>End (minutes) <input id="to" type="number" min="0" step="0.1" value="${c.customEnd}"></label></div>
+        ${c.region === 'custom' ? `<div class="settings-row"><label>Start (minutes) <input id="from" type="number" min="0" step="any" value="${c.customStart}"></label>
+          <label>End (minutes) <input id="to" type="number" min="0" step="any" value="${c.customEnd}"></label></div>
           <p class="muted small">${problem ? esc(problem) : `Analyze ${clock(c.customStart * 60)} to ${clock(c.customEnd * 60)} · ${clock((c.customEnd - c.customStart) * 60)} selected`}</p>` : ''}
-        <p class="muted small">Relio will analyze frames and available speech, then suggest ${many} ${long} in ${where}. Review every pick before exporting.</p></div>
+        <p class="muted small">Relio will analyze frames and available speech, then suggest ${many} ${long} in ${where}. Review every pick before exporting.</p>
+        <p class="muted small">The first analysis counts the full ${clock(m.duration)} video toward your monthly minutes, even when you select a shorter range. We’ll show any extra charge for a later analysis before it starts.</p></div>
       <button class="button primary" data-create="next" ${problem ? 'disabled' : ''}>Next: Choose captions →</button>${back}`;
   } else if (c.step === 3) {
     html = `${eyebrow(3, 'Choose captions')}<h2 class="big">Choose your captions</h2><p class="muted">Pick how spoken words appear. You can change this for each Short later.</p>
-      <div class="cards">${CAPTION_STYLES.map((s) => `<button class="choice ${s === c.style ? 'on' : ''}" data-style="${s}"><canvas class="style-preview" data-preview="${s}" aria-hidden="true"></canvas><strong>${STYLE_TITLES[s]}</strong><span class="muted small">${STYLE_DETAILS[s]}</span></button>`).join('')}
-        <button class="choice ${c.style === 'none' ? 'on' : ''}" data-style="none"><span class="style-preview no-captions" aria-hidden="true">Aa</span><strong>No captions</strong><span class="muted small">Shorts start without captions. Turn them on for any Short later.</span></button></div>
+      <div class="cards">${CAPTION_STYLES.map((s) => `<button class="choice ${s === c.style ? 'on' : ''}" data-style="${s}" aria-pressed="${s === c.style}"><canvas class="style-preview" data-preview="${s}" aria-hidden="true"></canvas><strong>${STYLE_TITLES[s]}</strong><span class="muted small">${STYLE_DETAILS[s]}</span></button>`).join('')}
+        <button class="choice ${c.style === 'none' ? 'on' : ''}" data-style="none" aria-pressed="${c.style === 'none'}"><span class="style-preview no-captions" aria-hidden="true">Aa</span><strong>No captions</strong><span class="muted small">Shorts start without captions. Turn them on for any Short later.</span></button></div>
       <div class="row"><button class="button primary" data-create="next">Next: Choose content type →</button><button class="link" data-create="prev">← Back</button></div>`;
   } else {
     html = `${eyebrow(4, 'Choose content type')}<h2 class="big">What kind of video is it?</h2><p class="muted">This tunes how Relio picks moments and frames them.</p>
-      <div class="cards">${VIDEO_TYPES.map((t) => `<button class="choice ${t === c.videoType ? 'on' : ''}" data-type="${t}"><strong>${VIDEO_TYPE_TITLES[t]}</strong><span class="muted small">${VIDEO_TYPE_DETAILS[t]}</span></button>`).join('')}</div>
+      <div class="cards">${VIDEO_TYPES.map((t) => `<button class="choice ${t === c.videoType ? 'on' : ''}" data-type="${t}" aria-pressed="${t === c.videoType}"><strong>${VIDEO_TYPE_TITLES[t]}</strong><span class="muted small">${VIDEO_TYPE_DETAILS[t]}</span></button>`).join('')}</div>
       <div class="row"><button class="button primary" data-create="make">Make Shorts</button><button class="link" data-create="prev">← Back</button></div>`;
   }
   $('#app').innerHTML = `<section class="create">${html}</section>`;
   for (const canvas of document.querySelectorAll('[data-preview]')) stylePreview(canvas, canvas.dataset.preview);
   $('#pick')?.addEventListener('change', (event) => event.target.files[0] && chooseVideo(event.target.files[0]));
-  $('#length')?.addEventListener('change', (event) => { c.duration = Number(event.target.value); renderCreate(); });
-  $('#region')?.addEventListener('change', (event) => { c.region = event.target.value; renderCreate(); });
+  $('#short-count')?.addEventListener('change', (event) => { c.count = Number(event.target.value); renderCreate(); $('#short-count')?.focus(); });
+  $('#length')?.addEventListener('change', (event) => { c.duration = Number(event.target.value); renderCreate(); $('#length')?.focus(); });
+  $('#region')?.addEventListener('change', (event) => { c.region = event.target.value; renderCreate(); $('#region')?.focus(); });
   $('#language')?.addEventListener('change', (event) => { c.language = event.target.value; });
   for (const [id, key] of [['#from', 'customStart'], ['#to', 'customEnd']]) {
-    $(id)?.addEventListener('change', (event) => { c[key] = Number(event.target.value) || 0; renderCreate(); });
+    $(id)?.addEventListener('change', (event) => { c[key] = event.target.value === '' ? NaN : Number(event.target.value); renderCreate(); $(id)?.focus(); });
   }
 }
 
 async function createAction(action) {
   const c = state.create;
   if (!c) return;
-  if (action === 'less') c.count = Math.max(0, c.count - 1);
-  else if (action === 'more') c.count = Math.min(Shorts.MAX_SHORTS, c.count + 1);
-  else if (action === 'prev') c.step -= 1;
+  if (action === 'prev') c.step -= 1;
   else if (action === 'next') c.step += 1;
   else if (action === 'different') {
     // An import that never made Shorts leaves nothing behind.
@@ -809,7 +898,7 @@ async function createAction(action) {
 
 // MARK: Settings (Account, Overview, Usage): the website's dashboard, now inside the app. No plans or prices for now.
 
-const SETTINGS_TABS = ['account', 'overview', 'usage'];
+const SETTINGS_TABS = ['account', 'overview', 'usage', ...(PLANS_ON ? ['plan'] : [])];
 const count = new Intl.NumberFormat();
 const lengthText = (seconds) => { const s = Math.round(seconds); return s >= 60 ? `${count.format(Math.floor(s / 60))}m ${s % 60}s` : `${s}s`; };
 
@@ -835,35 +924,51 @@ const syncText = (s) => ({
 }[s.state]);
 onSyncStatus((s) => { const el = $('#sync-text'); if (el) el.textContent = syncText(s); });
 
+/** Live clipping: recordings keep running in the background; a moment opens in Create Shorts like a chosen file. */
+// Live's home lists the recordings (/app/live); opening one, or starting a new one, shows the recording screen
+// (/app/live/<channel>, /app/live/kick/<channel>, /app/live/new).
+function showLive(channel) {
+  if (!state.session) return renderGate();
+  setScreen('live');
+  state.liveView = channel;
+  if (channel === undefined) {
+    setUrl('/app/live');
+    return mountLiveHome($('#app'), db, (key) => showLive(key));
+  }
+  setUrl(`/app/live/${channel ?? 'new'}`);
+  mountLive($('#app'), db, channel, { home: () => showLive(), open: (key) => showLive(key) });
+}
+
 async function showSettings(tab = state.settingsTab ?? 'account') {
   const account = userId();
   // Old addresses: the export history moved into Overview, and plans are switched off for now.
-  if (tab === 'exports' || tab === 'plans') tab = 'overview';
+  if (tab === 'exports' || (tab === 'plans' && !PLANS_ON)) tab = 'overview';
+  if (tab === 'plans') tab = 'plan';
   if (!SETTINGS_TABS.includes(tab)) tab = 'account';
   state.settingsTab = tab;
   setScreen('settings');
   setUrl(`/app/settings/${tab}`);
-  if (state.session && tab === 'usage') await refreshUsage();
+  if (state.session && (tab === 'usage' || tab === 'plan' || tab === 'account')) await refreshUsage();
   if (userId() !== account || state.screen !== 'settings' || state.settingsTab !== tab) return;
   const u = state.usage;
   const email = state.session?.user?.email;
   const used = u ? `${Math.ceil(u.used)} of ${Math.floor(u.allowance)} min used` : 'Minutes used';
   const NAV = [
-    ['account', 'Account', email ?? 'Sign in to track your stats', '<path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0"/>', 'Your Relio account.'],
-    ['overview', 'Overview', 'Stats and exports', '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>', 'What you have made with Relio, and your exports.'],
+    ['account', 'Account', email ?? 'Sign in to track your stats', '<path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0"/>', 'Your profile, sign-in and sync.'],
+    ['overview', 'Export history', 'Stats and exports', '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>', 'Every Short you have exported.'],
     ['usage', 'Usage', used, '<path d="M5 18a8 8 0 1 1 14 0M12 18l4-6"/>', 'Minutes of video you can make Shorts from, and your space for videos in the cloud.'],
+    ...(PLANS_ON ? [['plan', 'Plan', state.plan?.name ?? 'Plans and extra packs', '<path d="M3 7h18v12H3zM3 11h18M7 15h4"/>', 'Your plan, what it includes, and extra minutes or Live hours.']] : []),
   ];
-  const nav = NAV.map(([id, title, detail, icon]) => `<button class="settings-item" data-action="settings-tab" data-tab="${id}" ${tab === id ? 'aria-current="page"' : ''}>
-      <svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg><span><strong>${title}</strong><span class="muted small">${esc(detail)}</span></span></button>`).join('');
-  const [, title, , , blurb] = NAV.find(([id]) => id === tab);
+  const [, title] = NAV.find(([id]) => id === tab);
   let body;
   if (tab === 'usage') {
     const percent = u ? Math.min(100, u.used / u.allowance * 100) : 0;
+    const plan = state.plan, paid = plan && plan.tier !== 'free';
     body = `<div class="box">
         <div class="big-number"><b>${u ? Math.ceil(u.used) : '—'}</b><span>${u ? `of ${Math.floor(u.allowance)} minutes used` : state.session ? 'Usage is unavailable. Check your connection and try again.' : 'Sign in to see usage.'}</span></div>
         <div class="meter ${percent >= 85 ? 'warn' : ''}"><div style="width:${percent}%"></div></div>
         ${u ? `<p class="muted small">${Math.max(0, Math.floor(u.allowance - u.used))} minutes left.</p>` : ''}
-        <p class="muted small">Every account gets 60 minutes of video to make Shorts from. A video you already used doesn't count again; making Shorts from it again uses half of its length.</p>
+        <p class="muted small">${paid ? `Your plan includes ${plan.upload_minutes} minutes of video each month; the count starts again on the 1st.` : `The Free plan includes ${plan?.upload_minutes ?? 20} minutes of video each month; the count starts again on the 1st.`} A video you already used doesn't count again; making Shorts from it again uses half of its length.</p>
       </div>
       ${email ? `<div class="box"><strong>Videos in the cloud</strong><p id="cloud-video-text">Checking…</p><div class="meter"><div id="cloud-video-bar"></div></div>
         <p class="muted small">Videos you add are saved to your account too, so a project opens on any device without choosing the file again. The same video is stored once, however many projects use it. When a new video doesn’t fit, Relio asks before deleting your oldest cloud videos. A video bigger than all your space stays on its device.</p>
@@ -873,32 +978,109 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
         <div class="row"><input id="promo-code" name="code" placeholder="Enter code" autocomplete="off"><button class="button primary">Redeem</button></div>
         <p id="promo-status" class="muted small" role="status"></p>
       </form>`;
+  } else if (tab === 'plan') {
+    const plan = state.plan, paid = plan && plan.tier !== 'free', live = state.live;
+    const when = (d) => new Date(d).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+    const renew = plan?.sub?.scheduled_change?.action === 'cancel' ? `Ends on ${when(plan.sub.scheduled_change.effective_at)}`
+      : plan?.sub?.status === 'past_due' ? 'Payment failed: update your card in the email from Paddle'
+      : plan?.sub?.next_billed_at ? `Renews on ${when(plan.sub.next_billed_at)}` : paid ? '' : 'No payment needed';
+    const check = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>';
+    const unlimited = u && u.allowance >= 99_999;
+    // Unlimited accounts see the same card as everyone, with their real allowance.
+    const uv = u;
+    const icon = (path) => `<span class="row-icon sky" aria-hidden="true"><svg viewBox="0 0 24 24">${path}</svg></span>`;
+    body = plan ? `<div class="dash-plan plan-hero"><div class="dash-main">
+          <span class="dash-eyebrow">Your plan</span>
+          <b class="dash-big">${esc(plan.name)}</b>
+          <span class="dash-sub">${esc(renew)}</span>
+          <div class="dash-actions">${plan.sub ? '<button class="button dash-cta" data-action="manage-plan">Manage or cancel</button>' : ''}<a class="button ${plan.sub ? 'dash-buy' : 'dash-cta'}" href="/pricing">${paid ? 'Change plan' : 'Upgrade'}</a></div>
+          <p id="manage-note" class="small plan-note" role="alert" hidden></p>
+        </div>
+        ${plan.features.length ? `<ul class="dash-includes" aria-label="Included in your plan">${plan.features.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}
+      </div>
+      <div class="plan-meters">
+        <div class="box meter-card">${icon('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3Z"/>')}<span class="muted small">Video minutes this month${unlimited ? ' · Unlimited account' : ''}</span>
+          <div class="big-number"><b>${uv ? Math.ceil(uv.used) : '—'}</b><span>${uv ? `of ${Math.floor(uv.allowance)} min used` : 'Unavailable'}</span></div>
+          <div class="meter ${uv && uv.used / uv.allowance >= 0.85 ? 'warn' : ''}"><div style="width:${uv ? Math.min(100, uv.used / uv.allowance * 100) : 0}%"></div></div></div>
+        <div class="box meter-card">${icon('<circle cx="12" cy="12" r="3"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4"/>')}<span class="muted small">Live hours this month</span>
+          <div class="big-number"><b>${live ? live.hours_used.toFixed(1) : '—'}</b><span>${live ? `of ${Math.round(live.hours_allowed)} h used` : 'Shown soon'}</span></div>
+          <div class="meter ${live && live.hours_used / live.hours_allowed >= 0.85 ? 'warn' : ''}"><div style="width:${live ? Math.min(100, live.hours_used / Math.max(live.hours_allowed, 0.01) * 100) : 0}%"></div></div></div>
+      </div>
+      <h3 class="group-label">Need more this month?</h3>
+      <div class="plan-packs">
+        <div class="box pack-card">${icon('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3Z"/>')}<span class="pack-text"><strong>100 video minutes</strong><span class="muted small">Added to this month, on top of your plan.</span></span>
+          <a class="button primary" href="/pricing?pack=minutes" data-pack="minutes">Buy · €5</a></div>
+        <div class="box pack-card">${icon('<circle cx="12" cy="12" r="3"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4"/>')}<span class="pack-text"><strong>10 Live hours</strong><span class="muted small">For recording live streams this month.</span></span>
+          <a class="button primary" href="/pricing?pack=live" data-pack="live">Buy · €3</a></div>
+      </div>` : `<div class="box plan-box">
+        <div class="row between"><span><span class="muted small">Your plan</span><strong class="plan-name">${state.session ? 'Couldn\'t load your plan' : 'Sign in to see your plan'}</strong>
+          ${state.session ? '<span class="muted small">Check your connection and open this page again.</span>' : ''}</span>
+          <a class="button primary" href="/pricing">See plans</a></div>
+      </div>`;
   } else if (tab === 'overview') {
-    body = `<div class="stat-row"><div class="stat"><b id="stat-exports">—</b><span>Exports</span></div><div class="stat"><b id="stat-shorts">—</b><span>Shorts made</span></div><div class="stat"><b id="stat-minutes">—</b><span>Minutes of Shorts</span></div></div>
-      <h3 class="section-title">Export history</h3>
-      <div class="box flush"><div class="table-wrap"><table><thead><tr><th scope="col">Date</th><th scope="col">Shorts</th><th scope="col">Length</th><th scope="col">Quality</th></tr></thead><tbody id="export-rows"></tbody></table></div></div>
+    body = `<div class="dash-stat-row history-stats">
+        <div><span class="row-icon sky" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></span><b id="stat-exports">—</b><span>Exports</span></div>
+        <div><span class="row-icon sky" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 9l3 2-3 2Z"/></svg></span><b id="stat-shorts">—</b><span>Shorts made</span></div>
+        <div><span class="row-icon sky" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span><b id="stat-minutes">—</b><span>Minutes of Shorts</span></div>
+      </div>
+      <div class="box flush history-table"><div class="table-wrap"><table><thead><tr><th scope="col">Date</th><th scope="col">Shorts</th><th scope="col">Length</th><th scope="col">Quality</th></tr></thead><tbody id="export-rows"></tbody></table></div></div>
+      <div class="box history-empty" hidden><strong>No exports yet</strong></div>
       <p id="stats-note" class="muted small" role="status">Loading your export history…</p>`;
   } else {
-    body = `<div class="box">
-        <div class="who"><span class="avatar" aria-hidden="true">${esc((email ?? '?')[0].toUpperCase())}</span><div><strong>${email ? esc(email) : 'Not signed in'}</strong><span class="muted small">${email ? 'Signed in' : 'Sign in to track your stats'}</span></div></div>
-        <p class="muted small">Your projects, Shorts and videos are saved to your account, and each export adds its date, number of Shorts, length and quality to your stats under Overview.</p>
-        ${email ? '<div class="row"><button class="button ghost" data-action="tutorial">Show tutorial</button><button class="button ghost" data-action="signout">Sign out</button><button class="button ghost danger" data-action="delete-account">Delete account</button></div><p id="delete-account-note" class="error small" role="alert"></p>' : ''}
-      </div>
-      ${email ? `<form id="profile-form" class="box stack">
-        <strong>Profile</strong>
-        <div class="profile-fields">
-          <label>Name <input name="name" maxlength="60" autocomplete="name"></label>
-          <label>Username <span class="at-input"><span>@</span><input name="username" maxlength="21" spellcheck="false" autocapitalize="none" placeholder="choose one"></span></label>
+    const initial = esc((email ?? '?')[0].toUpperCase());
+    const plan = state.plan, paid = plan && plan.tier !== 'free';
+    const unlimited = u && u.allowance >= 99_999;
+    // Unlimited accounts see the same card as everyone, with their real allowance.
+    const uv = u;
+    const left = uv ? Math.max(0, Math.floor(uv.allowance - uv.used)) : null;
+    const dash = !email ? '' : `<div class="dash-grid">
+        <div class="dash-plan"><div class="dash-main">
+          <span class="dash-eyebrow">${esc(plan?.name ?? 'Free')} plan${unlimited ? ' · Unlimited' : ''}</span>
+          <b class="dash-big">${left ?? '—'}<small> min left</small></b>
+          <div class="dash-meter"><div style="width:${uv ? Math.min(100, uv.used / uv.allowance * 100) : 0}%"></div></div>
+          <span class="dash-sub">${uv ? `${Math.ceil(uv.used)} of ${Math.floor(uv.allowance)} minutes used this month` : 'Usage is unavailable right now.'}</span>
+          <div class="dash-actions">${PLANS_ON ? `<button class="button dash-cta" data-action="settings-tab" data-tab="plan">${paid ? 'Manage plan' : 'Upgrade'}</button>${unlimited ? '' : '<a class="button dash-buy" href="/pricing?pack=minutes" data-pack="minutes">Buy 100 minutes · €5</a>'}` : ''}<button class="link dash-link" data-action="settings-tab" data-tab="usage">Usage details</button></div></div>
+          ${plan ? `<ul class="dash-includes" aria-label="Included in your plan">
+            <li>${esc(plan.export === '4K' ? '4K' : plan.export)} exports</li>
+            <li>${plan.watermark ? 'Relio watermark on exports' : 'No watermark'}</li>
+            <li>${plan.live_channels} Live channel${plan.live_channels === 1 ? '' : 's'} at once</li>
+            <li>${plan.live_hours} Live hours a month</li>
+          </ul>` : ''}
         </div>
-        <div class="row"><button class="button primary" disabled>Save</button><span id="profile-status" class="muted small" role="status"></span></div>
-      </form>` : ''}
-      ${email ? `<div class="box"><strong>Cloud sync</strong><p id="sync-text">${esc(syncText(syncStatus()))}</p>
-        <p class="muted small">Your projects, folders, Shorts and edits are saved to your account, so you can open them on any device you sign in on. Their videos are kept in the cloud too: see Usage.</p>
-        <button class="button ghost" data-action="sync-now">Sync now</button></div>` : ''}`;
+        <div class="dash-stats">
+          <div class="dash-head"><strong class="dash-title">Your Shorts</strong><button class="link" data-action="settings-tab" data-tab="overview">Export history →</button></div>
+          <div class="dash-stat-row">
+            <div><span class="row-icon sky" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></span><b id="stat-exports">—</b><span>Exports</span></div>
+            <div><span class="row-icon sky" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 9l3 2-3 2Z"/></svg></span><b id="stat-shorts">—</b><span>Shorts made</span></div>
+            <div><span class="row-icon sky" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span><b id="stat-minutes">—</b><span>Minutes of Shorts</span></div>
+          </div>
+        </div>
+      </div>
+      <h3 class="group-label">Account</h3>`;
+    body = !email ? `<div class="set-group"><div class="set-row"><span class="who"><span class="avatar" aria-hidden="true">?</span><span><strong>Not signed in</strong><span class="muted small">Sign in to save your projects and stats.</span></span></span></div></div>` : `${dash}
+      <form id="profile-form" class="set-group">
+        <div class="set-row"><span class="who"><span class="avatar" aria-hidden="true">${initial}</span><span><strong>${esc(email)}</strong><span class="muted small">Signed in</span></span></span></div>
+        <div class="set-row profile-fields-row">
+          <label><span>Name</span><input name="name" maxlength="60" autocomplete="name"></label>
+          <label><span>Username</span><span class="at-input"><span>@</span><input name="username" maxlength="21" spellcheck="false" autocapitalize="none" placeholder="choose one"></span></label>
+          <button class="button primary profile-save" disabled>Save</button>
+          <span id="profile-status" class="muted small" role="status"></span>
+        </div>
+        <div class="set-row"><span><strong>Password</strong><span id="password-note" class="muted small" role="status">We email you a link to choose a new one.</span></span>
+          <button type="button" class="button ghost" data-action="change-password">Change password</button></div>
+      </form>
+      <div class="set-group danger-zone">
+        <div class="set-row"><span><strong>Sign out</strong><span class="muted small">Leave your account on this device. Your projects stay saved.</span></span>
+          <button class="button ghost danger-outline" data-action="signout">Sign out</button></div>
+        <div class="set-row"><span><strong>Delete account</strong><span id="delete-account-note" class="muted small" role="alert">Removes your projects, Shorts, stats and cloud videos for good. We email you a code first.</span></span>
+          <button class="button ghost danger" data-action="delete-account">Delete account</button></div>
+      </div>`;
   }
-  $('#app').innerHTML = `<section class="settings-layout">
-    <nav class="settings-nav" aria-label="Settings categories">${nav}</nav>
-    <div class="settings-content"><header class="set-head"><h2>${title}</h2><p class="muted">${blurb}</p></header>${body}</div></section>`;
+  // One page: the dashboard is Settings itself; usage, plans and export history open from its cards, with a way back.
+  // Sub-pages show where they are in the title bar: Settings › Plan, with Settings leading back.
+  if (tab !== 'account') $('#screen-title').innerHTML = `<button class="crumb" data-action="settings-tab" data-tab="account">Settings</button><span class="crumb-sep" aria-hidden="true">›</span>${title}`;
+  $('#app').innerHTML = `<section class="settings-layout settings-page">
+    <div class="settings-content">${body}</div></section>`;
   $('#promo-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const code = new FormData(event.currentTarget).get('code').trim();
@@ -907,7 +1089,7 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
     $('#promo-status').textContent = error ? error.message : 'Promo code added. Your allowance is updated.';
     if (!error) { await refreshUsage(); showSettings('usage'); }
   });
-  if (state.session && tab === 'overview') fillAccountData(tab);
+  if (state.session && (tab === 'overview' || tab === 'account')) fillAccountData(tab);
   if (state.session && tab === 'account') fillProfile();
   if (tab === 'usage' && email) fillCloudVideo();
 }
@@ -919,7 +1101,7 @@ async function fillProfile() {
   if (!form) return;
   const { data, error } = await db().from('profiles').select('display_name, username').maybeSingle();
   if (!form.isConnected || userId() !== account) return;
-  const status = $('#profile-status'), save = form.querySelector('button');
+  const status = $('#profile-status'), save = form.querySelector('.profile-save');
   if (error) { status.textContent = 'Your profile couldn’t load. Try again later.'; return; }
   form.elements.name.value = data?.display_name ?? '';
   form.elements.username.value = data?.username ?? '';
@@ -957,11 +1139,12 @@ async function fillAccountData(tab) {
     text('#stat-exports', count.format(totals.exports));
     text('#stat-shorts', count.format(totals.shorts));
     text('#stat-minutes', (totals.seconds / 60).toLocaleString(undefined, { maximumFractionDigits: 1 }));
-    text('#stats-note', totals.exports === 0 ? 'Your exported Shorts will appear here.'
-      : totals.exports > 50 ? 'Showing your latest 50 exports. The numbers above include your full history.' : '');
+    if (totals.exports === 0 && $('.history-empty')) { $('.history-empty').hidden = false; $('.history-table').hidden = true; }
+    text('#stats-note', totals.exports === 0 ? ''
+      : tab !== 'account' && totals.exports > 50 ? 'Showing your latest 50 exports. The numbers above include your full history.' : '');
     const rows = $('#export-rows');
     if (rows) {
-      const quality = { full: 'Full', compact: 'Compact', small: 'Small' };
+      const quality = { uhd: '4K', full: 'Full', compact: 'Compact', small: 'Small' };
       rows.innerHTML = totals.latest.map((row) => `<tr><td title="${esc(new Date(row.created_at).toLocaleString())}">${esc(new Date(row.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }))}</td>
         <td class="num">${count.format(row.short_count)}</td><td class="num">${lengthText(row.seconds)}</td><td>${esc(quality[row.quality] ?? row.quality)}</td></tr>`).join('');
     }
@@ -1413,7 +1596,7 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
       const u = state.usage;
       const left = u ? Math.max(0, u.allowance - u.used) : null;
       throw new GeminiError('usageLimit', 429, left === null ? null
-        : `This video is ${Math.ceil(minutes)} min long, but you have ${Math.floor(left)} of your ${Math.floor(u.allowance)} beta minutes left. A video you already used doesn't count again. Ask for a promo code to get more, then enter it in Settings › Usage.`);
+        : `This video is ${Math.ceil(minutes)} min long, but you have ${Math.floor(left)} of your ${Math.floor(u.allowance)} minutes left. A video you already used doesn't count again. ${PLANS_ON ? 'Buy 100 extra minutes for this month, pick a bigger plan, or enter a promo code in Settings › Usage.' : 'Ask for a promo code to get more, then enter it in Settings › Usage.'}`);
     }
     track('analysis_started', { length: lengthBucket(minutes) });
     const results = await Shorts.analyze(source, configuration, {
@@ -1491,7 +1674,7 @@ function reportGenerationError(error, retry) {
     if (cause.failure === 'noStrongClips' || cause.failure === 'noDistinctClips') return showError('No Shorts found', cause.message);
     if (cause.failure === 'musicVideo') return showError('This is a music video', cause.message);
     if (cause.failure === 'signIn' || cause.status === 401 || cause.status === 403) return showError('Check your sign-in', cause.message);
-    if (cause.failure === 'usageLimit') { track('limit_reached'); return showError('You’ve reached your beta limit', cause.message, 'limit'); }
+    if (cause.failure === 'usageLimit') { track('limit_reached'); return showError('You’ve used this month’s minutes', cause.message, 'limit'); }
     if (cause.failure === 'request' && [429, 500, 502, 503, 504, 546].includes(cause.status)) return showError('Relio AI is unavailable right now', cause.message, 'temporary', retry);
   }
   if (error instanceof ShortMakerError) return showError('Couldn’t make Shorts', error.message);
@@ -1642,12 +1825,31 @@ function renderTask() {
   document.documentElement.style.setProperty('--progress-h', `${host.offsetHeight + 12}px`);
 }
 
+let dialogOpener = null;
+function dialogControls(host) {
+  return [...host.querySelectorAll('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+    .filter((el) => !el.disabled && el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
+}
+function trapDialogFocus(event, host) {
+  if (event.key !== 'Tab') return;
+  const controls = dialogControls(host);
+  if (!controls.length) { event.preventDefault(); host.querySelector('[role="dialog"]')?.focus(); return; }
+  const current = controls.indexOf(document.activeElement);
+  if (current === -1 || (event.shiftKey && current === 0) || (!event.shiftKey && current === controls.length - 1)) {
+    event.preventDefault();
+    controls[event.shiftKey ? controls.length - 1 : 0].focus();
+  }
+}
 function openDialog(html) {
+  if (!state.dialog) dialogOpener = document.activeElement;
   state.dialog = html;
   const host = $('#dialog');
   host.hidden = false;
-  host.innerHTML = `<div class="sheet" role="dialog" aria-modal="true">${html}</div>`;
-  host.querySelector('input,select,button')?.focus();
+  host.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" tabindex="-1">${html}</div>`;
+  const sheet = host.querySelector('[role="dialog"]');
+  const title = sheet.querySelector('h2');
+  if (title) { title.id = 'dialog-title'; sheet.setAttribute('aria-labelledby', title.id); }
+  (dialogControls(host)[0] ?? sheet).focus();
 }
 function closeDialog() {
   // A question closed without an answer (Esc, the backdrop) is asked again later.
@@ -1659,10 +1861,13 @@ function closeDialog() {
   state.dialog = null;
   $('#dialog').hidden = true;
   $('#dialog').innerHTML = '';
+  const opener = dialogOpener;
+  dialogOpener = null;
+  if (opener?.isConnected) opener.focus();
 }
 function showError(title, message, kind = '', retry = null) {
   openDialog(`<div class="stack"><h2>${esc(title)}</h2><p>${esc(message)}</p>
-    <div class="row end">${kind === 'limit' ? '<button class="button ghost" data-action="usage">Usage</button>' : ''}${retry
+    <div class="row end">${kind === 'limit' ? `<button class="button ghost" data-action="usage">Usage</button>${PLANS_ON ? '<a class="button ghost" href="/pricing">See plans</a><a class="button primary" href="/pricing?pack=minutes" data-pack="minutes">Buy 100 video minutes</a>' : ''}` : ''}${retry
       ? '<button class="button ghost" data-action="close">Not now</button><button class="button primary" id="dialog-retry">Retry</button>'
       : '<button class="button primary" data-action="close">OK</button>'}</div></div>`);
   $('#dialog-retry')?.addEventListener('click', () => { closeDialog(); retry(); });
@@ -1790,7 +1995,7 @@ async function selectShort(id) {
     wireTimeline(segment);
     renderInspector();
     // Plays straight from the source file. When this browser can't play it, fall back to a rendered preview.
-    mountPlayer($('#player-host'), segment, source, () => renderedPreview(segment, source, token));
+    mountPlayer($('#player-host'), segment, source, () => renderedPreview(segment, source, token), { watermark: !paidPlan() });
     // Framing is found while it plays; the player reads the Short's framing every frame, so it appears as soon as it is ready.
     if (segment.cropTrackingVersion !== Framing.VERSION || !segment.cropKeyframes) {
       const note = $('#track-note');
@@ -1837,6 +2042,19 @@ async function retrack(segment, source) {
   await store.saveProject(project, { isCurrent: () => state.project === project && project.segments.includes(segment) });
 }
 
+/** Keep each caption's text attached to its own timing. */
+function captionTextFields(captions) {
+  if (!captions.length) return '<p class="muted small">No captions yet. Use Regenerate subtitles to make them.</p>';
+  return `<p class="muted small">Edit each caption below. Times are measured from the start of this Short.</p><div class="caption-lines">${captions.map((cue, index) =>
+    `<label><span class="mono small">${mmss(cue.start)}–${mmss(cue.start + cue.duration)}</span><textarea data-field="captionText" data-cue-index="${index}" rows="2">${esc(cue.text)}</textarea></label>`).join('')}</div>`;
+}
+
+function setCaptionText(segment, index, value) {
+  if (!Number.isInteger(index) || index < 0 || index >= (segment.captions ?? []).length) return false;
+  segment.captions[index] = { ...segment.captions[index], text: value };
+  return true;
+}
+
 function renderInspector() {
   const host = $('#inspector');
   if (!host) return;
@@ -1858,7 +2076,7 @@ function renderInspector() {
           <label>Size <select data-field="captionSize">${choice('captionSize', ['small', 'medium', 'large'], 'medium')}</select></label>
         </div>
         <label class="check"><input type="checkbox" data-field="captionAnimated" ${segment.captionAnimated ? 'checked' : ''}> Pop in new captions</label>
-        <label>Words <textarea data-field="captionTexts" rows="4">${esc((segment.captions ?? []).map((c) => c.text).join('\n'))}</textarea></label>
+        ${captionTextFields(segment.captions ?? [])}
         <button class="link-button" data-action="regen-captions">Regenerate subtitles</button>
       </section>
       <details class="insp-section">
@@ -1880,6 +2098,14 @@ function renderInspector() {
 }
 
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
+
+/** A source range must fit the video and leave at least half a second for the Short. */
+function timelineProblem(start, end, total) {
+  if (![start, end, total].every(Number.isFinite) || start < 0 || end > total + 0.001 || end - start < 0.5) {
+    return 'Enter a start and end within the video, at least 0.5 seconds apart.';
+  }
+  return null;
+}
 
 /** Moves or resizes a Short in its source. Captions and words are relative to the Short's start, so they shift with it. */
 function applyTiming(s, start, duration) {
@@ -1912,6 +2138,13 @@ function timelineHtml(segment) {
         <div class="tl-clip" id="tl-clip" style="left:${pct(segment.start)};width:${pct(segment.duration)}"><span class="tl-handle l" data-edge="l"></span><span class="tl-handle r" data-edge="r"></span></div>
       </div>
       <div class="row between muted small mono"><span>0:00</span><span id="tl-label">${clock(segment.start)}–${clock(segment.start + segment.duration)}</span><span>${clock(total)}</span></div>
+      <div class="timeline-fields" role="group" aria-label="Precise Short timing">
+        <label>Start (seconds) <input id="tl-start" type="number" min="0" max="${total}" step="any" value="${segment.start.toFixed(3)}" aria-describedby="tl-help tl-error"></label>
+        <label>End (seconds) <input id="tl-end" type="number" min="0" max="${total}" step="any" value="${(segment.start + segment.duration).toFixed(3)}" aria-describedby="tl-help tl-error"></label>
+        <button type="button" class="button ghost" id="tl-apply">Apply timing</button>
+      </div>
+      <p id="tl-help" class="muted small">Times are measured from the start of the source video. You can also drag the clip above.</p>
+      <p id="tl-error" class="error small" role="alert"></p>
     </div>`;
 }
 
@@ -1919,6 +2152,22 @@ function wireTimeline(segment) {
   const track = $('#tl-track'), clip = $('#tl-clip');
   if (!track || !clip) return;
   const total = Number($('.timeline').dataset.total);
+  $('#tl-apply')?.addEventListener('click', async (event) => {
+    const startInput = $('#tl-start'), endInput = $('#tl-end');
+    const start = startInput.value === '' ? NaN : Number(startInput.value);
+    const end = endInput.value === '' ? NaN : Number(endInput.value);
+    const problem = timelineProblem(start, end, total);
+    $('#tl-error').textContent = problem ?? '';
+    if (problem) return;
+    const safeEnd = Math.min(end, total);
+    if (Math.abs(start - segment.start) < 0.001 && Math.abs(safeEnd - segment.start - segment.duration) < 0.001) return;
+    event.currentTarget.disabled = true;
+    try {
+      await edit((s) => applyTiming(s, start, safeEnd - start), { awaitPreview: true });
+      if (selected()?.id === segment.id) $('#tl-apply')?.focus();
+    }
+    catch (error) { const note = $('#tl-error'); if (note) note.textContent = error.message || 'Could not save timing. Please try again.'; event.currentTarget.disabled = false; }
+  });
   clip.addEventListener('pointerdown', (event) => {
     event.preventDefault();
     clip.setPointerCapture(event.pointerId);
@@ -1948,7 +2197,7 @@ function wireTimeline(segment) {
 }
 
 /** Applies an edit to the selected Short: keeps an undo copy, saves, and re-renders the preview when the picture changed. */
-async function edit(change, { rerender = true } = {}) {
+async function edit(change, { rerender = true, awaitPreview = false } = {}) {
   const project = state.project;
   const segment = selected();
   if (!segment) return;
@@ -1958,7 +2207,7 @@ async function edit(change, { rerender = true } = {}) {
   if (state.project !== project || !project.segments.includes(segment)) return;
   await store.saveProject(project, { isCurrent: () => state.project === project && project.segments.includes(segment) });
   if (state.project !== project) return;
-  if (rerender) selectShort(segment.id);
+  if (rerender) { const ready = selectShort(segment.id); if (awaitPreview) await ready; }
   else renderEditor();
 }
 
@@ -1997,13 +2246,13 @@ function openExportDialog(onlyId = null) {
       ${esc(s.suggestedTitle || `Short ${i + 1}`)} <span class="muted small">${clock(s.duration)}</span></label>`).join('');
   // shortcut: Safari reports HEVC encoding as hardware but runs it at ~4 frames/s (2.5 min per 20 s Short), so it isn't offered there; drop when Safari's HEVC gets fast.
   const safari = /Safari\//.test(navigator.userAgent) && !/Chrome|Chromium|Edg|CriOS|FxiOS/.test(navigator.userAgent);
-  const qualities = Object.entries(EXPORT_QUALITIES).filter(([k]) => !(safari && k === 'compact')).map(([k, q]) => `<option value="${k}">${q.title} — ${q.detail}</option>`).join('');
+  const qualities = Object.entries(EXPORT_QUALITIES).filter(([k]) => !(safari && k === 'compact') && (!freePlan() || k === 'small') && (k !== 'uhd' || paidPlan())).map(([k, q]) => `<option value="${k}">${q.title} — ${q.detail}</option>`).join('');
   openDialog(`
     <form id="export-form" class="stack">
       <h2>Export Shorts</h2>
       ${list}
       <label>Quality <select name="quality">${qualities}</select></label>
-      <p class="muted small">Each Short downloads as an MP4.</p>
+      <p class="muted small">Each Short downloads as an MP4.${freePlan() ? ' Free exports are 720p with the Relio watermark; <a href="/pricing">a plan</a> gives 1080p or 4K without it.' : ''}</p>
       <p id="export-status" class="muted small" role="status"></p>
       <div class="row end">
         <button type="button" class="button ghost" data-action="close">Cancel</button>
@@ -2049,7 +2298,10 @@ async function exportShorts(ids, quality, folder = null) {
   const title = project.title;
   const account = userId();
   const task = beginTask('Exporting…');
-  const settings = exportSettings(quality);
+  // Free exports are 720p; the choice is checked here too, not only in the dialog.
+  if (freePlan()) quality = 'small';
+  if (quality === 'uhd' && !paidPlan()) quality = 'full'; // 4K is for paid plans
+  const settings = { ...exportSettings(quality), watermark: !paidPlan() };
   const seconds = [];
   let made = 0, failure = null, bookkeepingFailure = null;
   const signal = task.controller.signal;
@@ -2071,7 +2323,7 @@ async function exportShorts(ids, quality, folder = null) {
         watchdog = setInterval(() => {
           if (Date.now() - lastActive < STALL_MS) return;
           task.controller.abort();
-          reject(new Error(`The export stopped while ${lastStep} and made no progress for ${STALL_MS / 1000} seconds. Try 720p · H.264, or another browser.`));
+          reject(new Error(`The export stopped while ${lastStep} and made no progress for ${STALL_MS / 1000} seconds. Try 720p, or another browser.`));
         }, 1000);
       });
       const blob = await Promise.race([stalled, render(source, segment, {
@@ -2169,13 +2421,18 @@ const safeName = (value) => value.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g,
 // MARK: Events
 
 // Actions that leave the current screen; while a task runs they ask to stop it first.
-const LEAVES = new Set(['home', 'open', 'open-folder', 'create', 'make', 'nav', 'signout', 'tutorial']);
+const LEAVES = new Set(['home', 'open', 'open-folder', 'create', 'make', 'nav', 'signout']);
 document.addEventListener('click', async (event) => {
   const choice = event.target.closest('[data-create],[data-style],[data-type]');
   if (choice && state.create && state.task && !(await confirmStop())) return;
   if (choice && state.create) {
     if (choice.dataset.create) await createAction(choice.dataset.create);
-    else { if (choice.dataset.style) state.create.style = choice.dataset.style; else state.create.videoType = choice.dataset.type; renderCreate(); }
+    else {
+      const selector = choice.dataset.style ? `[data-style="${choice.dataset.style}"]` : `[data-type="${choice.dataset.type}"]`;
+      if (choice.dataset.style) state.create.style = choice.dataset.style; else state.create.videoType = choice.dataset.type;
+      renderCreate();
+      $(selector)?.focus();
+    }
     return;
   }
   const target = event.target.closest('[data-action]');
@@ -2189,7 +2446,7 @@ document.addEventListener('click', async (event) => {
   else if (action === 'cancel') cancelTask();
   else if (action === 'delete-project') deleteProjectNow(state.project.id);
   else if (action === 'games') showGames();
-  else if (action === 'tutorial') showTutorial();
+  // The Live tour runs once by itself; only this setting starts it again.
   else if (action === 'home') showHome();
   else if (action === 'open') openProject(target.dataset.id);
   else if (action === 'retry-download' && lastDownload) fetchFromCloud(lastDownload.project, lastDownload.media, lastDownload.shortPart);
@@ -2206,14 +2463,30 @@ document.addEventListener('click', async (event) => {
     if (screen === 'home') showHome();
     else if (screen === 'create') startCreate();
     else if (screen === 'settings') showSettings();
+    else if (screen === 'live') showLive();
   }
   else if (action === 'settings-tab') showSettings(target.dataset.tab);
-  else if (action === 'signout') { const { error } = await db().auth.signOut(); if (error) showError('Couldn’t sign out', error.message); }
+  else if (action === 'manage-plan') {
+    // Paddle's customer portal: cancel, change card, invoices. Opened in a new tab so Relio stays open.
+    const note = $('#manage-note');
+    const tab = window.open('', '_blank');
+    const response = await fetch('/api/billing?action=portal', { method: 'POST', headers: { Authorization: `Bearer ${await accessToken()}` } }).catch(() => null);
+    const body = await response?.json().catch(() => ({}));
+    if (response?.ok && body?.url) { tab.location = body.url; return; }
+    tab?.close();
+    if (note) { note.hidden = false; note.textContent = body?.error || 'Couldn’t open your billing page. Try again, or write to support@relioclips.com.'; }
+  }
+  else if (action === 'signout') {
+    const { error } = await db().auth.signOut();
+    // A session already ended on the server (expired, or a password change) still signs out here.
+    if (error && /session missing|not found|invalid/i.test(error.message)) { await db().auth.signOut({ scope: 'local' }).catch(() => {}); setSession(null); renderGate(); }
+    else if (error) showError('Couldn’t sign out', error.message);
+  }
   else if (action === 'delete-account') deleteAccount();
+  else if (action === 'change-password') changePassword();
   else if (action === 'theme') switchTheme(target.dataset.theme);
   else if (action === 'export-dialog') openExportDialog();
   else if (action === 'export-one') openExportDialog(state.selectedId);
-  else if (action === 'sync-now') sync();
   else if (action === 'retry-upload') { videoBlock = null; uploadPending(); showSettings('usage'); }
   else if (action === 'usage') { closeDialog(); showSettings('usage'); }
   else if (action === 'retrack') edit(async (s) => { s.cropKeyframes = null; await retrack(s, await sourceFor(state.project.media.find((m) => m.id === s.mediaId))); });
@@ -2236,9 +2509,8 @@ document.addEventListener('change', async (event) => {
   if (!field || field === 'suggestedTitle' || field === 'suggestedDescription' || !selected()) return;
   const input = event.target;
   edit(async (s) => {
-    if (field === 'captionTexts') {
-      const lines = input.value.split('\n');
-      if (lines.length === (s.captions ?? []).length) s.captions = s.captions.map((c, i) => ({ ...c, text: lines[i] }));
+    if (field === 'captionText') {
+      setCaptionText(s, Number(input.dataset.cueIndex), input.value);
       return;
     }
     if (field === 'start' || field === 'duration') {
@@ -2309,6 +2581,7 @@ document.addEventListener('mousedown', (event) => { if (event.target.id === 'dia
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && $('#menu')) { closeMenu(); return; }
   if (event.key === 'Escape' && state.dialog) { closeDialog(); return; }
+  if (state.dialog && event.key === 'Tab') { trapDialogFocus(event, $('#dialog')); return; }
   // Keys in the games panel belong to the game (Space drops a block there, it doesn't play the video).
   if (event.target.closest('input,textarea,select,.games-screen') || state.dialog) return;
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); undo(); }

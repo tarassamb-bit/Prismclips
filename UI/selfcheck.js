@@ -15,7 +15,10 @@ let subscription;
 let insertStatus;
 global.fetch = async (url, init = {}) => {
   calls.push({ url, method: init.method || 'GET', headers: init.headers || {}, body: init.body });
+  if (url === 'https://sandbox-api.paddle.com/ips') return new Response(JSON.stringify({ data: { ipv4_cidrs: ['34.1.2.3/32'] } }));
   if (url.startsWith('https://sandbox-api.paddle.com/subscriptions/')) return new Response(JSON.stringify({ data: subscription }));
+  if (url === 'https://sandbox-api.paddle.com/transactions/txn_9') return new Response(JSON.stringify({ data: { id: 'txn_9', status: 'completed', custom_data: { supabase_user_id: USER }, items: [{ price: { id: 'pri_01m7z8ycnqttzw183g03j59jre' }, quantity: 2 }] } }));
+  if (url.includes('/rest/v1/minute_packs')) return new Response(null, { status: 201 });
   if (url.includes('/rest/v1/subscriptions')) return new Response(null, { status: init.method === 'POST' ? insertStatus : 204 });
   throw new Error(`Unexpected request: ${url}`);
 };
@@ -29,9 +32,9 @@ function reset(customData) {
   };
 }
 
-function post(body, signature) {
+function post(body, signature, ip = '34.1.2.3') {
   const req = Readable.from([Buffer.from(body)]);
-  Object.assign(req, { method: 'POST', headers: { 'paddle-signature': signature } });
+  Object.assign(req, { method: 'POST', headers: { 'paddle-signature': signature, 'x-forwarded-for': `${ip}, 10.0.0.1` } });
   return new Promise((resolve) => {
     const res = { statusCode: 200, setHeader() {}, end: (text) => resolve({ status: res.statusCode, body: JSON.parse(text) }) };
     webhook(req, res);
@@ -63,6 +66,7 @@ const sign = (body, ts = Math.floor(Date.now() / 1000)) =>
 
   reset({ supabase_user_id: USER });
   const event = JSON.stringify({ event_type: 'subscription.updated', data: { id: 'sub_1' } });
+  assert.strictEqual((await post(event, sign(event), '1.2.3.4')).status, 403, 'only Paddle\'s addresses may call');
   assert.strictEqual((await post(event, 'ts=1;h1=bad')).status, 401);
   assert.strictEqual((await post(event, sign(event, Math.floor(Date.now() / 1000) - 600))).status, 401, 'old signatures are refused');
   assert.strictEqual((await post(event.replace('updated', 'created'), sign(event))).status, 401, 'tampered bodies are refused');
@@ -74,6 +78,11 @@ const sign = (body, ts = Math.floor(Date.now() / 1000)) =>
   const other = JSON.stringify({ event_type: 'transaction.paid', data: { id: 'txn_1' } });
   assert.deepStrictEqual((await post(other, sign(other))).body, { ignored: true });
   assert.deepStrictEqual(await post(event, sign(event)), { status: 200, body: { result: 'synced' } });
+  calls = [];
+  const paid = JSON.stringify({ event_type: 'transaction.completed', data: { id: 'txn_9' } });
+  assert.deepStrictEqual((await post(paid, sign(paid))).body, { result: 'transaction' });
+  const pack = calls.find((c) => c.url.includes('/rest/v1/minute_packs'));
+  assert.deepStrictEqual(JSON.parse(pack.body), { transaction_id: 'txn_9', user_id: USER, minutes: 200 }, 'a paid pack is saved from the webhook');
   for (const malformed of ['null', '{"event_type":42}', '{"event_type":"subscription.updated","data":{"id":"../invalid"}}']) {
     assert.strictEqual((await post(malformed, sign(malformed))).status, 400, 'signed malformed events are rejected without a server error');
   }

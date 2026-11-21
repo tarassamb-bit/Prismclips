@@ -100,7 +100,9 @@ export async function saveTranscript(projectId, mediaId, transcript, isCurrent) 
   await update('projects', projectId, (record) => {
     if (!record || !isCurrent() || !record.media.some((m) => m.id === mediaId)) return null;
     const previous = record.transcripts?.[mediaId];
-    if (previous?.start === transcript.start && previous.end > transcript.end) return null;
+    const language = (value) => typeof value === 'string' ? value.trim().toLowerCase() : '';
+    // A shorter checkpoint only loses to a longer one for the same language; a new language must replace the old transcript.
+    if (previous?.start === transcript.start && previous.end > transcript.end && language(previous.language) === language(transcript.language)) return null;
     const now = new Date().toISOString();
     record.transcripts ??= {};
     record.transcripts[mediaId] = transcript;

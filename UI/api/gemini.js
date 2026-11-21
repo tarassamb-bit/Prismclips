@@ -16,7 +16,7 @@ const DEFAULT_FALLBACK = 'meta/muse-ember';
 // Only providers that keep no data (zero data retention) and don't train on it; among those, the quickest to answer.
 const PROVIDER = { zdr: true, data_collection: 'deny', sort: 'latency' };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const LIMIT_MESSAGE = "You've reached your beta usage limit. Ask for a promo code to get more, then enter it in Settings › Usage.";
+const LIMIT_MESSAGE = "You've used this month's minutes. Pick a plan or buy extra minutes in Settings › Plan.";
 // A model reporting a cost of 0 would be free to use without limit; every answer counts at least this much.
 const MIN_ANSWER_USD = 0.0005;
 const MAX_OUTPUT_TOKENS = 12_000;

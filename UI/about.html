@@ -24,6 +24,7 @@
   <link rel="preload" href="fonts/SpaceGrotesk-Medium.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="styles.css">
   <script src="site.js" defer></script>
+  <script src="/bug-report.js" defer></script>
   <!-- Vercel Web Analytics and Speed Insights: cookieless page views and load times. -->
   <script src="/analytics.js" defer></script>
   <script defer src="/_vercel/insights/script.js"></script>
@@ -53,6 +54,8 @@
         <a href="/features">Features</a>
         <a href="/how-it-works">How it works</a>
         
+        <a href="/pricing" data-billing>Pricing</a>
+        
         <a href="/faq">FAQs</a>
         <a href="/changelog">Changelog</a>
       </nav>
@@ -68,17 +71,17 @@
     <section class="container prose">
 <h2>What Relio does</h2><p>Import a podcast, lecture, interview or stream. Relio transcribes it, finds moments that stand on their own, and cuts them into vertical Shorts. It reframes each one for the small screen and adds captions in the language spoken in your video. You review every Short and make the final cut before you export.</p>
 <h2>Who it’s for</h2><p>Creators, podcasters and streamers who want more short-form videos from the long recordings they already make, without spending hours in an editor.</p>
-<h2>Where it runs</h2><p>Relio is an early beta for macOS 14 or later on Apple Silicon. Windows and Linux ports have not yet been tested on real devices. Your source files and finished videos stay on your machine. See <a href="/privacy">Privacy</a> for what is sent for AI processing.</p>
-<h2>Beta access</h2><p>Relio is free during the beta. Every account gets 60 minutes of video to make Shorts from and 1 GB of cloud space for videos; Settings › Usage in the app shows what you have left. <a href="app/">Open Relio</a>.</p>
+<h2>Where it runs</h2><p>Relio runs in your web browser. Your source files and finished videos stay on your computer unless you turn on cloud sync. See <a href="/privacy">Privacy</a> for what is sent for AI processing.</p>
+<h2>Plans</h2><p>Start free with 20 minutes of video a month and 1 GB of cloud space; paid plans add more minutes and remove the watermark. Settings › Usage in the app shows what you have left. <a href="app/">Open Relio</a>.</p>
 <h2>Learn more</h2><p>See <a href="/features">features</a>, <a href="/how-it-works">how it works</a> and the <a href="/faq">FAQs</a>, or <a href="/download">download Relio</a>.</p>
     </section>
   </main>
   <footer class="site-footer">
     <div class="container footer-main">
       <div class="footer-brand"><a class="brand" href="/" aria-label="Relio Clips home"><img src="icon.png" width="28" height="28" alt=""><span>Relio Clips<span class="brand-dot">.</span></span></a><p>One in. Many out.</p></div>
-      <nav aria-label="Footer navigation"><a href="/download">Download</a><a href="/about">About</a><a href="/login">Your account</a><a href="/faq">Help & FAQs</a><a href="https://github.com/tarassamb-bit/Prismclips/issues">Feedback ↗</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a></nav>
+      <nav aria-label="Footer navigation"><a href="/download">Download</a><a href="/about">About</a><a href="/login">Your account</a><a href="/faq">Help & FAQs</a><a href="#feedback" data-bug-report="feedback">Send feedback</a><a href="#report-bug" data-bug-report>Report a bug</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/refund">Refunds</a><a href="mailto:support@relioclips.com">Contact</a></nav>
     </div>
-    <div class="container footer-bottom"><span>Built for creators. Open to everyone.</span><span>© 2026 Relio Clips <span class="separator">/</span> Relio beta</span></div>
+    <div class="container footer-bottom"><span>Built for creators. Open to everyone.</span><span>© 2026 Relio Clips <span class="separator">/</span> Relio Clips</span></div>
   </footer>
 </body>
 </html>

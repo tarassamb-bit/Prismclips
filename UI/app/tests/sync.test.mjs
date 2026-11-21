@@ -19,7 +19,7 @@ test('sync discards a network response from the previous account', async () => {
     return {
       select(value) { columns = value; return this; },
       eq(field, value) { filters.push([table, field, value]); return this; },
-      order() { return this; }, range() { return this; }, in() { return this; },
+      order() { return this; }, limit() { return this; }, gt() { return this; }, in() { return this; },
       then(resolve, reject) {
         if (columns.includes('data')) { requested(); return response.then(resolve, reject); }
         return Promise.resolve({ data: [{ id: 'p', updated_at: 'new' }], error: null }).then(resolve, reject);
@@ -51,7 +51,7 @@ test('sync keeps other accounts deletions and acknowledges only owned legacy row
     let deleting = false;
     return {
       delete() { deleting = true; return this; }, select() { return this; }, eq() { return this; },
-      in(field, ids) { sent.push(...ids); return this; }, order() { return this; }, range() { return this; },
+      in(field, ids) { sent.push(...ids); return this; }, order() { return this; }, limit() { return this; }, gt() { return this; },
       then(resolve, reject) {
         return Promise.resolve({ data: deleting ? [{ id: 'p' }, { id: 'legacy-owned' }] : [], error: null }).then(resolve, reject);
       },
@@ -79,7 +79,7 @@ test('local conflict winner keeps merged cloud media status on this device as we
   const db = { from(table) {
     let columns, writing = false;
     return {
-      select(value) { columns = value; return this; }, eq() { return this; }, order() { return this; }, range() { return this; }, in() { return this; },
+      select(value) { columns = value; return this; }, eq() { return this; }, order() { return this; }, limit() { return this; }, gt() { return this; }, in() { return this; },
       update({ data }) { writing = true; pushed = data; return this; },
       then(resolve, reject) {
         const data = table === 'cloud_folders' ? [] : writing ? [{ id: 'p', updated_at: 'written' }]
@@ -97,4 +97,57 @@ test('local conflict winner keeps merged cloud media status on this device as we
   assert.equal(pushed.media[0].cloud.removed, true);
   assert.equal(acknowledged.media[0].cloud.removed, true);
   assert.equal(vm.runInContext('syncStatus().state', context), 'ok');
+});
+
+test('sync reads beyond 10,000 cloud items before deciding a local item was deleted', async () => {
+  const cloud = Array.from({ length: 10_001 }, (_, i) => ({ id: String(i).padStart(5, '0'), updated_at: 'same' }));
+  let dropped = 0, pages = 0;
+  const store = {
+    listProjects: async () => cloud.map(({ id }) => ({ id, owner: 'first', dirty: false, syncedAt: 'same' })),
+    listFolders: async () => [], onSave() {}, pendingDeletes: () => new Set(),
+    dropSynced: async () => { dropped++; return true; },
+    applyCloud: async () => true,
+  };
+  const db = { from(table) {
+    let cursor = null;
+    return {
+      select() { return this; }, eq() { return this; }, order() { return this; }, limit() { return this; },
+      gt(field, value) { cursor = value; return this; }, in() { return this; },
+      then(resolve, reject) {
+        if (table === 'cloud_projects') pages++;
+        const data = table === 'cloud_projects' ? cloud.filter((row) => cursor === null || row.id > cursor).slice(0, 1000) : [];
+        return Promise.resolve({ data, error: null }).then(resolve, reject);
+      },
+    };
+  } };
+  const code = readFileSync(new URL('../sync.js', import.meta.url), 'utf8').replace(/^import .*;\n/gm, '').replace(/^export /gm, '');
+  const context = vm.createContext({ store, mergePlan, resolveConflict, setTimeout: () => 1, clearTimeout() {}, Date, console });
+  vm.runInContext(code, context);
+  context.configureSync({ db: () => db, userId: () => 'first' });
+  await context.sync();
+  assert.equal(pages, 11);
+  assert.equal(dropped, 0);
+  assert.equal(vm.runInContext('syncStatus().state', context), 'ok');
+});
+
+test('sync fails safely on an incomplete or repeating cloud inventory', async () => {
+  for (const badPage of [null, Array.from({ length: 1000 }, (_, i) => ({ id: String(i).padStart(4, '0'), updated_at: 'same' }))]) {
+    let dropped = 0;
+    const store = {
+      listProjects: async () => [{ id: 'local', owner: 'first', dirty: false, syncedAt: 'same' }],
+      listFolders: async () => [], onSave() {}, pendingDeletes: () => new Set(),
+      dropSynced: async () => { dropped++; return true; },
+    };
+    const db = { from() { return {
+      select() { return this; }, eq() { return this; }, order() { return this; }, limit() { return this; }, gt() { return this; },
+      then(resolve, reject) { return Promise.resolve({ data: badPage, error: null }).then(resolve, reject); },
+    }; } };
+    const code = readFileSync(new URL('../sync.js', import.meta.url), 'utf8').replace(/^import .*;\n/gm, '').replace(/^export /gm, '');
+    const context = vm.createContext({ store, mergePlan, resolveConflict, setTimeout: () => 1, clearTimeout() {}, Date, console });
+    vm.runInContext(code, context);
+    context.configureSync({ db: () => db, userId: () => 'first' });
+    await context.sync();
+    assert.equal(dropped, 0);
+    assert.equal(vm.runInContext('syncStatus().state', context), 'error');
+  }
 });

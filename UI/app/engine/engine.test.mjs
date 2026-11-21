@@ -31,6 +31,15 @@ assert.equal(clock.at(-1).end, 356);
 assert.ok(clock.every((w, i) => i === 0 || w.start < clock[i - 1].end));
 assert.ok(clock.some((w) => w.text === 'Look at this.') && clock.some((w) => w.text === ''));
 assert.deepEqual(T.timeWindows([], { start: 0, end: 40 }, 90, 30), [{ start: 0, end: 40, text: '' }]);
+// Overlapping cues cover the same speech only once; they must not make a mostly silent video look speech-heavy.
+assert.equal(T.speechCoverage([cue('one', 10, 20), cue('another', 10, 20)], { start: 0, end: 100 }), 0.2);
+// Speech-heavy videos can still contain a long silent section with meaningful visuals.
+const intermittent = [cue('Opening words.', 0, 40), cue('Closing words.', 160, 40)];
+const fullWindows = T.completeWindows(intermittent, { start: 0, end: 200 }, 90, 30);
+assert.ok(fullWindows.some((w) => w.start <= 90 && w.end >= 100), 'the middle of the silent gap is scored');
+assert.ok(fullWindows.every((w) => w.start >= 0 && w.end <= 200), 'no scoring outside the selected range');
+assert.ok(fullWindows.length <= 5, 'long gaps add only a bounded number of scoring windows');
+assert.equal(T.completeWindows([cue('One', 0, 40), cue('Two', 45, 40)], { start: 0, end: 85 }, 90, 30).length, 1, 'short pauses add no extra window');
 
 // Sentences: an edge in the middle of a sentence moves to its boundary.
 const sentences = [cue('One.', 0, 5), cue('Two.', 5, 5), cue('Three.', 10, 5)];
@@ -48,6 +57,11 @@ const words = ['hello', 'brave', 'new', 'world'].map((text, i) => cue(text, i, 0
 assert.equal(T.alignmentIsReliable(words, reference), true);
 assert.equal(T.alignmentIsReliable(words.map((w) => ({ ...w, text: 'nothing' })), reference), false);
 assert.equal(T.alignmentIsReliable([...words].reverse(), reference), false);
+// A second transcript that retains every original word can still invent speech between them.
+const invented = ['hello', 'very', 'brave', 'and', 'new', 'world'].map((text, i) => cue(text, i * 0.6, 0.5));
+assert.equal(T.alignmentIsReliable(invented, reference), false, 'invented words must not be treated as verified captions');
+const oneExtra = ['hello', 'brave', 'new', 'world', 'again'].map((text, i) => cue(text, i * 0.6, 0.5));
+assert.equal(T.alignmentIsReliable(oneExtra, reference), true, 'one extra token allows minor transcription differences');
 
 // Overlap rule and sentence-timing fallback.
 assert.equal(T.overlaps(0, 10, 9, 10), false);
@@ -76,6 +90,34 @@ assert.equal(S.parseWindowScore({ id: 1, hook: 10, payoff: 10, standalone: 10, e
 assert.ok(S.parseWindowScore({ id: 1, hook: 10, payoff: 10, standalone: 2, emotion: 10, novelty: 10 }).score < 80);
 assert.throws(() => S.parseWindowScore({ id: 1, hook: 11, payoff: 1, standalone: 1, emotion: 1, novelty: 1 }), { failure: 'invalidResponse' });
 assert.deepEqual(S.rankedWindowIds([{ id: 0, score: 5 }, { id: 1, score: 9 }], [0, 1]), [1, 0]);
+
+// The final judge gets bounded visual evidence for quiet clips, not just speech-based criteria.
+{
+  let request;
+  const sampled = [];
+  const pool = [clip(0, 30, 9), clip(40, 70, 8), clip(80, 110, 7)];
+  const config = { usage: { video: 'test', minutes: 2, day: '2026-01-01' }, accessToken: async () => 'test',
+    fetch: async (_url, options) => { request = JSON.parse(options.body); return new Response(JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: '{"ids":[1,0]}' }] } }] }), { status: 200 }); } };
+  const result = await S.finalCut(pool, [cue('A full explanation', 0, 30)], 2, '', config, null, {
+    source: {}, sampleFrame: async (_source, time) => { sampled.push(time); return new Uint8Array([1, 2]); },
+  });
+  assert.deepEqual(result, [pool[1], pool[0]]);
+  assert.deepEqual(sampled, [46, 64, 86, 104], 'only low-speech candidates get visual samples');
+  const parts = request.contents[0].parts;
+  assert.match(parts[0].text, /empty transcript is not a flaw/);
+  assert.equal(parts.filter((part) => part.inlineData).length, 4);
+  assert.ok(parts.some((part) => part.text?.startsWith('Candidate 1, still')));
+
+  sampled.length = 0;
+  const many = Array.from({ length: 8 }, (_, i) => clip(i * 30, (i + 1) * 30, 9));
+  await S.finalCut(many, [], 2, '', config, null, {
+    source: {}, sampleFrame: async (_source, time) => { sampled.push(time); return new Uint8Array([1]); },
+  });
+  assert.equal(sampled.length, 12, 'visual sampling is capped even with many candidates');
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(S.finalCut(pool, [], 2, '', config, controller.signal, { source: {} }), { name: 'AbortError' });
+}
 
 // Transcription answers: JSON, subtitle lines, long pieces split at sentences, bad timing rejected.
 assert.equal(S.transcriptAnswer('{"words":[{"text":"hi","start":0,"end":1}]}')[0].text, 'hi');
@@ -272,8 +314,27 @@ console.log('word timing checks passed');
 }
 console.log('title grounding checks passed');
 
-// Repeated lines within 20 s are dropped; the same line later on is kept.
-assert.deepEqual(Shorts.dropRepeats([{ text: 'Hello there.', start: 0 }, { text: 'hello there', start: 8 }, { text: 'hello there', start: 40 }]).map((c) => c.start), [0, 40]);
+// Fallback alignment stays within each sentence instead of moving the next sentence into earlier speech.
+{
+  const sentences = [cue('Hello there', 0, 2), cue('one two three four five six seven eight', 4, 4)];
+  const words = S.alignHeardCues(sentences, [{ start: 0, end: 2 }, { start: 4, end: 8 }]);
+  assert.deepEqual(words.map((word) => word.text), ['Hello', 'there', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight']);
+  assert.ok(words[1].start + words[1].duration <= 2.001);
+  assert.ok(words[2].start >= 4);
+  const missing = S.alignHeardCues(sentences, [{ start: 4, end: 8 }]);
+  assert.equal(missing[0].start, 0, 'a missed speech run retains the sentence timing');
+  assert.ok(missing[2].start >= 4, 'later speech is not borrowed by the first sentence');
+  const spike = S.alignHeardCues(sentences, [{ start: 4, end: 4.1 }]);
+  assert.ok(spike.at(-1).start > 7, 'a brief noise spike does not compress the sentence');
+}
+
+// Repeated speech is kept, but a duplicate transcription of the same moment is removed.
+assert.deepEqual(Shorts.dropRepeats([
+  { text: 'Hello there.', start: 0, duration: 1 },
+  { text: 'hello there', start: 0.05, duration: 1 },
+  { text: 'hello there', start: 1, duration: 1 },
+  { text: 'hello there', start: 8, duration: 1 },
+]).map((c) => c.start), [0, 1, 8]);
 
 // Lines with an impossible speaking rate are dropped; a normal line stays; too many removed means likely music.
 assert.deepEqual(Shorts.dropImpossibleRate([{ text: 'one two three', start: 0, duration: 2 }, { text: 'a b c d e f g h i j k l m n o p', start: 3, duration: 1 }]).map((c) => c.start), [0]);

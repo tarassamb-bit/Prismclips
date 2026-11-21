@@ -50,22 +50,40 @@ async function r2Call(method, key, query) {
 }
 
 /** The account's stored videos: { key, bytes, at } for everything under `prefix`. */
-async function listObjects(prefix) {
+async function listObjects(prefix, callPage = r2Call) {
   const objects = [];
   let token = null;
-  for (let page = 0; page < 20; page++) {
+  const seen = new Set();
+  const decode = (value) => value.replace(/&(?:amp|lt|gt|quot|apos|#\d+|#x[\da-f]+);/gi, (entity) => {
+    const named = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'" };
+    if (entity in named) return named[entity];
+    const code = entity[2].toLowerCase() === 'x' ? parseInt(entity.slice(3, -1), 16) : parseInt(entity.slice(2, -1), 10);
+    return Number.isInteger(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : entity;
+  });
+  for (let page = 0; page < 1000; page++) {
     const query = { 'list-type': '2', prefix, ...(token ? { 'continuation-token': token } : {}) };
-    const response = await r2Call('GET', null, query);
+    const response = await callPage('GET', null, query);
     const xml = await response.text();
     if (!response.ok) throw Object.assign(new Error(`Cloud storage returned ${response.status}.`), { status: 502 });
+    const truncated = xml.match(/<IsTruncated>\s*(true|false)\s*<\/IsTruncated>/);
+    if (!truncated || !/<ListBucketResult(?:\s[^>]*)?>/.test(xml) || !/<\/ListBucketResult>\s*$/.test(xml)
+      || (xml.match(/<Contents>/g) ?? []).length !== (xml.match(/<\/Contents>/g) ?? []).length) {
+      throw Object.assign(new Error('Cloud storage returned an incomplete video list. Please try again.'), { status: 502 });
+    }
     for (const [, item] of xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)) {
       const pick = (tag) => item.match(new RegExp(`<${tag}>([^<]*)</${tag}>`))?.[1] ?? '';
-      objects.push({ key: pick('Key'), bytes: Number(pick('Size')), at: pick('LastModified') });
+      const key = decode(pick('Key')), size = pick('Size'), bytes = Number(size), at = pick('LastModified');
+      if (!key.startsWith(prefix) || !size || !Number.isSafeInteger(bytes) || bytes < 0 || !at) {
+        throw Object.assign(new Error('Cloud storage returned an invalid video list. Please try again.'), { status: 502 });
+      }
+      objects.push({ key, bytes, at });
     }
-    token = /<IsTruncated>true<\/IsTruncated>/.test(xml) ? xml.match(/<NextContinuationToken>([^<]*)</)?.[1] : null;
-    if (!token) break;
+    if (truncated[1] === 'false') return objects;
+    token = decode(xml.match(/<NextContinuationToken>([^<]+)<\/NextContinuationToken>/)?.[1] ?? '');
+    if (!token || seen.has(token)) throw Object.assign(new Error('Cloud storage returned an incomplete video list. Please try again.'), { status: 502 });
+    seen.add(token);
   }
-  return objects;
+  throw Object.assign(new Error('Cloud storage video list is too large. Please try again.'), { status: 502 });
 }
 
 /** The object's size, or null when it doesn't exist. */

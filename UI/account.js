@@ -118,10 +118,6 @@
     return;
   }
   available = true;
-  // The sign-up page shows the beta's free spots, and the waitlist once they're gone.
-  const beta = signInButton?.value === 'up' && window.prismBeta
-    ? window.prismBeta.attach(db, form, { note: 'beta-spots', field: 'form-field', button: 'button button-primary' })
-    : null;
   // The desktop apps open the sign-up page with the email they were given.
   const givenEmail = new URLSearchParams(location.search).get('email');
   if (givenEmail && emailInput && !emailInput.value) emailInput.value = givenEmail.slice(0, 254);
@@ -298,8 +294,7 @@
         ? 'Check your inbox to confirm your email, then sign in here.'
         : 'Your session couldn’t be established. Please try signing in again.');
     } catch (error) {
-      if (action === 'up' && await beta?.signUpFailed(error)) say('');
-      else say(authErrorMessage(error), 'error');
+      say(authErrorMessage(error), 'error');
     } finally {
       if (action === 'up') human?.reset();
       setPending(false);

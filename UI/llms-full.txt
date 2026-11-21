@@ -2,7 +2,7 @@
 
 > Every main page of relioclips.com as plain text. Summary and links: https://relioclips.com/llms.txt
 
-Relio is in beta. On Mac, sign in to try it; AI usage limits apply. Windows and Linux use your own Gemini API key. Paid plans are not available yet.
+Relio runs in your browser and has desktop apps. Free and paid plans have monthly AI usage limits. Windows and Linux use your own Gemini API key.
 
 ---
 
@@ -35,7 +35,7 @@ Explore clip selection, framing, and captions.
 02 / THE BETA
 ### Try it free.
 
-Relio runs in your browser. Sign up for the free beta: 60 minutes of video per account.
+Relio runs in your browser. The Free plan includes 20 video minutes each month, with 720p watermarked exports.
 
 03 / THE DETAILS
 ### A few good questions.
@@ -58,7 +58,7 @@ Make every word count03
 
 THE STORY COMES FIRST
 #### More than a clip. A complete thought.
-Relio looks for a hook, the context, and a payoff. Cuts land on whole sentences, so your best ideas get the room they need.
+Relio looks for a hook, context, and a payoff, and tries to keep cuts on whole sentences. Review and refine each suggestion.
 
 - Moments from across your selected range
 
@@ -79,7 +79,7 @@ Use editor chat to request changes in plain language, from trimming to muting th
 Source files are copied, never modified. New batches append, and each batch can be undone.
 
 #### Ready to share
-Export vertical MP4s at up to 1080 × 1920, then upload them to your favorite platforms.
+Export vertical MP4s, then upload them to your favorite platforms.
 
 ONE IN. MANY OUT.
 
@@ -136,8 +136,8 @@ Title: Web app — Relio
 # Make Shorts in your browser.
 Relio runs in the browser: choose a video, let Relio AI suggest Shorts, edit captions and framing, and export MP4s. Nothing to install. Projects and videos are saved to your account and open on any device you sign in on.
 
-**How does beta access work?**
-Sign up at https://relioclips.com/signup. The free beta is open to 100 accounts; when it's full, you can join the waitlist. Each account gets 60 minutes of video to make Shorts from and 1 GB of cloud storage for videos. There are no payments or paid plans.
+**How does access work?**
+Sign up at https://relioclips.com/signup. The Free plan includes 20 video minutes each month, 720p watermarked exports and 1 GB of cloud storage. Paid plans offer more minutes and watermark-free exports. See https://relioclips.com/pricing for details.
 
 **Which browsers work?**
 Current Chrome, Edge, Safari and Firefox on a computer.
@@ -200,7 +200,7 @@ A FEW GOOD QUESTIONS
 Everything to know before your first Short.
 
 **How much does Relio cost?**
-Relio is in beta and paid plans are not available yet. AI usage limits apply; check Settings in the app for your allowance. About beta access.
+The Free plan includes 20 video minutes per month. Paid plans start at €9 per month for 150 video minutes; see https://relioclips.com/pricing for current details and local prices.
 
 **What happens to my footage?**
 Your source files, projects, preview, and rendering stay on your computer. Audio chunks, transcripts, sampled frames, and editor chat messages are sent for AI processing. On Mac, they go through Relio’s server and OpenRouter to an AI model; on Windows and Linux, they go to Google Gemini. Relio needs an internet connection; it has no offline AI mode.
@@ -209,7 +209,7 @@ Your source files, projects, preview, and rendering stay on your computer. Audio
 Yes. Review and adjust every Short before export. Change the timing, choose Fill, Fit, or Split framing, try seven caption styles, or ask the editor chat to help with edits.
 
 **Where can I post my exports?**
-Relio exports vertical MP4 files at up to 1080 × 1920. Upload them yourself to your favorite short-form platforms, including YouTube Shorts, Instagram Reels, and TikTok. Direct publishing isn’t built in.
+Relio exports vertical MP4 files: 720p on Free, or up to 4K on paid plans when your browser and computer support it. Upload them yourself to your favorite platforms. Direct publishing isn’t built in.
 
 **Is this ready for my daily workflow?**
 Relio is an early beta. The Mac pipeline works end to end, but you should review every clip and expect rough edges. Windows and Linux ports are available but still need verification on real devices. Read the current limits.
@@ -335,13 +335,13 @@ Relio has no offline mode. On Mac, requests go through Relio’s server (Supabas
 
 - Transcripts.
 
-- Sampled frames: up to 12 per refinement batch, and about 1 per second of each tracked Short.
+- Sampled frames for clip selection and subject tracking. Web final ranking may also send up to 12 stills from clips with little speech.
 
 - Editor chat messages, with recent conversation and a short edit summary.
 Temporary audio files are deleted after each request. The Mac server logs may include portions of model responses for diagnostics. See OpenRouter’s Privacy Policy and Terms, and Google’s Privacy Policy and Gemini API terms.
 
 ### Your Relio account
-Your Relio account is stored with our database provider, Supabase. Paid plans are not available during the current beta. The account stores:
+Your Relio account is stored with our database provider, Supabase. The account stores:
 
 - Your email address and password. The password is stored hashed by Supabase Auth.
 

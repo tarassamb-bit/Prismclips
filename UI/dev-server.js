@@ -83,8 +83,9 @@ const server = http.createServer(async (req, res) => {
   let file = pathname === '/' ? '/index' : /^\/dashboard_[^/]+$/.test(pathname) ? '/dashboard' : pathname;
   // Vercel serves its analytics scripts only on deployments; locally they are empty.
   if (pathname.startsWith('/_vercel/')) { res.setHeader('Content-Type', 'application/javascript'); return res.end(''); }
-  // Prices are switched off for now: the pricing page sends people to the app, as vercel.json does.
-  if (pathname === '/pricing' || pathname === '/pricing.html') { res.statusCode = 307; res.setHeader('Location', '/app'); return res.end(); }
+  // Prices are switched off on the live site: the pricing page sends people to the app, as vercel.json does. With the Paddle
+  // sandbox settings present (a local checkout experiment), the page opens instead.
+  if (!process.env.PADDLE_CLIENT_TOKEN && (pathname === '/pricing' || pathname === '/pricing.html')) { res.statusCode = 307; res.setHeader('Location', '/app'); return res.end(); }
   // The web app has an address per screen (/app/settings/usage, /app/project/...): any of them without a file extension is the app.
   if (pathname === '/app' || (pathname.startsWith('/app/') && !path.extname(pathname))) file = '/app/index.html';
   // Like Vercel, a folder serves its index.html (/app/ → app/index.html).

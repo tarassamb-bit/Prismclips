@@ -24,6 +24,7 @@
   <link rel="preload" href="fonts/SpaceGrotesk-Medium.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="styles.css">
   <script src="site.js" defer></script>
+  <script src="/bug-report.js" defer></script>
   <!-- Vercel Web Analytics and Speed Insights: cookieless page views and load times. -->
   <script src="/analytics.js" defer></script>
   <script defer src="/_vercel/insights/script.js"></script>
@@ -53,6 +54,8 @@
         <a href="/features">Features</a>
         <a href="/how-it-works">How it works</a>
         
+        <a href="/pricing" data-billing>Pricing</a>
+        
         <a href="/faq">FAQs</a>
         <a href="/changelog">Changelog</a>
       </nav>
@@ -65,13 +68,15 @@
   </header>
   <main id="main">
 
-    <section class="page-hero container"><p class="eyebrow">TERMS</p><h1>Terms of use</h1><p>The short version: Relio is beta software, provided as is. Last updated 2026-10-27.</p></section>
+    <section class="page-hero container"><p class="eyebrow">TERMS</p><h1>Terms of use</h1><p>The short version: Relio is provided as is. Last updated 2026-11-21.</p></section>
     <section class="container prose">
 <h2>The software</h2><p>Relio is provided “as is”, without warranty of any kind.</p>
-<h2>Beta status</h2><p>Relio is early beta software. Review every Short before you publish it, and keep your own backups. The Windows and Linux versions have not been tested on real devices yet.</p>
+<h2>Software status</h2><p>Relio is new software. Review every Short before you publish it, and keep your own backups. The Windows and Linux versions have not been tested on real devices yet.</p>
 <h2>Your content</h2><p>You keep all rights to your videos and exports. You are responsible for having the rights to the footage you process and the Shorts you publish.</p>
 <h2>AI processing</h2><p>On Mac, Relio sends audio, transcripts and sampled frames through its server to <a href="https://openrouter.ai/terms">OpenRouter</a>, which passes them to an AI model provider. Windows and Linux send requests to <a href="https://ai.google.dev/gemini-api/terms">Google’s Gemini API</a> using your own API key. The relevant providers’ terms apply.</p>
 <h2>Your account</h2><p>Keep your password safe and don’t use the account to break the service or access other people’s data. Accounts may be removed if they are abused. See the <a href="/privacy">Privacy</a> page for what the account stores.</p>
+<h2>Plans and payments</h2><p>Paid plans renew every month until you cancel. Payments are handled by Paddle, our merchant of record. See <a href="/refund">Refunds and cancellation</a>.</p>
+<h2>Contact</h2><p>Questions about these terms or your account: <a href="mailto:support@relioclips.com">support@relioclips.com</a>.</p>
 <h2>Changes</h2><p>These terms may change as Relio grows. The date at the top shows the latest version.</p>
 <p class="note">This is a plain-language draft, not legal advice.</p>
     </section>
@@ -80,9 +85,9 @@
   <footer class="site-footer">
     <div class="container footer-main">
       <div class="footer-brand"><a class="brand" href="/" aria-label="Relio Clips home"><img src="icon.png" width="28" height="28" alt=""><span>Relio Clips<span class="brand-dot">.</span></span></a><p>One in. Many out.</p></div>
-      <nav aria-label="Footer navigation"><a href="/download">Download</a><a href="/about">About</a><a href="/login">Your account</a><a href="/faq">Help & FAQs</a><a href="https://github.com/tarassamb-bit/Prismclips/issues">Feedback ↗</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a></nav>
+      <nav aria-label="Footer navigation"><a href="/download">Download</a><a href="/about">About</a><a href="/login">Your account</a><a href="/faq">Help & FAQs</a><a href="#feedback" data-bug-report="feedback">Send feedback</a><a href="#report-bug" data-bug-report>Report a bug</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/refund">Refunds</a><a href="mailto:support@relioclips.com">Contact</a></nav>
     </div>
-    <div class="container footer-bottom"><span>Built for creators. Open to everyone.</span><span>© 2026 Relio Clips <span class="separator">/</span> Relio beta</span></div>
+    <div class="container footer-bottom"><span>Built for creators. Open to everyone.</span><span>© 2026 Relio Clips <span class="separator">/</span> Relio Clips</span></div>
   </footer>
 </body>
 </html>
