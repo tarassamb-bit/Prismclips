@@ -942,7 +942,7 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
   const email = state.session?.user?.email;
   const used = u ? `${Math.ceil(u.used)} of ${Math.floor(u.allowance)} min used` : 'Minutes used';
   const NAV = [
-    ['account', 'Account', email ?? 'Sign in to track your stats', '<path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0"/>', 'Your Relio account.'],
+    ['account', 'Account', email ?? 'Sign in to track your stats', '<path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0"/>', 'Your profile, sign-in and sync.'],
     ['overview', 'Overview', 'Stats and exports', '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>', 'What you have made with Relio, and your exports.'],
     ['usage', 'Usage', used, '<path d="M5 18a8 8 0 1 1 14 0M12 18l4-6"/>', 'Minutes of video you can make Shorts from, and your space for videos in the cloud.'],
     ...(PLANS_ON ? [['plan', 'Plan', state.plan?.name ?? 'Plans and extra packs', '<path d="M3 7h18v12H3zM3 11h18M7 15h4"/>', 'Your plan, what it includes, and extra minutes or Live hours.']] : []),
@@ -958,7 +958,7 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
         <div class="big-number"><b>${u ? Math.ceil(u.used) : '—'}</b><span>${u ? `of ${Math.floor(u.allowance)} minutes used` : state.session ? 'Usage is unavailable. Check your connection and try again.' : 'Sign in to see usage.'}</span></div>
         <div class="meter ${percent >= 85 ? 'warn' : ''}"><div style="width:${percent}%"></div></div>
         ${u ? `<p class="muted small">${Math.max(0, Math.floor(u.allowance - u.used))} minutes left.</p>` : ''}
-        <p class="muted small">${paid ? `Your plan includes ${plan.upload_minutes} minutes of video each month; the count starts again on the 1st.` : 'Every account gets 60 minutes of video to make Shorts from.'} A video you already used doesn't count again; making Shorts from it again uses half of its length.</p>
+        <p class="muted small">${paid ? `Your plan includes ${plan.upload_minutes} minutes of video each month; the count starts again on the 1st.` : `The Free plan includes ${plan?.upload_minutes ?? 20} minutes of video each month; the count starts again on the 1st.`} A video you already used doesn't count again; making Shorts from it again uses half of its length.</p>
       </div>
       ${email ? `<div class="box"><strong>Videos in the cloud</strong><p id="cloud-video-text">Checking…</p><div class="meter"><div id="cloud-video-bar"></div></div>
         <p class="muted small">Videos you add are saved to your account too, so a project opens on any device without choosing the file again. The same video is stored once, however many projects use it. When a new video doesn’t fit, Relio asks before deleting your oldest cloud videos. A video bigger than all your space stays on its device.</p>
@@ -1007,27 +1007,32 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
       <div class="box flush"><div class="table-wrap"><table><thead><tr><th scope="col">Date</th><th scope="col">Shorts</th><th scope="col">Length</th><th scope="col">Quality</th></tr></thead><tbody id="export-rows"></tbody></table></div></div>
       <p id="stats-note" class="muted small" role="status">Loading your export history…</p>`;
   } else {
-    body = `<div class="box">
-        <div class="who"><span class="avatar" aria-hidden="true">${esc((email ?? '?')[0].toUpperCase())}</span><div><strong>${email ? esc(email) : 'Not signed in'}</strong><span class="muted small">${email ? 'Signed in' : 'Sign in to track your stats'}</span></div></div>
-        <p class="muted small">Your projects, Shorts and videos are saved to your account, and each export adds its date, number of Shorts, length and quality to your stats under Overview.</p>
-        ${email ? '<div class="row"><button class="button ghost" data-action="signout">Sign out</button></div>' : ''}
+    const initial = esc((email ?? '?')[0].toUpperCase());
+    body = !email ? `<div class="set-group"><div class="set-row"><span class="who"><span class="avatar" aria-hidden="true">?</span><span><strong>Not signed in</strong><span class="muted small">Sign in to save your projects and stats.</span></span></span></div></div>` : `
+      <div class="set-group">
+        <div class="set-row"><span class="who"><span class="avatar" aria-hidden="true">${initial}</span><span><strong>${esc(email)}</strong><span class="muted small">Signed in</span></span></span>
+          <button class="button ghost" data-action="signout">Sign out</button></div>
       </div>
-      ${email ? `<form id="profile-form" class="box stack">
-        <strong>Profile</strong>
-        <div class="profile-fields">
-          <label>Name <input name="name" maxlength="60" autocomplete="name"></label>
-          <label>Username <span class="at-input"><span>@</span><input name="username" maxlength="21" spellcheck="false" autocapitalize="none" placeholder="choose one"></span></label>
-        </div>
-        <div class="row"><button class="button primary" disabled>Save</button><span id="profile-status" class="muted small" role="status"></span></div>
-      </form>` : ''}
-      ${email ? `<div class="box"><strong>Cloud sync</strong><p id="sync-text">${esc(syncText(syncStatus()))}</p>
-        <p class="muted small">Your projects, folders, Shorts and edits sync by themselves to every device you sign in on. Their videos are kept in the cloud too: see Usage.</p></div>` : ''}
-      ${email ? `<div class="box"><strong>Password</strong>
-        <p class="muted small">We email you a link to choose a new password, so only someone with access to your inbox can change it.</p>
-        <div class="row"><button class="button ghost" data-action="change-password">Change password</button></div><p id="password-note" class="muted small" role="status"></p></div>
-      <div class="box danger-zone"><strong>Danger zone</strong>
-        <p class="muted small">Deleting your account removes your projects, Shorts, stats and every video in the cloud for good. We email you a code to confirm.</p>
-        <div class="row"><button class="button ghost danger" data-action="delete-account">Delete account</button></div><p id="delete-account-note" class="error small" role="alert"></p></div>` : ''}`;
+      <h3 class="group-label">Profile</h3>
+      <form id="profile-form" class="set-group">
+        <label class="set-row field-row"><span>Name</span><input name="name" maxlength="60" autocomplete="name"></label>
+        <label class="set-row field-row"><span>Username</span><span class="at-input"><span>@</span><input name="username" maxlength="21" spellcheck="false" autocapitalize="none" placeholder="choose one"></span></label>
+        <div class="set-row"><span id="profile-status" class="muted small" role="status"></span><button class="button primary" disabled>Save</button></div>
+      </form>
+      <h3 class="group-label">Security</h3>
+      <div class="set-group">
+        <div class="set-row"><span><strong>Email</strong><span class="muted small">${esc(email)}</span></span></div>
+        <div class="set-row"><span><strong>Password</strong><span id="password-note" class="muted small" role="status">We email you a link to choose a new one.</span></span>
+          <button class="button ghost" data-action="change-password">Change password</button></div>
+      </div>
+      <h3 class="group-label">Sync</h3>
+      <div class="set-group">
+        <div class="set-row"><span><strong>Cloud sync</strong><span id="sync-text" class="muted small">${esc(syncText(syncStatus()))}</span></span></div>
+      </div>
+      <div class="set-group danger-zone">
+        <div class="set-row"><span><strong>Delete account</strong><span id="delete-account-note" class="muted small" role="alert">Removes your projects, Shorts, stats and cloud videos for good. We email you a code first.</span></span>
+          <button class="button ghost danger" data-action="delete-account">Delete account</button></div>
+      </div>`;
   }
   $('#app').innerHTML = `<section class="settings-layout">
     <nav class="settings-nav" aria-label="Settings categories">${nav}</nav>
