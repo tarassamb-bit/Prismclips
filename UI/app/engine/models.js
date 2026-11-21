@@ -71,8 +71,8 @@ export function regionInterval(region, duration, customStart = null, customEnd =
 
 /** Every Short is composed at 1080×1920; quality sets the file's size and codec. */
 export const EXPORT_QUALITIES = {
-  full: { title: '1080p · H.264', detail: 'Best quality. Plays everywhere.', width: 1080, height: 1920, codec: 'avc', bitrate: 12e6 },
-  compact: { title: '1080p · HEVC', detail: 'Same quality, smaller files. Plays on recent phones and apps.', width: 1080, height: 1920, codec: 'hevc', bitrate: 6e6 },
-  uhd: { title: '4K · H.264', detail: 'Sharpest picture, biggest files. Paid plans; slower to export.', width: 2160, height: 3840, codec: 'avc', bitrate: 40e6 },
-  small: { title: '720p · H.264', detail: 'Smallest files, fastest to send.', width: 720, height: 1280, codec: 'avc', bitrate: 4e6 },
+  full: { title: '1080p', detail: 'Sharp, and plays everywhere.', width: 1080, height: 1920, codec: 'avc', bitrate: 12e6 },
+  compact: { title: '1080p, smaller file', detail: 'Same quality, smaller files. Plays on recent phones and apps.', width: 1080, height: 1920, codec: 'hevc', bitrate: 6e6 },
+  uhd: { title: '4K', detail: 'Sharpest picture, biggest files. Paid plans; slower to export.', width: 2160, height: 3840, codec: 'avc', bitrate: 40e6 },
+  small: { title: '720p', detail: 'Smallest files, fastest to send.', width: 720, height: 1280, codec: 'avc', bitrate: 4e6 },
 };

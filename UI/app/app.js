@@ -2152,7 +2152,7 @@ async function exportShorts(ids, quality, folder = null) {
         watchdog = setInterval(() => {
           if (Date.now() - lastActive < STALL_MS) return;
           task.controller.abort();
-          reject(new Error(`The export stopped while ${lastStep} and made no progress for ${STALL_MS / 1000} seconds. Try 720p · H.264, or another browser.`));
+          reject(new Error(`The export stopped while ${lastStep} and made no progress for ${STALL_MS / 1000} seconds. Try 720p, or another browser.`));
         }, 1000);
       });
       const blob = await Promise.race([stalled, render(source, segment, {
