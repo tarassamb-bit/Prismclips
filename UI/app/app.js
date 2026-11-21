@@ -1015,7 +1015,7 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
           ${unlimited ? `<b class="dash-big">Unlimited</b><span class="dash-sub">${Math.ceil(u.used)} minutes used this month</span>` : `<b class="dash-big">${left ?? '—'}<small> min left</small></b>
           <div class="dash-meter"><div style="width:${u ? Math.min(100, u.used / u.allowance * 100) : 0}%"></div></div>
           <span class="dash-sub">${u ? `${Math.ceil(u.used)} of ${Math.floor(u.allowance)} minutes used this month` : 'Usage is unavailable right now.'}</span>`}
-          <div class="dash-actions">${PLANS_ON ? `<button class="button dash-cta" data-action="settings-tab" data-tab="plan">${paid ? 'Manage plan' : 'Upgrade'}</button>` : ''}<button class="link dash-link" data-action="settings-tab" data-tab="usage">Usage details</button></div></div>
+          <div class="dash-actions">${PLANS_ON ? `<button class="button dash-cta" data-action="settings-tab" data-tab="plan">${paid ? 'Manage plan' : 'Upgrade'}</button>${unlimited ? '' : '<a class="button dash-buy" href="/pricing?pack=minutes" data-pack="minutes">Buy 100 minutes · €5</a>'}` : ''}<button class="link dash-link" data-action="settings-tab" data-tab="usage">Usage details</button></div></div>
           ${plan ? `<ul class="dash-includes" aria-label="Included in your plan">
             <li>${esc(plan.export === '4K' ? '4K' : plan.export)} exports</li>
             <li>${plan.watermark ? 'Relio watermark on exports' : 'No watermark'}</li>
