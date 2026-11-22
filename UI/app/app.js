@@ -2123,14 +2123,6 @@ function renderInspector() {
 
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
 
-/** A source range must fit the video and leave at least half a second for the Short. */
-function timelineProblem(start, end, total) {
-  if (![start, end, total].every(Number.isFinite) || start < 0 || end > total + 0.001 || end - start < 0.5) {
-    return 'Enter a start and end within the video, at least 0.5 seconds apart.';
-  }
-  return null;
-}
-
 /** Moves or resizes a Short in its source. Captions and words are relative to the Short's start, so they shift with it. */
 function applyTiming(s, start, duration) {
   const media = state.project.media.find((m) => m.id === s.mediaId);
@@ -2162,13 +2154,6 @@ function timelineHtml(segment) {
         <div class="tl-clip" id="tl-clip" style="left:${pct(segment.start)};width:${pct(segment.duration)}"><span class="tl-handle l" data-edge="l"></span><span class="tl-handle r" data-edge="r"></span></div>
       </div>
       <div class="row between muted small mono"><span>0:00</span><span id="tl-label">${clock(segment.start)}–${clock(segment.start + segment.duration)}</span><span>${clock(total)}</span></div>
-      <div class="timeline-fields" role="group" aria-label="Precise Short timing">
-        <label>Start (seconds) <input id="tl-start" type="number" min="0" max="${total}" step="any" value="${segment.start.toFixed(3)}" aria-describedby="tl-help tl-error"></label>
-        <label>End (seconds) <input id="tl-end" type="number" min="0" max="${total}" step="any" value="${(segment.start + segment.duration).toFixed(3)}" aria-describedby="tl-help tl-error"></label>
-        <button type="button" class="button ghost" id="tl-apply">Apply timing</button>
-      </div>
-      <p id="tl-help" class="muted small">Times are measured from the start of the source video. You can also drag the clip above.</p>
-      <p id="tl-error" class="error small" role="alert"></p>
     </div>`;
 }
 
@@ -2176,22 +2161,6 @@ function wireTimeline(segment) {
   const track = $('#tl-track'), clip = $('#tl-clip');
   if (!track || !clip) return;
   const total = Number($('.timeline').dataset.total);
-  $('#tl-apply')?.addEventListener('click', async (event) => {
-    const startInput = $('#tl-start'), endInput = $('#tl-end');
-    const start = startInput.value === '' ? NaN : Number(startInput.value);
-    const end = endInput.value === '' ? NaN : Number(endInput.value);
-    const problem = timelineProblem(start, end, total);
-    $('#tl-error').textContent = problem ?? '';
-    if (problem) return;
-    const safeEnd = Math.min(end, total);
-    if (Math.abs(start - segment.start) < 0.001 && Math.abs(safeEnd - segment.start - segment.duration) < 0.001) return;
-    event.currentTarget.disabled = true;
-    try {
-      await edit((s) => applyTiming(s, start, safeEnd - start), { awaitPreview: true });
-      if (selected()?.id === segment.id) $('#tl-apply')?.focus();
-    }
-    catch (error) { const note = $('#tl-error'); if (note) note.textContent = error.message || 'Could not save timing. Please try again.'; event.currentTarget.disabled = false; }
-  });
   clip.addEventListener('pointerdown', (event) => {
     event.preventDefault();
     clip.setPointerCapture(event.pointerId);
@@ -2221,7 +2190,7 @@ function wireTimeline(segment) {
 }
 
 /** Applies an edit to the selected Short: keeps an undo copy, saves, and re-renders the preview when the picture changed. */
-async function edit(change, { rerender = true, awaitPreview = false } = {}) {
+async function edit(change, { rerender = true } = {}) {
   const project = state.project;
   const segment = selected();
   if (!segment) return;
@@ -2231,7 +2200,7 @@ async function edit(change, { rerender = true, awaitPreview = false } = {}) {
   if (state.project !== project || !project.segments.includes(segment)) return;
   await store.saveProject(project, { isCurrent: () => state.project === project && project.segments.includes(segment) });
   if (state.project !== project) return;
-  if (rerender) { const ready = selectShort(segment.id); if (awaitPreview) await ready; }
+  if (rerender) selectShort(segment.id);
   else renderEditor();
 }
 

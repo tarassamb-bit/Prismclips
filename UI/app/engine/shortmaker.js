@@ -249,7 +249,8 @@ export function repeatedLines(cues, window = 20) {
   let count = 0;
   for (const cue of cues) {
     const text = key(cue.text);
-    if (!text) continue;
+    // "Yeah", "Right", "Thank you": normal speech repeats short lines; only a repeated longer line looks like a chorus.
+    if (text.split(' ').length < 3) continue;
     if (lastSeen.has(text) && cue.start - lastSeen.get(text) < window) count++;
     lastSeen.set(text, cue.start);
   }

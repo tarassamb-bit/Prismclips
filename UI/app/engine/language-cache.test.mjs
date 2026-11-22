@@ -58,4 +58,5 @@ test('an old transcript with unknown language is not reused for an explicit lang
 
 import { repeatedLines } from './shortmaker.js';
 import assertRepeat from 'node:assert/strict';
-assertRepeat.equal(repeatedLines([{ start: 0, text: 'Oh baby' }, { start: 8, text: 'oh, baby!' }, { start: 40, text: 'Oh baby' }, { start: 41, text: 'Other' }]), 1);
+assertRepeat.equal(repeatedLines([{ start: 0, text: 'Oh baby baby' }, { start: 8, text: 'oh, baby baby!' }, { start: 40, text: 'Oh baby baby' }, { start: 41, text: 'Other' }]), 1);
+assertRepeat.equal(repeatedLines([{ start: 0, text: 'Yeah.' }, { start: 3, text: 'Yeah.' }, { start: 6, text: 'Right.' }, { start: 9, text: 'Right.' }]), 0, 'short replies are normal speech');

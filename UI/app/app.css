@@ -78,9 +78,6 @@ details.insp-section:not([open]) { gap: 0; }
 .bin, .inspector { background: var(--surface1); border: 1px solid var(--border); border-radius: 14px; padding: 14px; max-height: calc(100vh - 150px); overflow: auto; }
 .stage { display: grid; justify-items: center; gap: 10px; min-height: 60vh; align-content: start; }
 .timeline { width: min(560px, 100%); display: grid; gap: 4px; margin-top: 6px; }
-.timeline-fields { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin-top: 8px; }
-.timeline-fields label { display: grid; gap: 4px; flex: 1 1 120px; }
-.timeline-fields input { width: 100%; min-width: 0; }
 .timeline > p { margin: 2px 0; }
 .tl-track { position: relative; height: 30px; min-width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; touch-action: none; }
 .tl-other { position: absolute; top: 4px; bottom: 4px; background: var(--border); border-radius: 4px; }
