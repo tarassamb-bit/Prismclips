@@ -817,6 +817,14 @@ function firstAnalysisNotice(duration, usage) {
   return `Your last usage check showed about ${Math.floor(left * 100) / 100} min remaining. A first analysis of this ${clock(duration)} video uses its full length, even for a shorter range. If you have analyzed it before, the charge may differ. Usage is checked again before analysis.`;
 }
 
+/** For Free accounts: the plan marked "Most popular" on the pricing page, with what it adds and a button to it. */
+function popularPitch() {
+  const tier = (window.PRISM_TIERS ?? []).find((t) => t.badge);
+  if (!PLANS_ON || !tier) return '';
+  return `<div class="popular-pitch"><span class="popular-tag">${esc(tier.badge)}</span><strong>${esc(tier.name)}</strong>
+    <span class="muted small">${esc(tier.features.slice(0, 2).join(' · '))}</span><a class="button primary" href="/pricing">Get ${esc(tier.name)}</a></div>`;
+}
+
 function renderCreate() {
   const c = state.create;
   setUrl(`/app/create/${CREATE_STEPS[c.step - 1]}`);
@@ -994,6 +1002,7 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
           <span class="dash-sub">${esc(renew)}</span>
           <div class="dash-actions">${plan.sub ? '<button class="button dash-cta" data-action="manage-plan">Manage or cancel</button>' : ''}<a class="button ${plan.sub ? 'dash-buy' : 'dash-cta'}" href="/pricing">${paid ? 'Change plan' : 'Upgrade'}</a></div>
           <p id="manage-note" class="small plan-note" role="alert" hidden></p>
+          ${paid ? '' : popularPitch()}
         </div>
         ${plan.features.length ? `<ul class="dash-includes" aria-label="Included in your plan">${plan.features.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}
       </div>
