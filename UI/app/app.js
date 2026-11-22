@@ -344,7 +344,8 @@ function setTourStage(stage) { try { localStorage.setItem(tourKey(), stage); } c
 /** The hint for this moment (see tour.js), with what its button does. Null when there is none. */
 function currentHint() {
   const hint = hintFor({ stage: tourStage(), dialog: Boolean(state.dialog), screen: state.screen, running: Boolean(state.task?.project),
-    createStep: state.create?.step ?? null, shorts: state.project?.segments.length ?? 0,
+    // An error on the create screen must stay readable: no bubble over it.
+    createStep: state.create?.error ? null : state.create?.step ?? null, shorts: state.project?.segments.length ?? 0,
     made: (state.projects ?? []).some((p) => !p.trashed && p.segments.length > 0) });
   if (hint?.then) hint.next = hint.then === 'finish' ? finishTour : () => setTourStage(hint.then);
   if (hint?.back) hint.previous = () => setTourStage(hint.back);
@@ -839,7 +840,7 @@ function renderCreate() {
   const prev = '<button class="button ghost" data-create="prev">← Back</button>';
   let html;
   if (c.step === 1) {
-    html = `${eyebrow(1, 'Choose video')}<h2 class="big">Choose a video</h2>
+    html = `${eyebrow(1, 'Choose video')}<h2 class="big">Choose a video</h2><p class="muted small">At least ${MIN_VIDEO_SECONDS / 60} minutes long.</p>
       <label class="drop-card ${c.busy ? 'busy' : ''}"><input id="pick" class="file-input" type="file" accept="video/*" aria-label="Choose a video" ${c.busy ? 'disabled' : ''}>
         <span class="drop-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 16V4m-5 5 5-5 5 5M5 20h14"/></svg></span>
         <strong>${c.busy ? 'Reading the video…' : 'Drop a video here'}</strong>
