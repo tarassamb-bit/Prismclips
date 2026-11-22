@@ -306,18 +306,21 @@ const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const folderIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>';
 
 /** `view` is null for Home, or { folderId } inside a folder. */
-// A project nobody edited for this long is deleted with its video and Shorts, here and in the cloud. Editing restarts the clock.
-const UNTOUCHED_DAYS = 7;
+// A project nobody edited for its plan's days is deleted with its video and Shorts, here and in the cloud. Editing restarts the clock.
+// Keep in step with KEEP_DAYS in api/cleanup.js. Until the plan is known, the longest applies, so nothing goes early.
+const KEEP_DAYS = { free: 1, tier1: 2, creator: 5, studio: 7 };
+const KEEP_BY_NAME = { 'Tier 1': 2, Creator: 5, Studio: 7 }; // when only the subscription's plan name is known
+const keepDays = () => (PLANS_ON && (KEEP_DAYS[state.plan?.tier] ?? KEEP_BY_NAME[state.plan?.name])) || 7;
 
-/** Whole days before an untouched project is deleted: 7 right after an edit, 1 on its last day. */
+/** Whole days before an untouched project is deleted: the plan's days right after an edit, 1 on its last day. */
 function daysLeft(project) {
   const edited = Date.parse(project.updated ?? project.created);
-  return Number.isFinite(edited) ? Math.max(1, UNTOUCHED_DAYS - Math.floor((Date.now() - edited) / 86_400_000)) : UNTOUCHED_DAYS;
+  return Number.isFinite(edited) ? Math.max(1, keepDays() - Math.floor((Date.now() - edited) / 86_400_000)) : keepDays();
 }
 
 /** Runs after each sync, so an edit made on another device arrives before anything is judged untouched. */
 async function expireUntouched() {
-  const cutoff = Date.now() - UNTOUCHED_DAYS * 86_400_000;
+  const cutoff = Date.now() - keepDays() * 86_400_000;
   let removed = 0;
   for (const project of (await store.listProjects()).filter(isMine)) {
     // An unreadable date never counts as old, and the open project is never removed under the person.
@@ -330,7 +333,7 @@ async function expireUntouched() {
   if (state.screen === 'home') showHome(state.homeView);
 }
 
-/** Once per account: the 7-day rule, before it can surprise anyone. */
+/** Once per account: the delete rule, before it can surprise anyone. */
 // First sign-in: a welcome, then a guided tour through the first project. Hints point at the real buttons, one at a time,
 // and follow the person's own steps: Start creating, the video, the settings, the wait, the first Shorts and Export. The
 // early hints come from where the person is; only the last ones need a saved stage ('on' -> 'edit' -> 'export' -> 'done').
@@ -416,10 +419,10 @@ function firstRunNotice() {
   if (!seen(retentionKey())) showRetention();
 }
 
-function showRetention(title = `Projects you don’t edit are deleted after ${UNTOUCHED_DAYS} days`) {
+function showRetention(title = `Projects you don’t edit are deleted after ${plural(keepDays(), 'day')}`) {
   try { localStorage.setItem(retentionKey(), '1'); } catch { /* storage blocked: shown again next time */ }
   openDialog(`<div class="stack"><h2>${title}</h2>
-    <p>If you don’t change a project for ${UNTOUCHED_DAYS} days, Relio deletes it: the video, its Shorts and everything else in it, on this device and in the cloud. Any edit, re-analysis or export, like moving a clip on the timeline, starts a new ${UNTOUCHED_DAYS}-day period. You’ll see a warning on Home 2 days before.</p>
+    <p>If you don’t change a project for ${plural(keepDays(), 'day')}, Relio deletes it: the video, its Shorts and everything else in it, on this device and in the cloud. Any edit, re-analysis or export, like moving a clip on the timeline, starts a new ${plural(keepDays(), 'day')}-day period. You’ll see a warning on Home 2 days before.</p>
     <p class="muted small">Export the Shorts you want to keep. Exported files on your computer are never touched.</p>
     <div class="row end"><button class="button primary" data-action="close">Got it</button></div></div>`);
 }
@@ -494,7 +497,7 @@ async function showHome(view = null) {
   }
   // Day 5 on: a banner names the projects about to go, so nobody loses one without warning.
   const soon = all.filter((p) => daysLeft(p) <= 2).sort((a, b) => daysLeft(a) - daysLeft(b));
-  const warning = soon.length ? `<div class="notice" role="status"><strong>${soon.length === 1 ? `“${esc(soon[0].title)}” will be deleted ${daysLeft(soon[0]) <= 1 ? 'tomorrow' : `in ${daysLeft(soon[0])} days`}.` : `${soon.length} projects will be deleted within 2 days.`}</strong> Export your Shorts now, or make any edit to keep a project for another ${UNTOUCHED_DAYS} days.</div>` : '';
+  const warning = soon.length ? `<div class="notice" role="status"><strong>${soon.length === 1 ? `“${esc(soon[0].title)}” will be deleted ${daysLeft(soon[0]) <= 1 ? 'tomorrow' : `in ${daysLeft(soon[0])} days`}.` : `${soon.length} projects will be deleted within 2 days.`}</strong> Export your Shorts now, or make any edit to keep a project for another ${plural(keepDays(), 'day')} days.</div>` : '';
   $('#app').innerHTML = `<section class="dashboard">${warning}${html}</section>`;
 }
 
