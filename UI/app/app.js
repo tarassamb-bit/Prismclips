@@ -284,6 +284,8 @@ function renderGate(message = '') {
     db: db(), mode: new URLSearchParams(location.search).get('mode') === 'signup' ? 'signup' : 'signin', redirectTo: location.origin + '/app/',
     onSignedIn: async () => {
       state.session = (await db().auth.getSession()).data.session;
+      // Signing out happens in Settings, so the address still says /app/settings: start at Home instead. Shared project/folder links are kept.
+      if (!/^\/app\/(project|folder|live)\//.test(location.pathname)) { history.replaceState(null, '', '/app/'); await route(); }
       renderGate();
       refreshUsage();
     },
@@ -455,12 +457,12 @@ async function showHome(view = null) {
   const card = (p) => {
     const poster = p.media.find((m) => m.thumbnail)?.thumbnail;
     const making = remoteTask(p.id);
-    const info = making ? `<span class="making small"><span class="spinner" aria-hidden="true"></span><span>${remoteText(making)}</span></span>`
+    const info = making ? `<span class="making small"><span class="spinner" aria-hidden="true"></span><span>Making Shorts…</span></span>`
       : `<span class="muted small">${plural(p.segments.length, 'Short')} · ${dateText(p.updated ?? p.created)}</span>`;
     const left = daysLeft(p);
     const expiry = left <= 2 ? `<span class="missing small">${left <= 1 ? 'Deleted tomorrow' : `Deleted in ${left} days`} unless you edit or export it</span>` : '';
     const away = noVideo.has(p.id) && !noVideo.get(p.id) ? '<span class="missing small">Video not on this device</span>' : '';
-    const body = `<div class="poster">${poster ? `<img alt="" src="${poster}">` : ''}<span class="badge">${clock(p.media[0]?.duration ?? 0)}</span></div>
+    const body = `<div class="poster">${poster ? `<img alt="" src="${poster}">` : ''}<span class="badge">${clock(p.media[0]?.duration ?? 0)}</span>${making ? makingOverlay(making) : ''}</div>
           <strong class="p-title">${esc(p.title)}</strong>${info}${expiry}${away}`;
     return `<div class="project-card" draggable="true" data-project="${esc(p.id)}">
           <button class="open" data-action="open" data-id="${esc(p.id)}">${body}</button>
@@ -834,7 +836,7 @@ function renderCreate() {
     const problem = rangeProblem(c);
     const usageNotice = firstAnalysisNotice(m.duration, state.usage);
     const where = { entireVideo: 'the entire video', firstHalf: 'the first half', lastHalf: 'the last half', custom: 'the chosen range' }[c.region];
-    const many = c.count > 0 ? `up to ${c.count} distinct moments` : `up to about one distinct moment per minute (maximum ${Shorts.MAX_SHORTS})`;
+    const many = c.count > 0 ? `up to ${c.count} distinct moments` : `up to about one distinct moment per minute (maximum ${Shorts.maxShorts(m.duration)})`;
     const long = c.duration > 0 ? `of about ${c.duration} seconds` : 'as long as each story needs';
     html = `${eyebrow(2, 'Set up Shorts')}<h2 class="big">Choose your Short settings</h2><p class="muted">Your video is ready. Choose how to turn it into Shorts.</p>
       <div class="panel"><p class="file-line"><span class="tick">✓</span> ${esc(m.name)}</p>
@@ -843,7 +845,7 @@ function renderCreate() {
         <button class="button ghost" data-create="different">Choose a different video</button></div>
       <div class="panel"><p class="muted small">Shorts settings</p>
         <div class="settings-row">
-          <label>How many <select id="short-count"><option value="0" ${c.count === 0 ? 'selected' : ''}>Auto</option>${Array.from({ length: Shorts.MAX_SHORTS }, (_, i) => i + 1).map((n) => `<option value="${n}" ${n === c.count ? 'selected' : ''}>${n} ${n === 1 ? 'Short' : 'Shorts'}</option>`).join('')}</select></label>
+          <label>How many <select id="short-count"><option value="0" ${c.count === 0 ? 'selected' : ''}>Auto</option>${Array.from({ length: Shorts.maxShorts(m.duration) }, (_, i) => i + 1).map((n) => `<option value="${n}" ${n === c.count ? 'selected' : ''}>${n} ${n === 1 ? 'Short' : 'Shorts'}</option>`).join('')}</select></label>
           <label>Approx. length <select id="length">${LENGTHS.map(([v, t]) => `<option value="${v}" ${v === c.duration ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
           <label>Language <select id="language">${LANGUAGES.map((l) => `<option value="${l}" ${l === c.language ? 'selected' : ''}>${l === 'auto' ? 'Auto' : l}</option>`).join('')}</select></label>
           <label>Take clips from <select id="region">${Object.entries(REGION_TITLES).map(([k, t]) => `<option value="${k}" ${k === c.region ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
@@ -1782,16 +1784,23 @@ function announceTask(now = false) {
 }
 // A quiet tab still says it's alive, so a closed or crashed one drops off Home.
 setInterval(() => announceTask(true), 5000);
-const remoteTask = (id) => { const t = remoteTasks.get(id); return t && Date.now() - t.at < 15_000 ? t : null; };
-const remoteText = (t) => `Making Shorts · ${Math.round(t.progress * 100)}%${t.left != null ? ` · ${leftText(t.left)}` : ''}`;
+const remoteTask = (id) => { const t = remoteTasks.get(id); return t && Date.now() - t.at < 60_000 ? t : null; }; // background tabs (Safari) slow their timers: allow a minute of quiet
+// Counts down between messages (a background tab may report only every few seconds); says "estimating" until there is a figure.
+// On the project's poster, like a render queue: big percentage, time left, a bar along the bottom.
+const makingOverlay = (t) => `<div class="making-overlay" role="status" aria-label="${esc(remoteText(t))}"><strong>${Math.round(t.progress * 100)}%</strong>
+  <span>${esc(remoteText(t).split(' · ').at(-1))}</span><div class="making-bar"><div style="width:${Math.round(t.progress * 100)}%"></div></div></div>`;
+const remoteText = (t) => {
+  const left = t.left == null ? null : Math.max(0, t.left - (Date.now() - t.at) / 1000);
+  return `Making Shorts · ${Math.round(t.progress * 100)}% · ${left == null ? 'estimating time left…' : leftText(left)}`;
+};
 taskChannel?.addEventListener('message', ({ data }) => {
   if (data.type === 'ask') return announceTask(true);
   if (data.type === 'progress') {
     const known = remoteTasks.has(data.projectId);
     remoteTasks.set(data.projectId, { ...data, at: Date.now() });
     if (state.screen !== 'home') return;
-    const status = document.querySelector(`[data-project="${CSS.escape(data.projectId)}"] .making`);
-    if (status) status.lastChild.textContent = remoteText(remoteTasks.get(data.projectId));
+    const overlay = document.querySelector(`[data-project="${CSS.escape(data.projectId)}"] .making-overlay`);
+    if (overlay) overlay.outerHTML = makingOverlay(remoteTasks.get(data.projectId));
     else if (!known) showHome(state.homeView); // a project this Home hasn't listed yet
   } else if (data.type === 'done') {
     remoteTasks.delete(data.projectId);
@@ -1820,7 +1829,7 @@ function renderTask() {
   }
   host.querySelector('strong').textContent = task.stage;
   host.querySelector('.bar > div').style.width = `${Math.round((task.progress ?? 0) * 100)}%`;
-  host.querySelector('.eta').textContent = leftText(secondsLeft(task));
+  host.querySelector('.eta').textContent = leftText(secondsLeft(task)) || 'Estimating time left…';
   host.querySelector('[data-action="games"]').hidden = !task.project || state.screen === 'games';
   document.documentElement.style.setProperty('--progress-h', `${host.offsetHeight + 12}px`);
 }

@@ -1,13 +1,14 @@
 // Relio's AI server. The app sends Gemini-format requests here, signed in with its Supabase session; this function
 // forwards them to OpenRouter with the OPENROUTER_API_KEY secret and answers in the same Gemini format.
 // The key lives only in Supabase's secrets, never in the app. Set it with Project Settings → Edge Functions → Secrets.
-// OPENROUTER_MODEL (default Mimo) is tried first, then one paid fallback (OPENROUTER_FALLBACK_MODEL) that takes audio,
-// images and text. Every failed attempt is logged in the ai_failures table. The web app uses UI/api/gemini.js instead.
+// OPENROUTER_MODEL (default Mimo) is tried first. Text and images get one Ember try (OPENROUTER_FALLBACK_MODEL) between two
+// MiMo tries; audio stays on MiMo only, because Ember has no zero-data-retention endpoint for audio. No Gemini: it cost more
+// than MiMo for the same work. Kept in step with UI/api/gemini.js. Every failed attempt is logged in the ai_failures table. The web app uses UI/api/gemini.js instead.
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 // No free models: they are rate-limited exactly when they are needed.
 const DEFAULT_MODEL = "xiaomi/mimo-v2.6-flash";
-const DEFAULT_FALLBACK = "google/gemini-3.8-flash";
+const DEFAULT_FALLBACK = "meta/muse-ember";
 // Only providers that keep no data (zero data retention) and don't train on it; among those, the quickest to answer.
 const PROVIDER = { zdr: true, data_collection: "deny", sort: "latency" };
 
@@ -153,7 +154,7 @@ async function checkVideoLimit(request: Request): Promise<{ refused: Response | 
 const MIN_ANSWER_USD = 0.0005;
 // Mimo gets this long; the fallback gets what is left of the budget.
 const MODEL_TIMEOUT_MS = 75_000;
-// Audio tries are short: a model that hasn't answered audio in 30 s rarely does later, and Gemini gets the time.
+// Audio tries are short: a model that hasn't answered audio in 30 s rarely does later, and the next try gets the time.
 const AUDIO_TRY_MS = 30_000;
 // The MiMo provider with the most answers in ai_spend (Makora, 296 of 429 over 2 days to 2026-11-08).
 const AUDIO_PROVIDER = "makora";
@@ -242,8 +243,8 @@ Deno.serve(async (request) => {
 
   const chosen = Deno.env.get("OPENROUTER_MODEL") || DEFAULT_MODEL;
   const fallback = Deno.env.get("OPENROUTER_FALLBACK_MODEL") || DEFAULT_FALLBACK;
-  // Audio: MiMo, then Gemini, each with a short try. Text and images: MiMo, then Gemini.
-  const models = [chosen, fallback];
+  // Audio: three short MiMo tries. Text and images: MiMo, one Ember try, then MiMo with the time left.
+  const models = converted.kind === "audio" ? [chosen, chosen, chosen] : [chosen, fallback, chosen];
   let status = 503, reply: any = null;
   const failures: string[] = [];
   const started = Date.now();

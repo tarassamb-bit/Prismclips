@@ -24,8 +24,8 @@ async function run(language, cached) {
     select: async (_source, transcript) => { calls.selected = transcript; throw endOfTest; },
   };
   const transcripts = { cuesCovering: (value, start, end) => value && value.start <= start && value.end >= end ? value.cues : null };
-  const analyze = new Function('compatibleTranscript', 'regionInterval', 'autoCount', 'T', 'S', 'MAX_SHORTS', 'SELECTION_GUIDANCE', 'VIDEO_TYPE_TITLES', 'GeminiError',
-    `${body}\nreturn analyze;`)(compatibleTranscript, () => ({ start: 0, end: 20 }), () => 1, transcripts, selection, 20, {}, {}, Error);
+  const analyze = new Function('compatibleTranscript', 'regionInterval', 'autoCount', 'T', 'S', 'maxShorts', 'SELECTION_GUIDANCE', 'VIDEO_TYPE_TITLES', 'GeminiError',
+    `${body}\nreturn analyze;`)(compatibleTranscript, () => ({ start: 0, end: 20 }), () => 1, transcripts, selection, () => 20, {}, {}, Error);
   await assert.rejects(analyze({ duration: 20, hasAudio: true }, {}, {
     region: 'entireVideo', count: 1, duration: 15, language, cachedTranscript: cached,
     onTranscript: async (value) => calls.checkpoints.push(value),
@@ -55,3 +55,7 @@ test('an old transcript with unknown language is not reused for an explicit lang
   const auto = await run('auto', cached);
   assert.equal(auto.transcriptions, 0);
 });
+
+import { repeatedLines } from './shortmaker.js';
+import assertRepeat from 'node:assert/strict';
+assertRepeat.equal(repeatedLines([{ start: 0, text: 'Oh baby' }, { start: 8, text: 'oh, baby!' }, { start: 40, text: 'Oh baby' }, { start: 41, text: 'Other' }]), 1);

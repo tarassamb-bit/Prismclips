@@ -27,7 +27,7 @@ export function validate(clips, interval, targetDuration, count, excluding = [],
   const selected = [];
   for (const clip of valid) {
     if (!overlapsAny(clip, selected)) selected.push(clip);
-    if (selected.length === Math.min(20, Math.max(1, count))) break;
+    if (selected.length === Math.max(1, count)) break;
   }
   if (selected.length === 0) {
     if (clips.some((c) => Number.isFinite(c.score) && c.score >= 0 && c.score <= 10)) throw new GeminiError('noStrongClips');
@@ -223,8 +223,10 @@ async function refine(ranked, windows, source, cues, interval, targetDuration, c
   const failures = outcomes.filter((o) => o.error).map((o) => o.error);
   if (allClips.length === 0 && failures.length === detailBatches.length && failures.length > 0) throw failures[0];
   if (allClips.length === 0) throw new GeminiError(excluding.length === 0 ? 'noStrongClips' : 'noDistinctClips');
-  const pool = strongestOrBest(allClips, interval, targetDuration, Math.min(20, count * 2 + 2), excluding);
+  const pool = strongestOrBest(allClips, interval, targetDuration, count * 2 + 2, excluding);
   if (pool.length <= 1) return pool;
+  // shortcut: the final editor compares at most 40 finalists in one request; past that the score ranking decides. Batch the final pass if long videos need it.
+  if (pool.length > 40) return pool.slice(0, count);
   progress(0.95, 'Relio AI · final edit: picking the best distinct stories');
   const chosen = await finalCut(pool, cues, count, guidance, configuration, signal, { source });
   // The final pass failed, so no editorial decision was made; score-ranked backups remain.
