@@ -44,7 +44,7 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
   };
   const document = { documentElement: { dataset: {} }, getElementById: (id) => id === 'tiers' ? grid : status, createElement: () => new Element() };
   vm.runInNewContext(fs.readFileSync(`${__dirname}/pricing.js`, 'utf8'), {
-    window, document, location, console, setTimeout, URLSearchParams, matchMedia: () => ({ matches: false }),
+    window, document, location, console, setTimeout, URLSearchParams, confirm: () => false, matchMedia: () => ({ matches: false }),
     fetch: async () => ({ ok: true, json: async () => ({ environment: 'sandbox', token: 'test_public' }) }),
   });
   await settle();
@@ -74,8 +74,8 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
   planResult = { data: [{ id: 'sub_existing' }], error: null };
   button.events.click();
   await settle();
-  assert.equal(checkouts.length, 1, 'an existing subscription opens account management');
-  assert.equal(location.href, '/app/settings/plans');
+  assert.equal(checkouts.length, 1, 'an existing subscription is switched in place, never bought again');
+  assert.equal(location.href, '', 'declining the switch stays on the page');
   sessionUser = null;
   button.events.click();
   await settle();

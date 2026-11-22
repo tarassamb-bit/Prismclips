@@ -2,6 +2,7 @@
 //   POST ?action=sync&transaction_id=txn_…  save a just-finished checkout (202 until Paddle attaches the subscription)
 //   POST ?action=refresh                     re-read the user's subscriptions from Paddle
 //   POST ?action=portal                      link to the Paddle billing portal for their subscriptions
+//   POST ?action=change&price_id=pri_…       switch the active plan to another plan, charging or crediting the difference now
 const { ACTIVE, HttpError, send, fail, requireEnv, paddle, supabase, getUser, syncSubscription } = require('./_lib');
 
 // The one-time packs (Paddle sandbox and live prices): 100 extra video minutes, or 10 extra Live hours, for the month they're bought.
@@ -10,6 +11,13 @@ const PACKS = {
   pri_01m7wykejd7qj2jm895kpb8cyy: MINUTES, pri_01m7z8ycnqttzw183g03j59jre: MINUTES,
   pri_01m7x801j9rtht27jw31r9vavh: HOURS, pri_01m7z8yd2m4w7cv2nasnt49grn: HOURS,
 };
+
+// The monthly plans (Paddle sandbox and live prices, as in pricing-tiers.js): the only prices a plan can be switched to.
+const PLANS = new Set([
+  'pri_01m7wxv785xs9pzn319erq7wtn', 'pri_01m7z8ybf53k8xtd0cghm6hrnb', // Tier 1
+  'pri_01m7wxv7jvh2e830hj69y0merw', 'pri_01m7z8ybvx3b7d6k0nx0r2edb9', // Creator
+  'pri_01m7wxv7wmheyjcr6qqz3cy41b', 'pri_01m7z8yc8ysxtmph5v5gv94y2c', // Studio
+]);
 
 /** Saves the packs of a paid transaction to the account, once per transaction. */
 async function recordPacks(transaction, userId) {
@@ -73,6 +81,20 @@ module.exports = async (req, res) => {
         });
         return send(res, 200, { url: session.urls.general.overview });
       }
+      case 'change': {
+        const priceId = query.get('price_id') || '';
+        if (!PLANS.has(priceId)) throw new HttpError(400, 'That isn’t one of Relio’s plans.');
+        const [row] = await userSubscriptions(user.id, `&status=in.(${ACTIVE})`);
+        if (!row) throw new HttpError(404, 'No plan to change yet. Subscribe first.');
+        const current = await paddle(`/subscriptions/${row.id}`);
+        if (current.items?.some((item) => item.price?.id === priceId)) throw new HttpError(409, 'You’re already on this plan.');
+        // Paddle bills the difference for the rest of this month at once (or credits it when moving down); the renewal date stays.
+        await paddle(`/subscriptions/${row.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ items: [{ price_id: priceId, quantity: 1 }], proration_billing_mode: 'prorated_immediately' }),
+        });
+        return send(res, 200, { result: await syncSubscription(row.id) });
+      }
       default:
         throw new HttpError(400, 'Unknown action.');
     }
@@ -81,3 +103,4 @@ module.exports = async (req, res) => {
   }
 };
 module.exports.recordPacks = recordPacks;
+module.exports.PLANS = PLANS;
