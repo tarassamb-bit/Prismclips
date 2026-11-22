@@ -100,7 +100,8 @@ const slug = (name) => name.toLowerCase().normalize('NFKD').replace(/[\u0300-\u0
 /** Projects and folders are named by their title plus the start of their id, so two with the same name still have different addresses. */
 const projectPath = (project) => `/app/project/${encodeURIComponent(slug(project.title))}-${project.id.slice(0, 8)}`;
 const folderPath = (folder) => `/app/folder/${encodeURIComponent(slug(folder.name))}-${folder.id.slice(0, 8)}`;
-const CREATE_STEPS = ['choose-video', 'settings', 'captions', 'content-type'];
+// Two steps: choose a video, then one screen with every setting (Auto by default) and Make Shorts.
+const CREATE_STEPS = ['choose-video', 'settings'];
 
 let routing = false;
 /** Puts the screen's address in the browser's bar. Moving between screens adds a history entry; `replace` rewrites the current one. */
@@ -855,16 +856,12 @@ function renderCreate() {
           <p class="muted small">${problem ? esc(problem) : `Analyze ${clock(c.customStart * 60)} to ${clock(c.customEnd * 60)} · ${clock((c.customEnd - c.customStart) * 60)} selected`}</p>` : ''}
         <p class="muted small">Relio will analyze frames and available speech, then suggest ${many} ${long} in ${where}. Review every pick before exporting.</p>
         <p class="muted small">The first analysis counts the full ${clock(m.duration)} video toward your monthly minutes, even when you select a shorter range. We’ll show any extra charge for a later analysis before it starts.</p></div>
-      <button class="button primary" data-create="next" ${problem ? 'disabled' : ''}>Next: Choose captions →</button>${back}`;
-  } else if (c.step === 3) {
-    html = `${eyebrow(3, 'Choose captions')}<h2 class="big">Choose your captions</h2><p class="muted">Pick how spoken words appear. You can change this for each Short later.</p>
+      <div class="panel"><p class="muted small">Captions · you can change them for each Short later</p>
       <div class="cards">${CAPTION_STYLES.map((s) => `<button class="choice ${s === c.style ? 'on' : ''}" data-style="${s}" aria-pressed="${s === c.style}"><canvas class="style-preview" data-preview="${s}" aria-hidden="true"></canvas><strong>${STYLE_TITLES[s]}</strong><span class="muted small">${STYLE_DETAILS[s]}</span></button>`).join('')}
-        <button class="choice ${c.style === 'none' ? 'on' : ''}" data-style="none" aria-pressed="${c.style === 'none'}"><span class="style-preview no-captions" aria-hidden="true">Aa</span><strong>No captions</strong><span class="muted small">Shorts start without captions. Turn them on for any Short later.</span></button></div>
-      <div class="row"><button class="button primary" data-create="next">Next: Choose content type →</button><button class="link" data-create="prev">← Back</button></div>`;
-  } else {
-    html = `${eyebrow(4, 'Choose content type')}<h2 class="big">What kind of video is it?</h2><p class="muted">This tunes how Relio picks moments and frames them.</p>
-      <div class="cards">${VIDEO_TYPES.map((t) => `<button class="choice ${t === c.videoType ? 'on' : ''}" data-type="${t}" aria-pressed="${t === c.videoType}"><strong>${VIDEO_TYPE_TITLES[t]}</strong><span class="muted small">${VIDEO_TYPE_DETAILS[t]}</span></button>`).join('')}</div>
-      <div class="row"><button class="button primary" data-create="make">Make Shorts</button><button class="link" data-create="prev">← Back</button></div>`;
+        <button class="choice ${c.style === 'none' ? 'on' : ''}" data-style="none" aria-pressed="${c.style === 'none'}"><span class="style-preview no-captions" aria-hidden="true">Aa</span><strong>No captions</strong><span class="muted small">Shorts start without captions. Turn them on for any Short later.</span></button></div></div>
+      <div class="panel"><p class="muted small">Kind of video · tunes how Relio picks moments and frames them</p>
+      <div class="cards">${VIDEO_TYPES.map((t) => `<button class="choice ${t === c.videoType ? 'on' : ''}" data-type="${t}" aria-pressed="${t === c.videoType}"><strong>${VIDEO_TYPE_TITLES[t]}</strong><span class="muted small">${VIDEO_TYPE_DETAILS[t]}</span></button>`).join('')}</div></div>
+      <button class="button primary" data-create="make" ${problem ? 'disabled' : ''}>Make Shorts</button>${back}`;
   }
   $('#app').innerHTML = `<section class="create">${html}</section>`;
   for (const canvas of document.querySelectorAll('[data-preview]')) stylePreview(canvas, canvas.dataset.preview);
@@ -1588,7 +1585,7 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
     usage: { video: key, minutes, day: localDay(), run },
     onRetry: (message) => { if (state.task === task) setTask(message); },
   };
-  let missed = 0;
+  let missed = 0, made = false;
   const retry = (count) => runShorts(media, { ...options, count }, key, minutes, run);
   try {
     // The server refuses an over-limit run too; checking first spares a request that can't succeed.
@@ -1643,6 +1640,7 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
     project.segments.push(...created);
     const committed = await store.saveProject(project, { isCurrent: () => state.project === project && state.task === task && !task.controller.signal.aborted });
     if (committed === false || state.task !== task || state.project !== project) { endTask(task); return; }
+    made = true;
     track('analysis_finished', { length: lengthBucket(minutes) });
     track('clips_generated', { clips: created.length });
     endTask(task);
@@ -1662,6 +1660,10 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
     endTask(task);
     if (state.screen === 'games') leaveGames();
     reportGenerationError(error, () => retry(options.count));
+  } finally {
+    // A run that was cancelled or failed before any Shorts were saved isn't a re-analysis: the server forgets it and refunds its
+    // minutes, so the next try starts like the first. Older servers lack the function; that only keeps the old charge.
+    if (!made) db()?.rpc('my_abandon_run', { p_video: key, p_run: run }).then(() => refreshUsage(), () => {});
   }
 }
 
