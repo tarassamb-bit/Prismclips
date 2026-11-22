@@ -840,7 +840,6 @@ function renderCreate() {
   let html;
   if (c.step === 1) {
     html = `${eyebrow(1, 'Choose video')}<h2 class="big">Choose a video</h2>
-      <p class="muted">The first analysis counts the video’s full length toward your monthly minutes, even for a shorter range.</p>
       <label class="drop-card ${c.busy ? 'busy' : ''}"><input id="pick" class="file-input" type="file" accept="video/*" aria-label="Choose a video" ${c.busy ? 'disabled' : ''}>
         <span class="drop-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 16V4m-5 5 5-5 5 5M5 20h14"/></svg></span>
         <strong>${c.busy ? 'Reading the video…' : 'Drop a video here'}</strong>
