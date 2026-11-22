@@ -61,6 +61,11 @@
       button.textContent = !user ? 'Sign in to subscribe' : hasPlan ? 'Switch to this plan' : 'Subscribe';
     }
     for (const { tier, button } of cards) if (hasPlan && tier.priceId === currentPrice) button.textContent = 'Your plan';
+    // A lower plan can't be switched to from here (the server refuses it too).
+    const rank = (priceId) => tiers.findIndex((t) => t.priceId === priceId);
+    for (const { tier, button } of cards) {
+      if (hasPlan && currentPrice && rank(tier.priceId) < rank(currentPrice)) { button.disabled = true; button.textContent = 'Lower plan: at renewal'; }
+    }
   }
 
   // One plan per account: a second checkout would start a second subscription.
@@ -130,6 +135,9 @@
   /** An active plan is changed in place (Paddle prorates it), never bought a second time. */
   async function switchPlan(tier) {
     if (tier.priceId === currentPrice) { say(`You’re already on ${tier.name}.`); return; }
+    if (tiers.findIndex((t) => t.priceId === tier.priceId) < tiers.findIndex((t) => t.priceId === currentPrice)) {
+      say('You can only switch to a higher plan. To go lower, cancel and subscribe to the lower plan when your current one ends.', 'error'); return;
+    }
     if (!confirm(`Switch to ${tier.name}? Paddle charges or credits the difference for the rest of this month right away; your renewal date stays the same.`)) return;
     say(`Switching to ${tier.name}…`);
     const token = (await db.auth.getSession())?.data?.session?.access_token;

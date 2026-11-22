@@ -4,13 +4,14 @@ const test = require('node:test');
 const path = require('node:path');
 
 const calls = [];
+let currentPrice = 'pri_01m7wxv785xs9pzn319erq7wtn'; // Tier 1
 const lib = require('./_lib');
 require.cache[path.join(__dirname, '_lib.js')].exports = {
   ...lib,
   requireEnv: () => {},
   getUser: async () => ({ id: 'user-1' }),
   supabase: async () => ({ response: { ok: true }, body: [{ id: 'sub_1', customer_id: 'ctm_1' }] }),
-  paddle: async (url, init) => { calls.push({ url, init }); return { items: [{ price: { id: 'pri_01m7wxv785xs9pzn319erq7wtn' } }] }; },
+  paddle: async (url, init) => { calls.push({ url, init }); return { items: [{ price: { id: currentPrice } }] }; },
   syncSubscription: async () => 'synced',
 };
 const handler = require('./billing');
@@ -36,4 +37,18 @@ test('the current plan and unknown prices are refused', async () => {
   assert.equal((await run('pri_01m7wxv785xs9pzn319erq7wtn')).status, 409);
   assert.equal((await run('pri_01m7wykejd7qj2jm895kpb8cyy')).status, 400, 'a pack is not a plan');
   assert.ok(!calls.some((c) => c.init?.method === 'PATCH'));
+});
+
+test('a downgrade is refused: from Studio, Tier 1 and Creator are both refused', async () => {
+  calls.length = 0;
+  currentPrice = 'pri_01m7wxv7wmheyjcr6qqz3cy41b'; // Studio
+  assert.equal((await run('pri_01m7wxv785xs9pzn319erq7wtn')).status, 409);
+  assert.equal((await run('pri_01m7wxv7jvh2e830hj69y0merw')).status, 409);
+  assert.ok(!calls.some((c) => c.init?.method === 'PATCH'));
+  currentPrice = 'pri_01m7wxv785xs9pzn319erq7wtn';
+});
+
+test('an upgrade from Tier 1 to Studio is allowed', async () => {
+  calls.length = 0;
+  assert.equal((await run('pri_01m7wxv7wmheyjcr6qqz3cy41b')).status, 200);
 });

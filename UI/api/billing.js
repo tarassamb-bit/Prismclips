@@ -13,11 +13,13 @@ const PACKS = {
 };
 
 // The monthly plans (Paddle sandbox and live prices, as in pricing-tiers.js): the only prices a plan can be switched to.
-const PLANS = new Set([
-  'pri_01m7wxv785xs9pzn319erq7wtn', 'pri_01m7z8ybf53k8xtd0cghm6hrnb', // Tier 1
-  'pri_01m7wxv7jvh2e830hj69y0merw', 'pri_01m7z8ybvx3b7d6k0nx0r2edb9', // Creator
-  'pri_01m7wxv7wmheyjcr6qqz3cy41b', 'pri_01m7z8yc8ysxtmph5v5gv94y2c', // Studio
+// Ordered from the lowest plan to the highest: a plan can only be switched to a higher one.
+const PLAN_RANK = new Map([
+  ['pri_01m7wxv785xs9pzn319erq7wtn', 1], ['pri_01m7z8ybf53k8xtd0cghm6hrnb', 1], // Tier 1
+  ['pri_01m7wxv7jvh2e830hj69y0merw', 2], ['pri_01m7z8ybvx3b7d6k0nx0r2edb9', 2], // Creator
+  ['pri_01m7wxv7wmheyjcr6qqz3cy41b', 3], ['pri_01m7z8yc8ysxtmph5v5gv94y2c', 3], // Studio
 ]);
+const PLANS = new Set(PLAN_RANK.keys());
 
 /** Saves the packs of a paid transaction to the account, once per transaction. */
 async function recordPacks(transaction, userId) {
@@ -88,7 +90,10 @@ module.exports = async (req, res) => {
         if (!row) throw new HttpError(404, 'No plan to change yet. Subscribe first.');
         const current = await paddle(`/subscriptions/${row.id}`);
         if (current.items?.some((item) => item.price?.id === priceId)) throw new HttpError(409, 'You’re already on this plan.');
-        // Paddle bills the difference for the rest of this month at once (or credits it when moving down); the renewal date stays.
+        // Upgrades only: a lower plan would credit the unused part to the balance, so it starts at the next renewal instead.
+        const currentRank = Math.max(0, ...(current.items ?? []).map((item) => PLAN_RANK.get(item.price?.id) ?? 0));
+        if (PLAN_RANK.get(priceId) <= currentRank) throw new HttpError(409, 'You can only switch to a higher plan. To go lower, cancel and subscribe to the lower plan when your current one ends.');
+        // Paddle bills the prorated difference for the rest of this month at once; the renewal date stays.
         await paddle(`/subscriptions/${row.id}`, {
           method: 'PATCH',
           body: JSON.stringify({ items: [{ price_id: priceId, quantity: 1 }], proration_billing_mode: 'prorated_immediately' }),
