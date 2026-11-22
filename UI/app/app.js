@@ -10,6 +10,7 @@ import { stylePreview } from './engine/captions.js';
 import { mountPlayer, unmountPlayer } from './player.js';
 import * as store from './store.js';
 import { hintFor, TOUR_STEPS } from './tour.js';
+import { addSample, estimateLeft } from './eta.js';
 import { configureSync, requestSync, syncStatus, onSyncStatus } from './sync.js';
 import { uploadVideo, downloadVideo, removeVideos, removeAllVideos, cloudUsage, CloudVideoError } from './cloudvideo.js';
 import { mountLive, mountLiveHome } from './live/live.js';
@@ -1708,6 +1709,7 @@ function setTask(stage, fraction = null) {
   if (!state.task) return;
   state.task.stage = stage;
   if (fraction !== null) state.task.progress = Math.max(state.task.progress ?? 0, fraction);
+  if (fraction !== null) addSample(state.task.samples ??= [], Date.now(), state.task.progress);
   renderTask();
   announceTask();
 }
@@ -1761,10 +1763,12 @@ function leaveGames() {
 }
 
 /** Seconds left, from how far the task got in the time it has run. Null until there is enough to go on. */
+/** Seconds left, from the recent speed (see eta.js), smoothed so the figure doesn't jump. Null until there is enough to go on. */
 function secondsLeft(task) {
-  const done = task.progress ?? 0;
-  if (!(done >= 0.03 && done < 1)) return null;
-  return ((Date.now() - task.started) / 1000) * (1 - done) / done;
+  const now = Date.now();
+  const seconds = estimateLeft(task.samples ?? [], now, task.started, task.eta ?? null);
+  task.eta = seconds == null ? null : { seconds, at: now };
+  return seconds;
 }
 const leftText = (seconds) => seconds == null ? '' : seconds < 60 ? 'less than a minute left' : `about ${Math.round(seconds / 60)} min left`;
 
