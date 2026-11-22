@@ -853,8 +853,6 @@ function renderCreate() {
     const many = c.count > 0 ? `up to ${c.count} distinct moments` : `up to about one distinct moment per minute (maximum ${Shorts.maxShorts(m.duration)})`;
     const long = c.duration > 0 ? `of about ${c.duration} seconds` : 'as long as each story needs';
     html = `${eyebrow(2, 'Set up Shorts')}<h2 class="big">Choose your Short settings</h2>
-      <div class="panel file-panel"><p class="file-line"><span class="tick">✓</span> ${esc(m.name)} <span class="muted small">· ${clock(m.duration)}</span></p>
-        <button class="link" data-create="different">Change video</button></div>
       ${usageNotice ? `<p class="notice small" role="status">${esc(usageNotice)} ${PLANS_ON ? '<a href="/pricing">See plans or buy minutes</a>.' : ''}</p>` : ''}
       <div class="panel">
         <div class="settings-row">
@@ -867,7 +865,7 @@ function renderCreate() {
           <label>End (minutes) <input id="to" type="number" min="0" step="any" value="${c.customEnd}"></label></div>
           <p class="muted small">${problem ? esc(problem) : `Analyze ${clock(c.customStart * 60)} to ${clock(c.customEnd * 60)} · ${clock((c.customEnd - c.customStart) * 60)} selected`}</p>` : ''}
         <p class="muted small">Relio will suggest ${many} ${long} in ${where}.</p></div>
-      ${actions(back, `<button class="button primary" data-create="next" ${problem ? 'disabled' : ''}>Next: Captions →</button>`)}`;
+      ${actions('<button class="button ghost" data-create="different">← Back</button>', `<button class="button primary" data-create="next" ${problem ? 'disabled' : ''}>Next: Captions →</button>`)}`;
   } else if (c.step === 3) {
     html = `${eyebrow(3, 'Choose captions')}<h2 class="big">Choose your captions</h2><p class="muted">You can change this for each Short later.</p>
       <div class="cards">${CAPTION_STYLES.map((s) => `<button class="choice ${s === c.style ? 'on' : ''}" data-style="${s}" aria-pressed="${s === c.style}"><canvas class="style-preview" data-preview="${s}" aria-hidden="true"></canvas><strong>${STYLE_TITLES[s]}</strong><span class="muted small">${STYLE_DETAILS[s]}</span></button>`).join('')}

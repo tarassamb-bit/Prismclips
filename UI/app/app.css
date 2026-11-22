@@ -720,13 +720,12 @@ details.insp-section:not([open]) { gap: 0; }
 /* Create Shorts: each step fits the window; the Back / Next bar stays pinned at the bottom. */
 .create h2.big { margin: 4px 0 6px; }
 .create .panel { padding: 14px 16px; }
-.file-panel { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .create .drop-card { padding: 32px 20px; }
 .create .cards { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .create .choice { padding: 10px; gap: 4px; }
 .create .choice .style-preview { max-height: 120px; }
 .create-actions { position: sticky; bottom: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  width: 100%; margin-top: 8px; padding: 12px 0; background: var(--surface0); border-top: 1px solid var(--border); }
+  width: 100%; margin-top: 8px; padding: 12px 0; background: var(--surface0); border-top: 1px solid var(--border); box-shadow: 0 48px 0 var(--surface0); }
 .create-actions .button.primary { min-width: 180px; }
 .create-dots { display: flex; gap: 6px; }
 .create-dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--border); }
