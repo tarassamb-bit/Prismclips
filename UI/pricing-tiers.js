@@ -33,7 +33,7 @@ window.PRISM_TIERS = [
     description: 'For creators publishing every week.',
     features: ['450 minutes of video a month', '4K exports, no watermark', 'Live clipping: 2 channels at once, 100 hours a month', 'Recordings up to 24 hours', '100 live Shorts a day'],
     priceId: prismPrice('pri_01m7wxv7jvh2e830hj69y0merw', 'pri_01m7z8ybvx3b7d6k0nx0r2edb9'),
-    badge: 'For weekly creators',
+    badge: 'Most popular',
   },
   {
     name: 'Studio',

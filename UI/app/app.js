@@ -10,6 +10,7 @@ import { stylePreview } from './engine/captions.js';
 import { mountPlayer, unmountPlayer } from './player.js';
 import * as store from './store.js';
 import { hintFor, TOUR_STEPS } from './tour.js';
+import { addSample, estimateLeft } from './eta.js';
 import { configureSync, requestSync, syncStatus, onSyncStatus } from './sync.js';
 import { uploadVideo, downloadVideo, removeVideos, removeAllVideos, cloudUsage, CloudVideoError } from './cloudvideo.js';
 import { mountLive, mountLiveHome } from './live/live.js';
@@ -100,6 +101,7 @@ const slug = (name) => name.toLowerCase().normalize('NFKD').replace(/[\u0300-\u0
 /** Projects and folders are named by their title plus the start of their id, so two with the same name still have different addresses. */
 const projectPath = (project) => `/app/project/${encodeURIComponent(slug(project.title))}-${project.id.slice(0, 8)}`;
 const folderPath = (folder) => `/app/folder/${encodeURIComponent(slug(folder.name))}-${folder.id.slice(0, 8)}`;
+
 const CREATE_STEPS = ['choose-video', 'settings', 'captions', 'content-type'];
 
 let routing = false;
@@ -284,6 +286,8 @@ function renderGate(message = '') {
     db: db(), mode: new URLSearchParams(location.search).get('mode') === 'signup' ? 'signup' : 'signin', redirectTo: location.origin + '/app/',
     onSignedIn: async () => {
       state.session = (await db().auth.getSession()).data.session;
+      // Signing out happens in Settings, so the address still says /app/settings: start at Home instead. Shared project/folder links are kept.
+      if (!/^\/app\/(project|folder|live)\//.test(location.pathname)) { history.replaceState(null, '', '/app/'); await route(); }
       renderGate();
       refreshUsage();
     },
@@ -302,18 +306,21 @@ const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const folderIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>';
 
 /** `view` is null for Home, or { folderId } inside a folder. */
-// A project nobody edited for this long is deleted with its video and Shorts, here and in the cloud. Editing restarts the clock.
-const UNTOUCHED_DAYS = 7;
+// A project nobody edited for its plan's days is deleted with its video and Shorts, here and in the cloud. Editing restarts the clock.
+// Keep in step with KEEP_DAYS in api/cleanup.js. Until the plan is known, the longest applies, so nothing goes early.
+const KEEP_DAYS = { free: 1, tier1: 2, creator: 5, studio: 7 };
+const KEEP_BY_NAME = { 'Tier 1': 2, Creator: 5, Studio: 7 }; // when only the subscription's plan name is known
+const keepDays = () => (PLANS_ON && (KEEP_DAYS[state.plan?.tier] ?? KEEP_BY_NAME[state.plan?.name])) || 7;
 
-/** Whole days before an untouched project is deleted: 7 right after an edit, 1 on its last day. */
+/** Whole days before an untouched project is deleted: the plan's days right after an edit, 1 on its last day. */
 function daysLeft(project) {
   const edited = Date.parse(project.updated ?? project.created);
-  return Number.isFinite(edited) ? Math.max(1, UNTOUCHED_DAYS - Math.floor((Date.now() - edited) / 86_400_000)) : UNTOUCHED_DAYS;
+  return Number.isFinite(edited) ? Math.max(1, keepDays() - Math.floor((Date.now() - edited) / 86_400_000)) : keepDays();
 }
 
 /** Runs after each sync, so an edit made on another device arrives before anything is judged untouched. */
 async function expireUntouched() {
-  const cutoff = Date.now() - UNTOUCHED_DAYS * 86_400_000;
+  const cutoff = Date.now() - keepDays() * 86_400_000;
   let removed = 0;
   for (const project of (await store.listProjects()).filter(isMine)) {
     // An unreadable date never counts as old, and the open project is never removed under the person.
@@ -326,7 +333,7 @@ async function expireUntouched() {
   if (state.screen === 'home') showHome(state.homeView);
 }
 
-/** Once per account: the 7-day rule, before it can surprise anyone. */
+/** Once per account: the delete rule, before it can surprise anyone. */
 // First sign-in: a welcome, then a guided tour through the first project. Hints point at the real buttons, one at a time,
 // and follow the person's own steps: Start creating, the video, the settings, the wait, the first Shorts and Export. The
 // early hints come from where the person is; only the last ones need a saved stage ('on' -> 'edit' -> 'export' -> 'done').
@@ -412,10 +419,10 @@ function firstRunNotice() {
   if (!seen(retentionKey())) showRetention();
 }
 
-function showRetention(title = `Projects you don’t edit are deleted after ${UNTOUCHED_DAYS} days`) {
+function showRetention(title = `Projects you don’t edit are deleted after ${plural(keepDays(), 'day')}`) {
   try { localStorage.setItem(retentionKey(), '1'); } catch { /* storage blocked: shown again next time */ }
   openDialog(`<div class="stack"><h2>${title}</h2>
-    <p>If you don’t change a project for ${UNTOUCHED_DAYS} days, Relio deletes it: the video, its Shorts and everything else in it, on this device and in the cloud. Any edit, re-analysis or export, like moving a clip on the timeline, starts a new ${UNTOUCHED_DAYS}-day period. You’ll see a warning on Home 2 days before.</p>
+    <p>If you don’t change a project for ${plural(keepDays(), 'day')}, Relio deletes it: the video, its Shorts and everything else in it, on this device and in the cloud. Any edit, re-analysis or export, like moving a clip on the timeline, starts a new ${plural(keepDays(), 'day')}-day period. You’ll see a warning on Home 2 days before.</p>
     <p class="muted small">Export the Shorts you want to keep. Exported files on your computer are never touched.</p>
     <div class="row end"><button class="button primary" data-action="close">Got it</button></div></div>`);
 }
@@ -455,12 +462,12 @@ async function showHome(view = null) {
   const card = (p) => {
     const poster = p.media.find((m) => m.thumbnail)?.thumbnail;
     const making = remoteTask(p.id);
-    const info = making ? `<span class="making small"><span class="spinner" aria-hidden="true"></span><span>${remoteText(making)}</span></span>`
+    const info = making ? `<span class="making small"><span class="spinner" aria-hidden="true"></span><span>Making Shorts…</span></span>`
       : `<span class="muted small">${plural(p.segments.length, 'Short')} · ${dateText(p.updated ?? p.created)}</span>`;
     const left = daysLeft(p);
     const expiry = left <= 2 ? `<span class="missing small">${left <= 1 ? 'Deleted tomorrow' : `Deleted in ${left} days`} unless you edit or export it</span>` : '';
     const away = noVideo.has(p.id) && !noVideo.get(p.id) ? '<span class="missing small">Video not on this device</span>' : '';
-    const body = `<div class="poster">${poster ? `<img alt="" src="${poster}">` : ''}<span class="badge">${clock(p.media[0]?.duration ?? 0)}</span></div>
+    const body = `<div class="poster">${poster ? `<img alt="" src="${poster}">` : ''}<span class="badge">${clock(p.media[0]?.duration ?? 0)}</span>${making ? makingOverlay(making) : ''}</div>
           <strong class="p-title">${esc(p.title)}</strong>${info}${expiry}${away}`;
     return `<div class="project-card" draggable="true" data-project="${esc(p.id)}">
           <button class="open" data-action="open" data-id="${esc(p.id)}">${body}</button>
@@ -490,7 +497,7 @@ async function showHome(view = null) {
   }
   // Day 5 on: a banner names the projects about to go, so nobody loses one without warning.
   const soon = all.filter((p) => daysLeft(p) <= 2).sort((a, b) => daysLeft(a) - daysLeft(b));
-  const warning = soon.length ? `<div class="notice" role="status"><strong>${soon.length === 1 ? `“${esc(soon[0].title)}” will be deleted ${daysLeft(soon[0]) <= 1 ? 'tomorrow' : `in ${daysLeft(soon[0])} days`}.` : `${soon.length} projects will be deleted within 2 days.`}</strong> Export your Shorts now, or make any edit to keep a project for another ${UNTOUCHED_DAYS} days.</div>` : '';
+  const warning = soon.length ? `<div class="notice" role="status"><strong>${soon.length === 1 ? `“${esc(soon[0].title)}” will be deleted ${daysLeft(soon[0]) <= 1 ? 'tomorrow' : `in ${daysLeft(soon[0])} days`}.` : `${soon.length} projects will be deleted within 2 days.`}</strong> Export your Shorts now, or make any edit to keep a project for another ${plural(keepDays(), 'day')} days.</div>` : '';
   $('#app').innerHTML = `<section class="dashboard">${warning}${html}</section>`;
 }
 
@@ -814,36 +821,44 @@ function firstAnalysisNotice(duration, usage) {
   return `Your last usage check showed about ${Math.floor(left * 100) / 100} min remaining. A first analysis of this ${clock(duration)} video uses its full length, even for a shorter range. If you have analyzed it before, the charge may differ. Usage is checked again before analysis.`;
 }
 
+/** For Free accounts: the plan marked "Most popular" on the pricing page, with what it adds and a button to it. */
+function popularPitch() {
+  const tier = (window.PRISM_TIERS ?? []).find((t) => t.badge);
+  if (!PLANS_ON || !tier) return '';
+  return `<div class="popular-pitch"><span class="popular-tag">${esc(tier.badge)}</span><strong>${esc(tier.name)}</strong>
+    <span class="muted small">${esc(tier.features.slice(0, 2).join(' · '))}</span><a class="button primary" href="/pricing">Get ${esc(tier.name)}</a></div>`;
+}
+
 function renderCreate() {
   const c = state.create;
   setUrl(`/app/create/${CREATE_STEPS[c.step - 1]}`);
   const eyebrow = (n, label) => `<p class="eyebrow">Step ${n} of ${CREATE_STEPS.length} · ${label}</p>`;
   const back = `<button class="link back" data-action="home">← Back to Home</button>`;
+  // Every step ends in the same bar, pinned to the bottom of the window: Back on the left, the next step on the right, never scrolled away.
+  const actions = (left, right) => `<div class="create-actions">${left}<span class="create-dots" aria-hidden="true">${CREATE_STEPS.map((_, i) => `<i class="${i < c.step ? 'on' : ''}"></i>`).join('')}</span>${right}</div>`;
+  const prev = '<button class="button ghost" data-create="prev">← Back</button>';
   let html;
   if (c.step === 1) {
     html = `${eyebrow(1, 'Choose video')}<h2 class="big">Choose a video</h2>
-      <p class="muted">Relio keeps the video in this browser and saves it to your account, so the project opens on any device you sign in on. Relio AI reads its audio and some frames.</p>
-      <p class="muted small">The first analysis counts the full video duration toward your monthly minutes, even if you choose a shorter range. A later analysis may use extra minutes; we’ll show the charge before you start.</p>
       <label class="drop-card ${c.busy ? 'busy' : ''}"><input id="pick" class="file-input" type="file" accept="video/*" aria-label="Choose a video" ${c.busy ? 'disabled' : ''}>
         <span class="drop-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 16V4m-5 5 5-5 5 5M5 20h14"/></svg></span>
         <strong>${c.busy ? 'Reading the video…' : 'Drop a video here'}</strong>
         ${c.busy ? '' : '<span class="muted small">or</span><span class="button primary">Choose a video</span>'}</label>
-      ${c.error ? `<p class="error" role="alert">${esc(c.error)}</p>` : ''}${back}`;
+      ${c.error ? `<p class="error" role="alert">${esc(c.error)}</p>` : ''}${actions(back, '')}`;
   } else if (c.step === 2) {
     const m = c.media;
     const problem = rangeProblem(c);
     const usageNotice = firstAnalysisNotice(m.duration, state.usage);
     const where = { entireVideo: 'the entire video', firstHalf: 'the first half', lastHalf: 'the last half', custom: 'the chosen range' }[c.region];
-    const many = c.count > 0 ? `up to ${c.count} distinct moments` : `up to about one distinct moment per minute (maximum ${Shorts.MAX_SHORTS})`;
+    const many = c.count > 0 ? `up to ${c.count} distinct moments` : `up to about one distinct moment per minute (maximum ${Shorts.maxShorts(m.duration)})`;
     const long = c.duration > 0 ? `of about ${c.duration} seconds` : 'as long as each story needs';
-    html = `${eyebrow(2, 'Set up Shorts')}<h2 class="big">Choose your Short settings</h2><p class="muted">Your video is ready. Choose how to turn it into Shorts.</p>
-      <div class="panel"><p class="file-line"><span class="tick">✓</span> ${esc(m.name)}</p>
-        <p class="muted">Video duration: ${clock(m.duration)} · ${(m.duration / 60).toFixed(2)} minutes</p>
-        ${usageNotice ? `<p class="notice small" role="status">${esc(usageNotice)} ${PLANS_ON ? '<a href="/pricing">See plans or buy minutes</a>.' : ''}</p>` : ''}
-        <button class="button ghost" data-create="different">Choose a different video</button></div>
-      <div class="panel"><p class="muted small">Shorts settings</p>
+    html = `${eyebrow(2, 'Set up Shorts')}<h2 class="big">Choose your Short settings</h2>
+      <div class="panel file-panel"><p class="file-line"><span class="tick">✓</span> ${esc(m.name)} <span class="muted small">· ${clock(m.duration)}</span></p>
+        <button class="link" data-create="different">Change video</button></div>
+      ${usageNotice ? `<p class="notice small" role="status">${esc(usageNotice)} ${PLANS_ON ? '<a href="/pricing">See plans or buy minutes</a>.' : ''}</p>` : ''}
+      <div class="panel">
         <div class="settings-row">
-          <label>How many <select id="short-count"><option value="0" ${c.count === 0 ? 'selected' : ''}>Auto</option>${Array.from({ length: Shorts.MAX_SHORTS }, (_, i) => i + 1).map((n) => `<option value="${n}" ${n === c.count ? 'selected' : ''}>${n} ${n === 1 ? 'Short' : 'Shorts'}</option>`).join('')}</select></label>
+          <label>How many <select id="short-count"><option value="0" ${c.count === 0 ? 'selected' : ''}>Auto</option>${Array.from({ length: Shorts.maxShorts(m.duration) }, (_, i) => i + 1).map((n) => `<option value="${n}" ${n === c.count ? 'selected' : ''}>${n} ${n === 1 ? 'Short' : 'Shorts'}</option>`).join('')}</select></label>
           <label>Approx. length <select id="length">${LENGTHS.map(([v, t]) => `<option value="${v}" ${v === c.duration ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
           <label>Language <select id="language">${LANGUAGES.map((l) => `<option value="${l}" ${l === c.language ? 'selected' : ''}>${l === 'auto' ? 'Auto' : l}</option>`).join('')}</select></label>
           <label>Take clips from <select id="region">${Object.entries(REGION_TITLES).map(([k, t]) => `<option value="${k}" ${k === c.region ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
@@ -851,18 +866,17 @@ function renderCreate() {
         ${c.region === 'custom' ? `<div class="settings-row"><label>Start (minutes) <input id="from" type="number" min="0" step="any" value="${c.customStart}"></label>
           <label>End (minutes) <input id="to" type="number" min="0" step="any" value="${c.customEnd}"></label></div>
           <p class="muted small">${problem ? esc(problem) : `Analyze ${clock(c.customStart * 60)} to ${clock(c.customEnd * 60)} · ${clock((c.customEnd - c.customStart) * 60)} selected`}</p>` : ''}
-        <p class="muted small">Relio will analyze frames and available speech, then suggest ${many} ${long} in ${where}. Review every pick before exporting.</p>
-        <p class="muted small">The first analysis counts the full ${clock(m.duration)} video toward your monthly minutes, even when you select a shorter range. We’ll show any extra charge for a later analysis before it starts.</p></div>
-      <button class="button primary" data-create="next" ${problem ? 'disabled' : ''}>Next: Choose captions →</button>${back}`;
+        <p class="muted small">Relio will suggest ${many} ${long} in ${where}.</p></div>
+      ${actions(back, `<button class="button primary" data-create="next" ${problem ? 'disabled' : ''}>Next: Captions →</button>`)}`;
   } else if (c.step === 3) {
-    html = `${eyebrow(3, 'Choose captions')}<h2 class="big">Choose your captions</h2><p class="muted">Pick how spoken words appear. You can change this for each Short later.</p>
+    html = `${eyebrow(3, 'Choose captions')}<h2 class="big">Choose your captions</h2><p class="muted">You can change this for each Short later.</p>
       <div class="cards">${CAPTION_STYLES.map((s) => `<button class="choice ${s === c.style ? 'on' : ''}" data-style="${s}" aria-pressed="${s === c.style}"><canvas class="style-preview" data-preview="${s}" aria-hidden="true"></canvas><strong>${STYLE_TITLES[s]}</strong><span class="muted small">${STYLE_DETAILS[s]}</span></button>`).join('')}
         <button class="choice ${c.style === 'none' ? 'on' : ''}" data-style="none" aria-pressed="${c.style === 'none'}"><span class="style-preview no-captions" aria-hidden="true">Aa</span><strong>No captions</strong><span class="muted small">Shorts start without captions. Turn them on for any Short later.</span></button></div>
-      <div class="row"><button class="button primary" data-create="next">Next: Choose content type →</button><button class="link" data-create="prev">← Back</button></div>`;
+      ${actions(prev, '<button class="button primary" data-create="next">Next: Kind of video →</button>')}`;
   } else {
     html = `${eyebrow(4, 'Choose content type')}<h2 class="big">What kind of video is it?</h2><p class="muted">This tunes how Relio picks moments and frames them.</p>
       <div class="cards">${VIDEO_TYPES.map((t) => `<button class="choice ${t === c.videoType ? 'on' : ''}" data-type="${t}" aria-pressed="${t === c.videoType}"><strong>${VIDEO_TYPE_TITLES[t]}</strong><span class="muted small">${VIDEO_TYPE_DETAILS[t]}</span></button>`).join('')}</div>
-      <div class="row"><button class="button primary" data-create="make">Make Shorts</button><button class="link" data-create="prev">← Back</button></div>`;
+      ${actions(prev, '<button class="button primary" data-create="make">Make Shorts</button>')}`;
   }
   $('#app').innerHTML = `<section class="create">${html}</section>`;
   for (const canvas of document.querySelectorAll('[data-preview]')) stylePreview(canvas, canvas.dataset.preview);
@@ -995,6 +1009,7 @@ async function showSettings(tab = state.settingsTab ?? 'account') {
           <span class="dash-sub">${esc(renew)}</span>
           <div class="dash-actions">${plan.sub ? '<button class="button dash-cta" data-action="manage-plan">Manage or cancel</button>' : ''}<a class="button ${plan.sub ? 'dash-buy' : 'dash-cta'}" href="/pricing">${paid ? 'Change plan' : 'Upgrade'}</a></div>
           <p id="manage-note" class="small plan-note" role="alert" hidden></p>
+          ${paid ? '' : popularPitch()}
         </div>
         ${plan.features.length ? `<ul class="dash-includes" aria-label="Included in your plan">${plan.features.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}
       </div>
@@ -1586,7 +1601,7 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
     usage: { video: key, minutes, day: localDay(), run },
     onRetry: (message) => { if (state.task === task) setTask(message); },
   };
-  let missed = 0;
+  let missed = 0, made = false;
   const retry = (count) => runShorts(media, { ...options, count }, key, minutes, run);
   try {
     // The server refuses an over-limit run too; checking first spares a request that can't succeed.
@@ -1641,6 +1656,7 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
     project.segments.push(...created);
     const committed = await store.saveProject(project, { isCurrent: () => state.project === project && state.task === task && !task.controller.signal.aborted });
     if (committed === false || state.task !== task || state.project !== project) { endTask(task); return; }
+    made = true;
     track('analysis_finished', { length: lengthBucket(minutes) });
     track('clips_generated', { clips: created.length });
     endTask(task);
@@ -1660,6 +1676,10 @@ async function runShorts(media, options, key, minutes, run = uuid()) {
     endTask(task);
     if (state.screen === 'games') leaveGames();
     reportGenerationError(error, () => retry(options.count));
+  } finally {
+    // A run that was cancelled or failed before any Shorts were saved isn't a re-analysis: the server forgets it and refunds its
+    // minutes, so the next try starts like the first. Older servers lack the function; that only keeps the old charge.
+    if (!made) db()?.rpc('my_abandon_run', { p_video: key, p_run: run }).then(() => refreshUsage(), () => {});
   }
 }
 
@@ -1695,6 +1715,7 @@ function setTask(stage, fraction = null) {
   if (!state.task) return;
   state.task.stage = stage;
   if (fraction !== null) state.task.progress = Math.max(state.task.progress ?? 0, fraction);
+  if (fraction !== null) addSample(state.task.samples ??= [], Date.now(), state.task.progress);
   renderTask();
   announceTask();
 }
@@ -1748,10 +1769,12 @@ function leaveGames() {
 }
 
 /** Seconds left, from how far the task got in the time it has run. Null until there is enough to go on. */
+/** Seconds left, from the recent speed (see eta.js), smoothed so the figure doesn't jump. Null until there is enough to go on. */
 function secondsLeft(task) {
-  const done = task.progress ?? 0;
-  if (!(done >= 0.03 && done < 1)) return null;
-  return ((Date.now() - task.started) / 1000) * (1 - done) / done;
+  const now = Date.now();
+  const seconds = estimateLeft(task.samples ?? [], now, task.started, task.eta ?? null);
+  task.eta = seconds == null ? null : { seconds, at: now };
+  return seconds;
 }
 const leftText = (seconds) => seconds == null ? '' : seconds < 60 ? 'less than a minute left' : `about ${Math.round(seconds / 60)} min left`;
 
@@ -1782,16 +1805,23 @@ function announceTask(now = false) {
 }
 // A quiet tab still says it's alive, so a closed or crashed one drops off Home.
 setInterval(() => announceTask(true), 5000);
-const remoteTask = (id) => { const t = remoteTasks.get(id); return t && Date.now() - t.at < 15_000 ? t : null; };
-const remoteText = (t) => `Making Shorts · ${Math.round(t.progress * 100)}%${t.left != null ? ` · ${leftText(t.left)}` : ''}`;
+const remoteTask = (id) => { const t = remoteTasks.get(id); return t && Date.now() - t.at < 60_000 ? t : null; }; // background tabs (Safari) slow their timers: allow a minute of quiet
+// Counts down between messages (a background tab may report only every few seconds); says "estimating" until there is a figure.
+// On the project's poster, like a render queue: big percentage, time left, a bar along the bottom.
+const makingOverlay = (t) => `<div class="making-overlay" role="status" aria-label="${esc(remoteText(t))}"><strong>${Math.round(t.progress * 100)}%</strong>
+  <span>${esc(remoteText(t).split(' · ').at(-1))}</span><div class="making-bar"><div style="width:${Math.round(t.progress * 100)}%"></div></div></div>`;
+const remoteText = (t) => {
+  const left = t.left == null ? null : Math.max(0, t.left - (Date.now() - t.at) / 1000);
+  return `Making Shorts · ${Math.round(t.progress * 100)}% · ${left == null ? 'estimating time left…' : leftText(left)}`;
+};
 taskChannel?.addEventListener('message', ({ data }) => {
   if (data.type === 'ask') return announceTask(true);
   if (data.type === 'progress') {
     const known = remoteTasks.has(data.projectId);
     remoteTasks.set(data.projectId, { ...data, at: Date.now() });
     if (state.screen !== 'home') return;
-    const status = document.querySelector(`[data-project="${CSS.escape(data.projectId)}"] .making`);
-    if (status) status.lastChild.textContent = remoteText(remoteTasks.get(data.projectId));
+    const overlay = document.querySelector(`[data-project="${CSS.escape(data.projectId)}"] .making-overlay`);
+    if (overlay) overlay.outerHTML = makingOverlay(remoteTasks.get(data.projectId));
     else if (!known) showHome(state.homeView); // a project this Home hasn't listed yet
   } else if (data.type === 'done') {
     remoteTasks.delete(data.projectId);
@@ -1820,7 +1850,7 @@ function renderTask() {
   }
   host.querySelector('strong').textContent = task.stage;
   host.querySelector('.bar > div').style.width = `${Math.round((task.progress ?? 0) * 100)}%`;
-  host.querySelector('.eta').textContent = leftText(secondsLeft(task));
+  host.querySelector('.eta').textContent = leftText(secondsLeft(task)) || 'Estimating time left…';
   host.querySelector('[data-action="games"]').hidden = !task.project || state.screen === 'games';
   document.documentElement.style.setProperty('--progress-h', `${host.offsetHeight + 12}px`);
 }
@@ -2099,14 +2129,6 @@ function renderInspector() {
 
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
 
-/** A source range must fit the video and leave at least half a second for the Short. */
-function timelineProblem(start, end, total) {
-  if (![start, end, total].every(Number.isFinite) || start < 0 || end > total + 0.001 || end - start < 0.5) {
-    return 'Enter a start and end within the video, at least 0.5 seconds apart.';
-  }
-  return null;
-}
-
 /** Moves or resizes a Short in its source. Captions and words are relative to the Short's start, so they shift with it. */
 function applyTiming(s, start, duration) {
   const media = state.project.media.find((m) => m.id === s.mediaId);
@@ -2138,13 +2160,6 @@ function timelineHtml(segment) {
         <div class="tl-clip" id="tl-clip" style="left:${pct(segment.start)};width:${pct(segment.duration)}"><span class="tl-handle l" data-edge="l"></span><span class="tl-handle r" data-edge="r"></span></div>
       </div>
       <div class="row between muted small mono"><span>0:00</span><span id="tl-label">${clock(segment.start)}–${clock(segment.start + segment.duration)}</span><span>${clock(total)}</span></div>
-      <div class="timeline-fields" role="group" aria-label="Precise Short timing">
-        <label>Start (seconds) <input id="tl-start" type="number" min="0" max="${total}" step="any" value="${segment.start.toFixed(3)}" aria-describedby="tl-help tl-error"></label>
-        <label>End (seconds) <input id="tl-end" type="number" min="0" max="${total}" step="any" value="${(segment.start + segment.duration).toFixed(3)}" aria-describedby="tl-help tl-error"></label>
-        <button type="button" class="button ghost" id="tl-apply">Apply timing</button>
-      </div>
-      <p id="tl-help" class="muted small">Times are measured from the start of the source video. You can also drag the clip above.</p>
-      <p id="tl-error" class="error small" role="alert"></p>
     </div>`;
 }
 
@@ -2152,22 +2167,6 @@ function wireTimeline(segment) {
   const track = $('#tl-track'), clip = $('#tl-clip');
   if (!track || !clip) return;
   const total = Number($('.timeline').dataset.total);
-  $('#tl-apply')?.addEventListener('click', async (event) => {
-    const startInput = $('#tl-start'), endInput = $('#tl-end');
-    const start = startInput.value === '' ? NaN : Number(startInput.value);
-    const end = endInput.value === '' ? NaN : Number(endInput.value);
-    const problem = timelineProblem(start, end, total);
-    $('#tl-error').textContent = problem ?? '';
-    if (problem) return;
-    const safeEnd = Math.min(end, total);
-    if (Math.abs(start - segment.start) < 0.001 && Math.abs(safeEnd - segment.start - segment.duration) < 0.001) return;
-    event.currentTarget.disabled = true;
-    try {
-      await edit((s) => applyTiming(s, start, safeEnd - start), { awaitPreview: true });
-      if (selected()?.id === segment.id) $('#tl-apply')?.focus();
-    }
-    catch (error) { const note = $('#tl-error'); if (note) note.textContent = error.message || 'Could not save timing. Please try again.'; event.currentTarget.disabled = false; }
-  });
   clip.addEventListener('pointerdown', (event) => {
     event.preventDefault();
     clip.setPointerCapture(event.pointerId);
@@ -2197,7 +2196,7 @@ function wireTimeline(segment) {
 }
 
 /** Applies an edit to the selected Short: keeps an undo copy, saves, and re-renders the preview when the picture changed. */
-async function edit(change, { rerender = true, awaitPreview = false } = {}) {
+async function edit(change, { rerender = true } = {}) {
   const project = state.project;
   const segment = selected();
   if (!segment) return;
@@ -2207,7 +2206,7 @@ async function edit(change, { rerender = true, awaitPreview = false } = {}) {
   if (state.project !== project || !project.segments.includes(segment)) return;
   await store.saveProject(project, { isCurrent: () => state.project === project && project.segments.includes(segment) });
   if (state.project !== project) return;
-  if (rerender) { const ready = selectShort(segment.id); if (awaitPreview) await ready; }
+  if (rerender) selectShort(segment.id);
   else renderEditor();
 }
 

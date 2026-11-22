@@ -15,3 +15,6 @@ UI/updates/
 !.env.example
 .agent37.env
 .paddle.env
+
+# Supabase CLI state (project link, cached CLI version): machine-local.
+supabase/.temp/

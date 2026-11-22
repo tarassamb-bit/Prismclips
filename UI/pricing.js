@@ -19,6 +19,7 @@
   let paddle = null;
   let user = null;
   let hasPlan = false;
+  let currentPrice = null; // the active plan's price, so its card says "Your plan" and the others offer a switch
   let finishing = false;
   let opening = false;
 
@@ -57,16 +58,23 @@
 
   function label() {
     for (const { button } of cards) {
-      button.textContent = !user ? 'Sign in to subscribe' : hasPlan ? 'Manage your plan' : 'Subscribe';
+      button.textContent = !user ? 'Sign in to subscribe' : hasPlan ? 'Switch to this plan' : 'Subscribe';
+    }
+    for (const { tier, button } of cards) if (hasPlan && tier.priceId === currentPrice) button.textContent = 'Your plan';
+    // A lower plan can't be switched to from here (the server refuses it too).
+    const rank = (priceId) => tiers.findIndex((t) => t.priceId === priceId);
+    for (const { tier, button } of cards) {
+      if (hasPlan && currentPrice && rank(tier.priceId) < rank(currentPrice)) { button.disabled = true; button.textContent = 'Lower plan: at renewal'; }
     }
   }
 
   // One plan per account: a second checkout would start a second subscription.
   async function checkPlan() {
     if (!db || !user) return false;
-    const { data, error } = await db.from('subscriptions').select('id').in('status', ACTIVE).limit(1);
+    const { data, error } = await db.from('subscriptions').select('id,price_id').in('status', ACTIVE).limit(1);
     if (error) throw error;
     if (!Array.isArray(data)) throw new Error('The server returned an unexpected plan response.');
+    currentPrice = data[0]?.price_id ?? null;
     return data.length > 0;
   }
 
@@ -85,10 +93,10 @@
         return;
       }
       // Checked again on click: a plan may have been bought in another tab since the page loaded.
-      hasPlan = hasPlan || await checkPlan();
+      hasPlan = await checkPlan();
       if (hasPlan) {
         label();
-        location.href = '/app/settings/plans';
+        await switchPlan(tier);
         return;
       }
       say('');
@@ -122,6 +130,22 @@
       opening = false;
       for (const { button } of cards) button.disabled = finishing;
     }
+  }
+
+  /** An active plan is changed in place (Paddle prorates it), never bought a second time. */
+  async function switchPlan(tier) {
+    if (tier.priceId === currentPrice) { say(`You’re already on ${tier.name}.`); return; }
+    if (tiers.findIndex((t) => t.priceId === tier.priceId) < tiers.findIndex((t) => t.priceId === currentPrice)) {
+      say('You can only switch to a higher plan. To go lower, cancel and subscribe to the lower plan when your current one ends.', 'error'); return;
+    }
+    if (!confirm(`Switch to ${tier.name}? Paddle charges or credits the difference for the rest of this month right away; your renewal date stays the same.`)) return;
+    say(`Switching to ${tier.name}…`);
+    const token = (await db.auth.getSession())?.data?.session?.access_token;
+    const response = await fetch(`/api/billing?action=change&price_id=${encodeURIComponent(tier.priceId)}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
+    const body = await response?.json().catch(() => ({}));
+    if (!response?.ok) { say(body?.error || 'Couldn’t change your plan. Please try again.', 'error'); return; }
+    say(`You’re on ${tier.name} now.`);
+    location.href = '/app/settings/plans';
   }
 
   // The add-on, offered once before checkout: true to add it, false without it, null when the person closes the box.

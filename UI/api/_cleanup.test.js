@@ -76,3 +76,23 @@ console.log('cleanup checks passed');
   assert.deepEqual(deletedVideos, [], 'unknown delete results must not trigger file deletion');
   console.log('cleanup concurrent-edit checks passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });
+
+// Days per plan: Free 1, Tier 1 2, Creator 5, Studio 7; an unreadable plan list stops the run.
+{
+  const { loadKeepDays } = require('./cleanup');
+  const ok = (body) => ({ response: { ok: true }, body });
+  const read = async (q) => q.startsWith('subscriptions')
+    ? ok([{ user_id: 'paid', price_id: 'p_creator' }, { user_id: 'big', price_id: 'p_tier1' }, { user_id: 'big', price_id: 'p_studio' }])
+    : ok([{ price_id: 'p_creator', tier: 'creator' }, { price_id: 'p_tier1', tier: 'tier1' }, { price_id: 'p_studio', tier: 'studio' }]);
+  loadKeepDays(read).then((daysFor) => {
+    assert.equal(daysFor('nobody'), 1);
+    assert.equal(daysFor('paid'), 5);
+    assert.equal(daysFor('big'), 7, 'the longest plan wins');
+    const DAY = 86_400_000, now = Date.now();
+    const rows = [{ id: 'a', user_id: 'nobody', updated: new Date(now - 2 * DAY).toISOString(), media: [] },
+      { id: 'b', user_id: 'paid', updated: new Date(now - 2 * DAY).toISOString(), media: [] }];
+    assert.deepEqual(plan(rows, now, daysFor).projects.map((p) => p.id), ['a'], 'Free goes after 1 day, Creator keeps 5');
+    console.log('PASS keep days per plan');
+  });
+  assert.rejects(loadKeepDays(async () => ({ response: { ok: false }, body: null })));
+}

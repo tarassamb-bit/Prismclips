@@ -27,7 +27,7 @@ export function validate(clips, interval, targetDuration, count, excluding = [],
   const selected = [];
   for (const clip of valid) {
     if (!overlapsAny(clip, selected)) selected.push(clip);
-    if (selected.length === Math.min(20, Math.max(1, count))) break;
+    if (selected.length === Math.max(1, count)) break;
   }
   if (selected.length === 0) {
     if (clips.some((c) => Number.isFinite(c.score) && c.score >= 0 && c.score <= 10)) throw new GeminiError('noStrongClips');
@@ -223,14 +223,30 @@ async function refine(ranked, windows, source, cues, interval, targetDuration, c
   const failures = outcomes.filter((o) => o.error).map((o) => o.error);
   if (allClips.length === 0 && failures.length === detailBatches.length && failures.length > 0) throw failures[0];
   if (allClips.length === 0) throw new GeminiError(excluding.length === 0 ? 'noStrongClips' : 'noDistinctClips');
-  const pool = strongestOrBest(allClips, interval, targetDuration, Math.min(20, count * 2 + 2), excluding);
+  const pool = strongestOrBest(allClips, interval, targetDuration, count * 2 + 2, excluding);
   if (pool.length <= 1) return pool;
   progress(0.95, 'Relio AI · final edit: picking the best distinct stories');
-  const chosen = await finalCut(pool, cues, count, guidance, configuration, signal, { source });
+  const chosen = await batchedFinalCut(pool, count, (part, share) => finalCut(part, cues, share, guidance, configuration, signal, { source }));
   // The final pass failed, so no editorial decision was made; score-ranked backups remain.
   if (chosen === null) return pool;
   if (chosen.length === 0) throw new GeminiError(excluding.length === 0 ? 'noStrongClips' : 'noDistinctClips');
   return chosen;
+}
+
+/** One final-edit request compares at most `size` finalists. Longer pools (long videos) are split into stretches of the source,
+ *  each picking its share of `count`; a failed stretch keeps its score-ranked best. Null only when every stretch failed.
+ *  shortcut: repeats are only caught within a stretch, not between distant ones. */
+export async function batchedFinalCut(pool, count, cut, size = 40) {
+  if (pool.length <= size) return cut(pool, count);
+  const byTime = [...pool].sort((a, b) => a.start - b.start);
+  const parts = Array.from({ length: Math.ceil(byTime.length / size) }, (_, i) => byTime.slice(i * size, (i + 1) * size));
+  const results = await Promise.all(parts.map(async (part) => {
+    const share = Math.max(1, Math.ceil(count * part.length / pool.length));
+    const best = [...part].sort((a, b) => b.score - a.score).slice(0, share);
+    return { chosen: await cut(part, share).catch(() => null), best };
+  }));
+  if (results.every((r) => r.chosen === null)) return null;
+  return results.flatMap((r) => r.chosen ?? r.best).sort((a, b) => b.score - a.score).slice(0, count);
 }
 
 /** Compares finalists from different batches on one scale and drops repeats. Null on any failure; empty when the editor kept none. */

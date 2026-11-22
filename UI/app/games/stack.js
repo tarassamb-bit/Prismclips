@@ -44,7 +44,7 @@ export function start(root, { onEnd }) {
     const size = axis === 'x' ? 'w' : 'd';
     const kept = cutBlock({ x: top[axis], w: top[size] }, { x: moving[axis], w: moving[size] });
     if (!kept) {
-      falling.push({ ...moving, y: tower.length * SLAB, vy: 0, level: tower.length });
+      falling.push({ ...moving, y: tower.length * SLAB, vy: 0, level: tower.length, back: moving[axis] < top[axis] });
       over = true;
       onEnd(tower.length - 1, now - started);
       return;
@@ -53,7 +53,8 @@ export function start(root, { onEnd }) {
     const cut = moving[size] - kept.w;
     if (cut > 0.5) {
       const piece = { ...moving, [size]: cut, [axis]: moving[axis] < kept.x ? moving[axis] : kept.x + kept.w };
-      falling.push({ ...piece, y: tower.length * SLAB, vy: 0, level: tower.length });
+      // Cut off the low side, it hangs behind the tower (the viewer sees the +x and +z faces).
+      falling.push({ ...piece, y: tower.length * SLAB, vy: 0, level: tower.length, back: moving[axis] < kept.x });
     }
     tower.push({ ...moving, [axis]: kept.x, [size]: kept.w });
     speed = Math.min(4.2, speed + 0.1);
@@ -62,7 +63,9 @@ export function start(root, { onEnd }) {
 
   // World (x right-back, z left-back, y up) to screen, with the camera following the top of the tower.
   const project = (x, y, z) => [W / 2 + (x - z) * COS * K, H * 0.62 + (x + z - SIZE) * SIN * K - (y - camera) * K];
-  const color = (level, light) => `hsl(${(250 - level * 7 + 360) % 360} 55% ${light}%)`;
+  // The app's colours: sky-blue slabs (a little lighter each level) on the card's own background.
+  const css = (name) => getComputedStyle(canvas).getPropertyValue(name).trim();
+  const color = (level, light) => `hsl(205 85% ${Math.min(88, light - 8 + (level % 6) * 3)}%)`;
   function face(points, fill) {
     ctx.beginPath();
     points.forEach(([x, y, z], i) => { const [sx, sy] = project(x, y, z); i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); });
@@ -79,21 +82,10 @@ export function start(root, { onEnd }) {
     ctx.globalAlpha = 1;
   }
   const slab = (b, y, level, alpha) => box(b, y, SLAB, (light) => color(level, light), alpha);
-  const teal = (light) => `hsl(190 45% ${light - 18}%)`;
+  const base = (light) => `hsl(40 12% ${light + 14}%)`;
   function background() {
-    const g = ctx.createRadialGradient(W / 2, H * 0.45, 10, W / 2, H * 0.45, H * 0.8);
-    g.addColorStop(0, '#7fd8ff'); g.addColorStop(1, '#2a9be8');
-    ctx.fillStyle = g;
+    ctx.fillStyle = css('--surface1') || '#fff';
     ctx.fillRect(0, 0, W, H);
-    // Soft sun rays around the centre.
-    ctx.save();
-    ctx.translate(W / 2, H * 0.45);
-    ctx.fillStyle = 'rgb(255 255 255 / .07)';
-    for (let i = 0; i < 16; i++) {
-      ctx.rotate(Math.PI / 8);
-      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-40, -H); ctx.lineTo(40, -H); ctx.closePath(); ctx.fill();
-    }
-    ctx.restore();
   }
   function draw() {
     if (!over) {
@@ -104,22 +96,23 @@ export function start(root, { onEnd }) {
     }
     camera += (Math.max(0, (tower.length - 6) * SLAB) - camera) * 0.08;
     background();
-    // A tall teal column under the tower, so it stands on something.
-    box({ x: 0, z: 0, w: SIZE, d: SIZE }, camera - 600, 600 - camera, teal);
+    falling = falling.filter((p) => p.y > camera - 400);
+    for (const p of falling) { p.vy += 0.5; p.y -= p.vy; }
+    // Pieces behind the tower are drawn first, so the tower covers them; pieces in front are drawn last.
+    for (const p of falling) if (p.back) slab(p, p.y, p.level, 0.85);
+    // A column under the tower, so it stands on something.
+    box({ x: 0, z: 0, w: SIZE, d: SIZE }, camera - 600, 600 - camera, base);
     tower.forEach((b, i) => slab(b, i * SLAB, i));
     if (!over) slab(moving, tower.length * SLAB, tower.length);
-    falling = falling.filter((p) => p.y > camera - 400);
-    for (const p of falling) { p.vy += 0.5; p.y -= p.vy; slab(p, p.y, p.level, 0.85); }
-    ctx.fillStyle = '#fff';
+    for (const p of falling) if (!p.back) slab(p, p.y, p.level, 0.85);
+    ctx.fillStyle = css('--text') || '#0e0f14';
     ctx.textAlign = 'center';
-    ctx.shadowColor = 'rgb(0 0 0 / .25)'; ctx.shadowBlur = 8;
     ctx.font = '700 40px Sora, system-ui, sans-serif';
     ctx.fillText(String(tower.length - 1), W / 2, 58);
     if (over) {
       ctx.font = '600 15px Sora, system-ui, sans-serif';
       ctx.fillText('Missed! Tap to play again', W / 2, 86);
     }
-    ctx.shadowBlur = 0;
     frame = requestAnimationFrame(draw);
   }
   const onPointer = (event) => { event.preventDefault(); drop(); };

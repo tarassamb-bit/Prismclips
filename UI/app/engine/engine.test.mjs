@@ -368,3 +368,6 @@ assert.deepEqual(Shorts.dropImpossibleRate([{ text: 'one two three', start: 0, d
   assert.deepEqual(out.map((p) => p.text), ['Blu-ray disc', 'Top Gun']);
   assert.ok(out[0].end <= out[1].start + 1e-9);
 }
+assert.equal(Shorts.maxShorts(7200), 84);
+assert.equal(Shorts.autoCount(7200), 84);
+assert.equal(Shorts.autoCount(600), 7);

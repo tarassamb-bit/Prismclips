@@ -23,7 +23,7 @@ export function start(root, { onEnd }) {
   ctx.scale(scale, scale);
   const css = getComputedStyle(root);
   const sky = css.getPropertyValue('--sky').trim() || '#3fa9f5';
-  const ink = '#12141a'; // the sheet is always white, so the pen stays dark in dark mode too
+  const ink = css.getPropertyValue('--text').trim() || '#12141a'; // the sheet follows the theme, so the pen does too
 
   let logo, strokes, phase, timer, started;
   const pad = 30, fit = ([x, y]) => [pad + x * (SIZE - pad * 2), pad + y * (SIZE - pad * 2)];

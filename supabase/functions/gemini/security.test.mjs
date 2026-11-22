@@ -126,18 +126,20 @@ calls.length = 0;
 const refused = await handler(audioRequest('audio/wav'));
 assert.equal(refused.status, 400);
 const reason = (await refused.json()).error.message;
-assert.ok(reason.includes('mimo-v2.6-flash') && reason.includes('gemini-3.8-flash') && reason.includes('unsupported audio data'), reason);
+assert.ok(reason.includes('mimo-v2.6-flash') && !reason.includes('gemini') && !reason.includes('ember') && reason.includes('unsupported audio data'), reason);
 assert.ok(!providerBody.model.endsWith(':free'), 'no free models');
-const audioTries = providerBodies.slice(-2);
-assert.deepEqual(audioTries[0].provider, { zdr: true, data_collection: 'deny', sort: 'latency', order: ['makora'], allow_fallbacks: false }, 'audio on MiMo: one no-retention provider');
-assert.deepEqual(audioTries[1].provider, { zdr: true, data_collection: 'deny', sort: 'latency' }, 'the fallback is not pinned');
+const audioTries = providerBodies.slice(-3);
+for (const tried of audioTries) {
+  assert.equal(tried.model, 'xiaomi/mimo-v2.6-flash', 'audio stays on MiMo: Ember has no no-retention audio endpoint');
+  assert.deepEqual(tried.provider, { zdr: true, data_collection: 'deny', sort: 'latency', order: ['makora'], allow_fallbacks: false }, 'audio on MiMo: one no-retention provider');
+}
 const logged = calls.filter((call) => call.url.endsWith('/rest/v1/ai_failures')).map((call) => JSON.parse(call.body));
 assert.deepEqual(logged.map((row) => [row.model, row.error_type, row.source]),
-  [['xiaomi/mimo-v2.6-flash', 'bad_request', 'desktop'], ['google/gemini-3.8-flash', 'bad_request', 'desktop'], ['all', 'gave_up', 'desktop']]);
+  [['xiaomi/mimo-v2.6-flash', 'bad_request', 'desktop'], ['xiaomi/mimo-v2.6-flash', 'bad_request', 'desktop'], ['xiaomi/mimo-v2.6-flash', 'bad_request', 'desktop'], ['all', 'gave_up', 'desktop']]);
 assert.equal(logged[0].user_id, '12345678-1234-1234-1234-123456789abc');
 assert.equal(calls.find((call) => call.url.endsWith('/rest/v1/ai_failures')).headers.Authorization, 'Bearer server-only-test-key');
 providerFails = false;
-console.log('PASS audio format by type, Mimo then the paid fallback on no-retention providers, every failure reported and logged');
+console.log('PASS audio format by type, audio on MiMo only (no-retention provider), every failure reported and logged');
 
 // A slow answer arrives after OpenRouter's keep-alive lines; it is the answer, not a failure.
 slowAnswer = true;

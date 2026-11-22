@@ -6,9 +6,10 @@ import * as Framing from './framing.js';
 import { audioLevels } from './media.js';
 import { regionInterval, forcesFit, SELECTION_GUIDANCE, VIDEO_TYPE_TITLES } from './models.js';
 
-export const MAX_SHORTS = 20;
-/** How many Shorts Auto makes room for: one per minute of the analyzed part, 1 to 20. */
-export const autoCount = (seconds) => Math.min(MAX_SHORTS, Math.max(1, Math.floor(seconds / 60)));
+/** The most Shorts a part of a video can give: 7 per 10 minutes, rounded up (2 hours gives 84). */
+export const maxShorts = (seconds) => Math.max(1, Math.ceil(seconds / 600 * 7));
+/** How many Shorts Auto makes room for: one per minute of the analyzed part, up to maxShorts. */
+export const autoCount = (seconds) => Math.min(maxShorts(seconds), Math.max(1, Math.floor(seconds / 60)));
 
 const truncate = (value, length) => (value.length > length ? value.slice(0, length) : value);
 
@@ -40,7 +41,7 @@ export async function analyze(source, configuration_, options) {
   // 0 is Auto length; Relio AI sizes each clip within lengthRange.
   const clipDuration = options.duration > 0 ? Math.min(Math.max(1, options.duration), interval.end - interval.start) : 0;
   // A count of 0 means Auto: room for one Short per minute, and only clips Relio AI scores as strong fill it.
-  const targetCount = options.count > 0 ? Math.min(options.count, MAX_SHORTS) : autoCount(interval.end - interval.start);
+  const targetCount = options.count > 0 ? Math.min(options.count, maxShorts(interval.end - interval.start)) : autoCount(interval.end - interval.start);
   progress(0, 'Preparing audio for Relio AI');
   // One language for the whole video, chosen or detected once, so no piece of it is transcribed in another one.
   const chosen = options.language && options.language !== 'auto' ? options.language : null;
@@ -122,8 +123,8 @@ export async function analyze(source, configuration_, options) {
     const raw = clipCaptions(source_, start, duration);
     const plausible = dropImpossibleRate(raw);
     const captions = dropRepeats(plausible);
-    // Many implausibly fast lines may be sung lyrics or music that the speech model garbled.
-    const garbled = raw.length > 0 && (raw.length - plausible.length) / raw.length >= 0.2;
+    // Many implausibly fast or quickly repeated lines (a chorus) suggest sung lyrics or music the speech model garbled.
+    const garbled = raw.length > 0 && (raw.length - plausible.length + repeatedLines(plausible)) / raw.length >= 0.2;
     const words = timed.filter((w) => w.start >= start - 0.01 && w.start + w.duration <= start + duration + 0.01).map((w) => ({ ...w, start: w.start - start }));
     const cropKeyframes = candidate.fit
       ? [{ time: 0, position: 0.5, preserveWholeFrame: true }, { time: duration, position: 0.5, preserveWholeFrame: true }]
@@ -239,6 +240,21 @@ export function dropImpossibleRate(cues, maxWordsPerSecond = 5.5) {
     const words = cue.text.split(/\s+/).filter(Boolean).length;
     return words / Math.max(cue.duration, 0.3) <= maxWordsPerSecond;
   });
+}
+
+/** How many lines repeat an earlier line within `window` seconds: a music signal, not a reason to drop them. */
+export function repeatedLines(cues, window = 20) {
+  const key = (text) => text.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const lastSeen = new Map();
+  let count = 0;
+  for (const cue of cues) {
+    const text = key(cue.text);
+    // "Yeah", "Right", "Thank you": normal speech repeats short lines; only a repeated longer line looks like a chorus.
+    if (text.split(' ').length < 3) continue;
+    if (lastSeen.has(text) && cue.start - lastSeen.get(text) < window) count++;
+    lastSeen.set(text, cue.start);
+  }
+  return count;
 }
 
 /** Remove duplicate entries for the same moment, while keeping phrases the speaker actually repeats later. */
