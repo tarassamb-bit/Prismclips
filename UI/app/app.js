@@ -101,8 +101,8 @@ const slug = (name) => name.toLowerCase().normalize('NFKD').replace(/[\u0300-\u0
 /** Projects and folders are named by their title plus the start of their id, so two with the same name still have different addresses. */
 const projectPath = (project) => `/app/project/${encodeURIComponent(slug(project.title))}-${project.id.slice(0, 8)}`;
 const folderPath = (folder) => `/app/folder/${encodeURIComponent(slug(folder.name))}-${folder.id.slice(0, 8)}`;
-// Two steps: choose a video, then one screen with every setting (Auto by default) and Make Shorts.
-const CREATE_STEPS = ['choose-video', 'settings'];
+
+const CREATE_STEPS = ['choose-video', 'settings', 'captions', 'content-type'];
 
 let routing = false;
 /** Puts the screen's address in the browser's bar. Moving between screens adds a history entry; `replace` rewrites the current one. */
@@ -834,16 +834,18 @@ function renderCreate() {
   setUrl(`/app/create/${CREATE_STEPS[c.step - 1]}`);
   const eyebrow = (n, label) => `<p class="eyebrow">Step ${n} of ${CREATE_STEPS.length} · ${label}</p>`;
   const back = `<button class="link back" data-action="home">← Back to Home</button>`;
+  // Every step ends in the same bar, pinned to the bottom of the window: Back on the left, the next step on the right, never scrolled away.
+  const actions = (left, right) => `<div class="create-actions">${left}<span class="create-dots" aria-hidden="true">${CREATE_STEPS.map((_, i) => `<i class="${i < c.step ? 'on' : ''}"></i>`).join('')}</span>${right}</div>`;
+  const prev = '<button class="button ghost" data-create="prev">← Back</button>';
   let html;
   if (c.step === 1) {
     html = `${eyebrow(1, 'Choose video')}<h2 class="big">Choose a video</h2>
-      <p class="muted">Relio keeps the video in this browser and saves it to your account, so the project opens on any device you sign in on. Relio AI reads its audio and some frames.</p>
-      <p class="muted small">The first analysis counts the full video duration toward your monthly minutes, even if you choose a shorter range. A later analysis may use extra minutes; we’ll show the charge before you start.</p>
+      <p class="muted">The first analysis counts the video’s full length toward your monthly minutes, even for a shorter range.</p>
       <label class="drop-card ${c.busy ? 'busy' : ''}"><input id="pick" class="file-input" type="file" accept="video/*" aria-label="Choose a video" ${c.busy ? 'disabled' : ''}>
         <span class="drop-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 16V4m-5 5 5-5 5 5M5 20h14"/></svg></span>
         <strong>${c.busy ? 'Reading the video…' : 'Drop a video here'}</strong>
         ${c.busy ? '' : '<span class="muted small">or</span><span class="button primary">Choose a video</span>'}</label>
-      ${c.error ? `<p class="error" role="alert">${esc(c.error)}</p>` : ''}${back}`;
+      ${c.error ? `<p class="error" role="alert">${esc(c.error)}</p>` : ''}${actions(back, '')}`;
   } else if (c.step === 2) {
     const m = c.media;
     const problem = rangeProblem(c);
@@ -851,12 +853,11 @@ function renderCreate() {
     const where = { entireVideo: 'the entire video', firstHalf: 'the first half', lastHalf: 'the last half', custom: 'the chosen range' }[c.region];
     const many = c.count > 0 ? `up to ${c.count} distinct moments` : `up to about one distinct moment per minute (maximum ${Shorts.maxShorts(m.duration)})`;
     const long = c.duration > 0 ? `of about ${c.duration} seconds` : 'as long as each story needs';
-    html = `${eyebrow(2, 'Set up Shorts')}<h2 class="big">Choose your Short settings</h2><p class="muted">Your video is ready. Choose how to turn it into Shorts.</p>
-      <div class="panel"><p class="file-line"><span class="tick">✓</span> ${esc(m.name)}</p>
-        <p class="muted">Video duration: ${clock(m.duration)} · ${(m.duration / 60).toFixed(2)} minutes</p>
-        ${usageNotice ? `<p class="notice small" role="status">${esc(usageNotice)} ${PLANS_ON ? '<a href="/pricing">See plans or buy minutes</a>.' : ''}</p>` : ''}
-        <button class="button ghost" data-create="different">Choose a different video</button></div>
-      <div class="panel"><p class="muted small">Shorts settings</p>
+    html = `${eyebrow(2, 'Set up Shorts')}<h2 class="big">Choose your Short settings</h2>
+      <div class="panel file-panel"><p class="file-line"><span class="tick">✓</span> ${esc(m.name)} <span class="muted small">· ${clock(m.duration)}</span></p>
+        <button class="link" data-create="different">Change video</button></div>
+      ${usageNotice ? `<p class="notice small" role="status">${esc(usageNotice)} ${PLANS_ON ? '<a href="/pricing">See plans or buy minutes</a>.' : ''}</p>` : ''}
+      <div class="panel">
         <div class="settings-row">
           <label>How many <select id="short-count"><option value="0" ${c.count === 0 ? 'selected' : ''}>Auto</option>${Array.from({ length: Shorts.maxShorts(m.duration) }, (_, i) => i + 1).map((n) => `<option value="${n}" ${n === c.count ? 'selected' : ''}>${n} ${n === 1 ? 'Short' : 'Shorts'}</option>`).join('')}</select></label>
           <label>Approx. length <select id="length">${LENGTHS.map(([v, t]) => `<option value="${v}" ${v === c.duration ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
@@ -866,14 +867,17 @@ function renderCreate() {
         ${c.region === 'custom' ? `<div class="settings-row"><label>Start (minutes) <input id="from" type="number" min="0" step="any" value="${c.customStart}"></label>
           <label>End (minutes) <input id="to" type="number" min="0" step="any" value="${c.customEnd}"></label></div>
           <p class="muted small">${problem ? esc(problem) : `Analyze ${clock(c.customStart * 60)} to ${clock(c.customEnd * 60)} · ${clock((c.customEnd - c.customStart) * 60)} selected`}</p>` : ''}
-        <p class="muted small">Relio will analyze frames and available speech, then suggest ${many} ${long} in ${where}. Review every pick before exporting.</p>
-        <p class="muted small">The first analysis counts the full ${clock(m.duration)} video toward your monthly minutes, even when you select a shorter range. We’ll show any extra charge for a later analysis before it starts.</p></div>
-      <div class="panel"><p class="muted small">Captions · you can change them for each Short later</p>
+        <p class="muted small">Relio will suggest ${many} ${long} in ${where}.</p></div>
+      ${actions(back, `<button class="button primary" data-create="next" ${problem ? 'disabled' : ''}>Next: Captions →</button>`)}`;
+  } else if (c.step === 3) {
+    html = `${eyebrow(3, 'Choose captions')}<h2 class="big">Choose your captions</h2><p class="muted">You can change this for each Short later.</p>
       <div class="cards">${CAPTION_STYLES.map((s) => `<button class="choice ${s === c.style ? 'on' : ''}" data-style="${s}" aria-pressed="${s === c.style}"><canvas class="style-preview" data-preview="${s}" aria-hidden="true"></canvas><strong>${STYLE_TITLES[s]}</strong><span class="muted small">${STYLE_DETAILS[s]}</span></button>`).join('')}
-        <button class="choice ${c.style === 'none' ? 'on' : ''}" data-style="none" aria-pressed="${c.style === 'none'}"><span class="style-preview no-captions" aria-hidden="true">Aa</span><strong>No captions</strong><span class="muted small">Shorts start without captions. Turn them on for any Short later.</span></button></div></div>
-      <div class="panel"><p class="muted small">Kind of video · tunes how Relio picks moments and frames them</p>
-      <div class="cards">${VIDEO_TYPES.map((t) => `<button class="choice ${t === c.videoType ? 'on' : ''}" data-type="${t}" aria-pressed="${t === c.videoType}"><strong>${VIDEO_TYPE_TITLES[t]}</strong><span class="muted small">${VIDEO_TYPE_DETAILS[t]}</span></button>`).join('')}</div></div>
-      <button class="button primary" data-create="make" ${problem ? 'disabled' : ''}>Make Shorts</button>${back}`;
+        <button class="choice ${c.style === 'none' ? 'on' : ''}" data-style="none" aria-pressed="${c.style === 'none'}"><span class="style-preview no-captions" aria-hidden="true">Aa</span><strong>No captions</strong><span class="muted small">Shorts start without captions. Turn them on for any Short later.</span></button></div>
+      ${actions(prev, '<button class="button primary" data-create="next">Next: Kind of video →</button>')}`;
+  } else {
+    html = `${eyebrow(4, 'Choose content type')}<h2 class="big">What kind of video is it?</h2><p class="muted">This tunes how Relio picks moments and frames them.</p>
+      <div class="cards">${VIDEO_TYPES.map((t) => `<button class="choice ${t === c.videoType ? 'on' : ''}" data-type="${t}" aria-pressed="${t === c.videoType}"><strong>${VIDEO_TYPE_TITLES[t]}</strong><span class="muted small">${VIDEO_TYPE_DETAILS[t]}</span></button>`).join('')}</div>
+      ${actions(prev, '<button class="button primary" data-create="make">Make Shorts</button>')}`;
   }
   $('#app').innerHTML = `<section class="create">${html}</section>`;
   for (const canvas of document.querySelectorAll('[data-preview]')) stylePreview(canvas, canvas.dataset.preview);

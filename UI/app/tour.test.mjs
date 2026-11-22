@@ -6,11 +6,11 @@ const at = (extra) => ({ stage: 'on', dialog: false, screen: 'home', running: fa
 
 test('the tour follows the first project in order, steps 1 to the last', () => {
   const path = [
-    at({}), at({ screen: 'create', createStep: 1 }), at({ screen: 'create', createStep: 2 }),
-    at({ screen: 'games', running: true }), at({ screen: 'editor', shorts: 3 }),
+    at({}), at({ screen: 'create', createStep: 1 }), at({ screen: 'create', createStep: 2 }), at({ screen: 'create', createStep: 3 }),
+    at({ screen: 'create', createStep: 4 }), at({ screen: 'games', running: true }), at({ screen: 'editor', shorts: 3 }),
     at({ stage: 'edit', screen: 'editor', shorts: 3 }), at({ stage: 'export', screen: 'editor', shorts: 3 }),
   ].map((where) => hintFor(where).step);
-  assert.deepEqual(path, [1, 2, 3, 4, 5, 6, 7]);
+  assert.deepEqual(path, [1, 2, 3, 3, 4, 5, 6, 7, 8]);
   assert.equal(path.at(-1), TOUR_STEPS);
 });
 
@@ -30,7 +30,7 @@ test('no hint when the tour is off, done, behind a dialog, or there is nothing t
 });
 
 test('while Shorts are made the hint is on the progress card, or on the game cards on the games screen', () => {
-  assert.equal(hintFor(at({ screen: 'create', createStep: 2, running: true })).target, '#progress .progress-card');
+  assert.equal(hintFor(at({ screen: 'create', createStep: 4, running: true })).target, '#progress .progress-card');
   assert.equal(hintFor(at({ screen: 'games', running: true })).target, '.games-grid');
 });
 
