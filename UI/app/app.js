@@ -411,8 +411,14 @@ addEventListener('resize', tourHint);
 addEventListener('scroll', tourHint, true);
 
 const retentionKey = () => `relio.retention-notice.${userId()}`;
+// Saved on the account, so the welcome, tour and deletion notice show once per person, not once per browser or device.
+const onboarded = () => state.session?.user?.user_metadata?.onboarded === true;
+function markOnboarded() { if (!onboarded()) db()?.auth.updateUser({ data: { onboarded: true } }).catch(() => {}); }
 function firstRunNotice() {
   const seen = (key) => { try { return localStorage.getItem(key); } catch { return '1'; } };
+  // A tour still running in this browser carries on; anywhere else, an onboarded account sees nothing.
+  if (onboarded() && !['on', 'edit', 'export'].includes(tourStage())) return;
+  markOnboarded();
   // Accounts that already saw the deletion notice aren't new; they can start the tour from Settings.
   if (!tourStage() && !seen(retentionKey())) { setTourStage('on'); return welcomeTour(); }
   // During the tour the deletion rule waits for its end (finishTour, endTour).
@@ -423,7 +429,7 @@ function firstRunNotice() {
 function showRetention(title = `Projects you don’t edit are deleted after ${plural(keepDays(), 'day')}`) {
   try { localStorage.setItem(retentionKey(), '1'); } catch { /* storage blocked: shown again next time */ }
   openDialog(`<div class="stack"><h2>${title}</h2>
-    <p>If you don’t change a project for ${plural(keepDays(), 'day')}, Relio deletes it: the video, its Shorts and everything else in it, on this device and in the cloud. Any edit, re-analysis or export, like moving a clip on the timeline, starts a new ${plural(keepDays(), 'day')}-day period. You’ll see a warning on Home 2 days before.</p>
+    <p>If you don’t change a project for ${plural(keepDays(), 'day')}, Relio deletes it: the video, its Shorts and everything else in it, on this device and in the cloud. Any edit, re-analysis or export, like moving a clip on the timeline, starts the time again. You’ll see a warning on Home 2 days before.</p>
     <p class="muted small">Export the Shorts you want to keep. Exported files on your computer are never touched.</p>
     <div class="row end"><button class="button primary" data-action="close">Got it</button></div></div>`);
 }
@@ -440,13 +446,6 @@ async function showHome(view = null) {
   const all = everything.filter(isMine), folders = allFolders.filter(isMine);
   state.projects = all;
   state.folders = folders;
-  // A project that came from another device has no video here until it is added again.
-  const noVideo = new Map(); // project id -> every missing video is in the cloud
-  for (const p of all) {
-    const missing = [];
-    for (const m of p.media) if (!(await store.hasFile(m.id))) missing.push(m);
-    if (missing.length) noVideo.set(p.id, missing.every((m) => m.cloud?.uploaded));
-  }
   if (userId() !== account || state.screen !== 'home') return;
   // There is no Trash anymore: projects still in it were meant to go, so they are deleted, here and in the cloud.
   const trashed = all.filter((p) => p.trashed);
@@ -467,9 +466,8 @@ async function showHome(view = null) {
       : `<span class="muted small">${plural(p.segments.length, 'Short')} · ${dateText(p.updated ?? p.created)}</span>`;
     const left = daysLeft(p);
     const expiry = left <= 2 ? `<span class="missing small">${left <= 1 ? 'Deleted tomorrow' : `Deleted in ${left} days`} unless you edit or export it</span>` : '';
-    const away = noVideo.has(p.id) && !noVideo.get(p.id) ? '<span class="missing small">Video not on this device</span>' : '';
     const body = `<div class="poster">${poster ? `<img alt="" src="${poster}">` : ''}<span class="badge">${clock(p.media[0]?.duration ?? 0)}</span>${making ? makingOverlay(making) : ''}</div>
-          <strong class="p-title">${esc(p.title)}</strong>${info}${expiry}${away}`;
+          <strong class="p-title">${esc(p.title)}</strong>${info}${expiry}`;
     return `<div class="project-card" draggable="true" data-project="${esc(p.id)}">
           <button class="open" data-action="open" data-id="${esc(p.id)}">${body}</button>
           <button class="card-menu" data-action="project-menu" data-id="${esc(p.id)}" aria-label="Options for ${esc(p.title)}" aria-haspopup="menu">⋯</button></div>`;
