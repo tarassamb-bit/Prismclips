@@ -818,8 +818,10 @@ function rangeProblem(c) {
 function firstAnalysisNotice(duration, usage) {
   if (!Number.isFinite(duration) || duration <= 0 || !usage || !Number.isFinite(usage.used) || !Number.isFinite(usage.allowance)) return null;
   const left = Math.max(0, usage.allowance - usage.used);
-  if (duration / 60 <= left) return null;
-  return `Your last usage check showed about ${Math.floor(left * 100) / 100} min remaining. A first analysis of this ${clock(duration)} video uses its full length, even for a shorter range. If you have analyzed it before, the charge may differ. Usage is checked again before analysis.`;
+  // On Free a video counts at most the Free allowance (the server caps it the same way).
+  const charge = freePlan() ? Math.min(duration / 60, 20) : duration / 60;
+  if (charge <= left) return null;
+  return `Your last usage check showed about ${Math.floor(left * 100) / 100} min remaining. A first analysis of this ${clock(duration)} video uses ${freePlan() && duration / 60 > 20 ? '20 minutes (the most a video counts on Free)' : 'its full length, even for a shorter range'}. If you have analyzed it before, the charge may differ. Usage is checked again before analysis.`;
 }
 
 /** For Free accounts: the plan marked "Most popular" on the pricing page, with what it adds and a button to it. */
