@@ -11,6 +11,7 @@ const prismPrice = (sandbox, live) => (PRISM_LIVE ? live : sandbox);
  * @property {string[]} features
  * @property {string} priceId
  * @property {string} [badge]
+ * @property {string} price  the monthly price in euros, as Paddle charges it
  */
 
 // One-time packs for the month they're bought: video minutes (also offered before a plan's checkout) and Live hours.
@@ -24,12 +25,16 @@ window.PRISM_FREE = { name: 'Free', features: ['20 minutes of video a month', '7
 window.PRISM_TIERS = [
   {
     name: 'Tier 1',
+    // Shown at once and when Paddle can't be reached; Paddle's own price (local currency) replaces it. Keep equal to Paddle.
+    price: '€9.00',
     description: 'Start making Shorts every month.',
     features: ['150 minutes of video a month', '4K exports, no watermark', 'Live clipping: 1 channel, 25 hours a month', 'Recordings up to 4 hours', '30 live Shorts a day'],
     priceId: prismPrice('pri_01m7wxv785xs9pzn319erq7wtn', 'pri_01m7z8ybf53k8xtd0cghm6hrnb'),
   },
   {
     name: 'Creator',
+    // Shown at once and when Paddle can't be reached; Paddle's own price (local currency) replaces it. Keep equal to Paddle.
+    price: '€25.00',
     description: 'For creators publishing every week.',
     features: ['450 minutes of video a month', '4K exports, no watermark', 'Live clipping: 2 channels at once, 100 hours a month', 'Recordings up to 24 hours', '100 live Shorts a day'],
     priceId: prismPrice('pri_01m7wxv7jvh2e830hj69y0merw', 'pri_01m7z8ybvx3b7d6k0nx0r2edb9'),
@@ -37,6 +42,8 @@ window.PRISM_TIERS = [
   },
   {
     name: 'Studio',
+    // Shown at once and when Paddle can't be reached; Paddle's own price (local currency) replaces it. Keep equal to Paddle.
+    price: '€99.00',
     description: 'For teams and channels at full speed.',
     features: ['2,000 minutes of video a month', '4K exports, no watermark', 'Live clipping: 5 channels at once, 400 hours a month', 'Recordings up to 48 hours', '300 live Shorts a day'],
     priceId: prismPrice('pri_01m7wxv7wmheyjcr6qqz3cy41b', 'pri_01m7z8yc8ysxtmph5v5gv94y2c'),

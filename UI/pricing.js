@@ -40,7 +40,7 @@
     const top = el('div', 'platform-top');
     top.append(el('h3', '', tier.name));
     if (tier.badge) top.append(el('span', 'platform-tag', tier.badge.toUpperCase()));
-    const price = el('p', 'price', '…');
+    const price = el('p', 'price', tier.price ?? '…');
     price.setAttribute('aria-live', 'polite');
     const per = el('span', '', ' / month');
     const list = el('ul');
@@ -225,7 +225,7 @@
     const totals = new Map(preview.data.details.lineItems.map((item) => [item.price.id, item.formattedTotals.total]));
     if (pack) packPrice = totals.get(pack.priceId) ?? '';
     for (const { tier, price, per, button } of cards) {
-      price.textContent = totals.get(tier.priceId) ?? '—';
+      price.textContent = totals.get(tier.priceId) ?? tier.price ?? '—';
       price.append(per);
       button.disabled = false;
     }
