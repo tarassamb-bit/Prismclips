@@ -137,7 +137,7 @@ Title: Web app — Relio
 Relio runs in the browser: choose a video, let Relio AI suggest Shorts, edit captions and framing, and export MP4s. Nothing to install. Projects and videos are saved to your account and open on any device you sign in on.
 
 **How does access work?**
-Sign up at https://relioclips.com/signup. The Free plan includes 20 video minutes each month, 720p watermarked exports and 1 GB of cloud storage. Paid plans offer more minutes and watermark-free exports. See https://relioclips.com/pricing for details.
+Sign up at https://relioclips.com/signup. The Free plan includes 20 video minutes each month, and 720p watermarked exports. Paid plans offer more minutes and watermark-free exports. See https://relioclips.com/pricing for details.
 
 **Which browsers work?**
 Current Chrome, Edge, Safari and Firefox on a computer.
@@ -267,7 +267,7 @@ Relio Clips now runs in your browser at relioclips.com. Nothing to install.
 
 - A new name: Prism is now Relio Clips, at relioclips.com.
 - Make Shorts in the browser: upload a video, pick settings and captions, review the picks, and export MP4s.
-- Your projects and videos follow your account to any computer (1 GB of cloud storage per account).
+- Your projects and videos follow your account to any computer (kept until a project goes untouched for its plan's days).
 - Choose the language of the video, or leave it on Auto. Relio keeps one language for the whole video, sung lyrics included.
 - How many Shorts and how long each one is start at Auto.
 - A bigger video player in the editor.

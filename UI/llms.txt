@@ -3,7 +3,7 @@
 > Relio Clips turns long videos into vertical Shorts with captions. It runs in the browser at https://relioclips.com/app, with nothing to install; desktop apps also exist. Relio AI finds moments that stand on their own; you review them, adjust captions and framing, and export MP4s. Captions are written in the language spoken in the video.
 
 - Who it's for: creators, podcasters and streamers who want short-form clips from long recordings.
-- Web app: the Free plan gets 20 minutes of video a month (720p, watermark) and 1 GB of cloud storage; paid plans Tier 1 €9, Creator €25 and Studio €99 a month add minutes, 1080p and 4K exports and no watermark; projects sync across devices. Works in current Chrome, Edge, Safari and Firefox on a computer.
+- Web app: the Free plan gets 20 minutes of video a month (720p, watermark); paid plans Tier 1 €9, Creator €25 and Studio €99 a month add minutes, 1080p and 4K exports and no watermark; projects sync across devices. Works in current Chrome, Edge, Safari and Firefox on a computer.
 - Desktop apps: macOS 14 or later on Apple Silicon (sign in, same plan). Windows and Linux builds use your own Gemini API key and have not yet been tested on real devices.
 - Access: sign up at https://relioclips.com/signup. Pay and cancel anytime from Settings › Plan; payments by Paddle.
 - Review every Short before publishing.

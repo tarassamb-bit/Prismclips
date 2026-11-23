@@ -50,7 +50,7 @@ const reset = (entries = []) => { objects = new Map(entries); deleted = []; sign
   // Usage counts only this account's videos.
   reset([[`${USER}/a`, { bytes: 100 * MB, at: '2026-11-01T10:00:00Z' }], [`${OTHER}/x`, { bytes: 400 * MB, at: '2026-11-01T09:00:00Z' }]]);
   let r = await call('usage');
-  assert.deepEqual([r.status, r.body.used, r.body.cap, r.body.videos.length], [200, 100 * MB, 1000 * MB, 1], 'the cap is 1 GB unless set');
+  assert.deepEqual([r.status, r.body.used, r.body.cap, r.body.videos.length], [200, 100 * MB, 50_000 * MB, 1], 'the cap is 50 GB unless set');
   process.env.R2_CAP_MB = '500';
   assert.equal((await call('usage')).body.cap, 500 * MB);
 

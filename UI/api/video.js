@@ -1,6 +1,6 @@
 // Vercel function: the signed-in user's videos in Cloudflare R2. The R2 keys stay on the server; the browser only gets short-lived
 // links for its own videos, stored at <account id>/<video id>; the app uses the file's fingerprint as the id, so the same video is
-// stored once however many projects use it. Each account has a hard cap (R2_CAP_MB, 1000 MB by default). When a
+// stored once however many projects use it. Each account has a safety cap (R2_CAP_MB, 50 GB by default) against abuse; untouched projects are deleted after their plan's days anyway. When a
 // new video doesn't fit, the answer names the oldest videos that would have to go; only when the person agrees are they deleted.
 //   POST ?action=usage                                     { used, cap, videos: [{ mediaId, bytes, at }] }
 //   POST ?action=upload   { mediaId, bytes, confirm, evict } { url, evicted } | { already } | 409 { needsRoom, evict } | 413 too big
@@ -12,7 +12,7 @@ const { HttpError, send, fail, getUser } = require('./_lib');
 const { link, listObjects, headObject, deleteObject } = require('./_r2');
 
 const ID = /^[A-Za-z0-9-]{1,64}$/;
-const capBytes = () => Math.max(1, Number(process.env.R2_CAP_MB) || 1000) * 1_000_000;
+const capBytes = () => Math.max(1, Number(process.env.R2_CAP_MB) || 50_000) * 1_000_000;
 const sizeText = (bytes) => (bytes >= 1e9 ? `${Number((bytes / 1e9).toFixed(1))} GB` : `${Math.round(bytes / 1e6)} MB`);
 
 async function readJson(req) {
