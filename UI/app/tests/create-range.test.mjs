@@ -8,7 +8,8 @@ import { regionInterval } from '../engine/models.js';
 const app = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
 const defaultLine = app.match(/const defaultCustomEnd = [^\n]+/)[0];
 const rangeFn = app.slice(app.indexOf('function rangeProblem('), app.indexOf('\nfunction renderCreate('));
-const context = vm.createContext({ clock: (seconds) => `${seconds}s` });
+let free = false;
+const context = vm.createContext({ clock: (seconds) => `${seconds}s`, freePlan: () => free });
 vm.runInContext(`${defaultLine}\n${rangeFn}\nthis.defaultCustomEnd = defaultCustomEnd;`, context);
 
 test('the default custom end stays inside videos of different lengths', () => {
@@ -34,4 +35,11 @@ test('a possible first-analysis limit is shown before setup without blocking or 
   assert.match(notice, /first analysis/i);
   assert.match(notice, /analyzed it before.*charge may differ/i);
   assert.match(notice, /checked again/i);
+});
+
+test('on Free a long video counts at most 20 minutes, so a fresh account can try an hour-long recording', () => {
+  free = true;
+  assert.equal(context.firstAnalysisNotice(3600, { allowance: 20, used: 0 }), null);
+  assert.match(context.firstAnalysisNotice(3600, { allowance: 20, used: 5 }), /20 minutes/);
+  free = false;
 });
